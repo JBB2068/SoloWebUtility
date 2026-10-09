@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>🎮 3DR Solo Controller Button Setup</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎮</text></svg>">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Top Navigation Bar -->
+    <header class="top-nav">
+      <div class="brand">
+        <div class="brand-icon">🎮</div>
+        <div class="brand-text">
+          <h1>Solo Controller Setup</h1>
+          <span class="sub-badge">Artoo Hardware Button Mapping &bull; <code>/usr/bin/extSettings.conf</code></span>
+        </div>
+      </div>
+
+      <div class="status-indicators">
+        <div class="indicator-chip" id="soloStatusChip">
+          <span class="dot checking"></span>
+          <span class="lbl">Solo (10.1.1.10):</span>
+          <span class="val" id="soloStatusVal">Connecting...</span>
+        </div>
+        <div class="indicator-chip" id="ctrlStatusChip">
+          <span class="dot checking"></span>
+          <span class="lbl">Controller (10.1.1.1):</span>
+          <span class="val" id="ctrlStatusVal">Checking...</span>
+        </div>
+      </div>
+
+      <div class="action-buttons">
+        <button id="fetchBtn" class="btn btn-secondary" title="Reload settings from Solo copter">
+          <span class="icon">🔄</span> Fetch Live
+        </button>
+        <button id="presetsBtn" class="btn btn-secondary" title="Apply a quick preset profile">
+          <span class="icon">⚡</span> Presets
+        </button>
+        <button id="rawBtn" class="btn btn-secondary" title="View or edit raw extSettings.conf">
+          <span class="icon">📝</span> Raw Config
+        </button>
+        <button id="saveBtn" class="btn btn-primary" title="Review diff and write to Solo">
+          <span class="icon">💾</span> Upload to Solo
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      <!-- Info banner -->
+      <section class="banner-card">
+        <div class="banner-icon">ℹ️</div>
+        <div class="banner-body">
+          <div class="banner-title">Extended Button Functions Engine (Open Solo / Artoo)</div>
+          <div class="banner-text">
+            Standard taps on <strong>A</strong> &amp; <strong>B</strong> trigger your default flight modes (Alt Hold / PosHold).
+            The mappings below customize what happens when you perform a <strong>Short Hold (~0.5s)</strong> or <strong>Long Hold (~2.0s)</strong>
+            on the physical buttons of your Artoo controller. Changes write directly to <code>/usr/bin/extSettings.conf</code> on the Solo copter and take effect immediately.
+          </div>
+        </div>
+        <div class="banner-meta">
+          <span class="badge badge-pulse" id="liveBadge">Checking file...</span>
+        </div>
+      </section>
+
+      <!-- Controller Interactive Visual & Button Config Grid -->
+      <div class="dashboard-grid">
+        <!-- Left: Interactive Controller Visual Diagram -->
+        <section class="controller-visual-card">
+          <div class="card-header">
+            <h2>🕹️ Artoo Controller Layout</h2>
+            <span class="hint">Click any button to configure</span>
+          </div>
+
+          <div class="controller-diagram-wrap">
+            <svg class="controller-svg" viewBox="0 0 680 424" xmlns="http://www.w3.org/2000/svg">
+              <defs>
+                <linearGradient id="chassisGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                  <stop offset="0%" stop-color="#2c323d" />
+                  <stop offset="60%" stop-color="#181d24" />
+                  <stop offset="100%" stop-color="#101318" />
+                </linearGradient>
+                <linearGradient id="glossGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                  <stop offset="0%" stop-color="#1e2229" />
+                  <stop offset="25%" stop-color="#12151b" />
+                  <stop offset="70%" stop-color="#0a0c10" />
+                  <stop offset="100%" stop-color="#06080a" />
+                </linearGradient>
+                <linearGradient id="chromeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="#f0f4f8" />
+                  <stop offset="35%" stop-color="#8a9ba8" />
+                  <stop offset="70%" stop-color="#d0dbe5" />
+                  <stop offset="100%" stop-color="#4a5563" />
+                </linearGradient>
+                <linearGradient id="screenGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                  <stop offset="0%" stop-color="#070c12" />
+                  <stop offset="100%" stop-color="#020406" />
+                </linearGradient>
+                <filter id="softGlow" x="-20%" y="-20%" width="140%" height="140%">
+                  <feGaussianBlur stdDeviation="2.5" result="blur" />
+                  <feComposite in="SourceGraphic" in2="blur" operator="over" />
+                </filter>
+              </defs>
+
+              <!-- Top Antennas (Black dual-band omni sticks) -->
+              <rect x="220" y="2" width="16" height="48" rx="3" fill="#12151a" stroke="#252c38" stroke-width="1.5" />
+              <rect x="444" y="2" width="16" height="48" rx="3" fill="#12151a" stroke="#252c38" stroke-width="1.5" />
+              <rect x="290" y="8" width="100" height="38" rx="4" fill="#181d24" stroke="#2d3645" stroke-width="1.5" />
+              <path d="M 315,18 L 365,18" stroke="#3a4556" stroke-width="3" stroke-linecap="round" />
+
+              <!-- Outer Matte Chassis (Reduced height, big curved corner radius) -->
+              <rect class="ctrl-shell" x="45" y="48" width="590" height="364" rx="58" fill="url(#chassisGrad)" stroke="#384353" stroke-width="2.5"/>
+
+              <!-- Glossy Piano-Black Faceplate (Reduced height, big curved corner radius) -->
+              <rect x="60" y="60" width="560" height="340" rx="46" fill="url(#glossGrad)" stroke="#1f2733" stroke-width="1.5" />
+
+              <!-- TOP LEFT: Camera Trigger (interactive btn 8) -->
+              <g class="interactive-btn" data-btn-id="8" id="svgBtn8">
+                <rect x="42" y="14" width="126" height="34" rx="8" class="btn-rect" />
+                <text x="105" y="35" class="btn-text">📷 CAMERA (8)</text>
+              </g>
+              <!-- Gimbal Paddle Dial -->
+              <rect x="178" y="16" width="22" height="30" rx="3" fill="#141820" stroke="#374354" stroke-width="1.5" />
+              <line x1="181" y1="23" x2="197" y2="23" stroke="#5a687d" stroke-width="1.5" />
+              <line x1="181" y1="28" x2="197" y2="28" stroke="#5a687d" stroke-width="1.5" />
+              <line x1="181" y1="33" x2="197" y2="33" stroke="#5a687d" stroke-width="1.5" />
+              <line x1="181" y1="38" x2="197" y2="38" stroke="#5a687d" stroke-width="1.5" />
+
+              <!-- TOP RIGHT: Preset 1 & Preset 2 (interactive btns 6 & 7) -->
+              <g class="interactive-btn" data-btn-id="6" id="svgBtn6">
+                <rect x="502" y="14" width="56" height="34" rx="8" class="btn-rect" />
+                <text x="530" y="35" class="btn-text">1 PRESET</text>
+              </g>
+              <g class="interactive-btn" data-btn-id="7" id="svgBtn7">
+                <rect x="566" y="14" width="56" height="34" rx="8" class="btn-rect" />
+                <text x="594" y="35" class="btn-text">2 PRESET</text>
+              </g>
+
+              <!-- Metallic 3DR Logo (Above Screen) -->
+              <text x="340" y="94" fill="#cdd7e3" font-size="22" font-weight="900" font-family="'Segoe UI', Roboto, sans-serif" letter-spacing="3" text-anchor="middle">3DR</text>
+
+              <!-- Center Display Screen -->
+              <rect x="268" y="106" width="144" height="114" rx="3" fill="#040608" stroke="#1c2533" stroke-width="2"/>
+              <!-- Screen Inner Drone Icon (White H Quadcopter) -->
+              <g transform="translate(340, 148)">
+                <!-- Drone Body -->
+                <rect x="-10" y="-12" width="20" height="24" rx="4" fill="#e0e8f2" />
+                <rect x="-6" y="-8" width="12" height="16" rx="2" fill="#040608" />
+                <!-- Motor Arms -->
+                <line x1="-10" y1="-8" x2="-22" y2="-18" stroke="#e0e8f2" stroke-width="3.5" stroke-linecap="round" />
+                <line x1="10" y1="-8" x2="22" y2="-18" stroke="#e0e8f2" stroke-width="3.5" stroke-linecap="round" />
+                <line x1="-10" y1="8" x2="-22" y2="18" stroke="#e0e8f2" stroke-width="3.5" stroke-linecap="round" />
+                <line x1="10" y1="8" x2="22" y2="18" stroke="#e0e8f2" stroke-width="3.5" stroke-linecap="round" />
+                <!-- Motors / Rotors -->
+                <circle cx="-22" cy="-18" r="4" fill="#e0e8f2" />
+                <circle cx="22" cy="-18" r="4" fill="#e0e8f2" />
+                <circle cx="-22" cy="18" r="4" fill="#e0e8f2" />
+                <circle cx="22" cy="18" r="4" fill="#e0e8f2" />
+              </g>
+              <!-- Screen Text: waiting for Solo in bright green -->
+              <text x="340" y="196" fill="#00e676" font-size="12" font-family="'Consolas', 'SF Mono', monospace" font-weight="bold" text-anchor="middle">waiting for Solo</text>
+
+              <!-- Left Gimbal (Stick) -->
+              <g transform="translate(155, 172)">
+                <circle cx="0" cy="0" r="54" fill="#0b0e13" stroke="#222b38" stroke-width="2"/>
+                <circle cx="0" cy="0" r="48" fill="#13171f" stroke="#1a202a" stroke-width="1.5"/>
+                <!-- Horizontal Pivot Cylinder -->
+                <rect x="-38" y="-20" width="76" height="40" rx="10" fill="#1b222d" stroke="#2d3848" stroke-width="1.5" />
+                <!-- Joystick Stick angled up-left -->
+                <line x1="0" y1="0" x2="-18" y2="-32" stroke="#0e1218" stroke-width="10" stroke-linecap="round" />
+                <line x1="0" y1="0" x2="-18" y2="-32" stroke="#3d495a" stroke-width="6" stroke-linecap="round" />
+                <!-- Knurled Tip -->
+                <circle cx="-18" cy="-32" r="8" fill="#202733" stroke="#5c6e85" stroke-width="2" />
+                <circle cx="-18" cy="-32" r="4" fill="#3c4756" />
+              </g>
+
+              <!-- Right Gimbal (Stick) -->
+              <g transform="translate(525, 172)">
+                <circle cx="0" cy="0" r="54" fill="#0b0e13" stroke="#222b38" stroke-width="2"/>
+                <circle cx="0" cy="0" r="48" fill="#13171f" stroke="#1a202a" stroke-width="1.5"/>
+                <!-- Horizontal Pivot Cylinder -->
+                <rect x="-38" y="-20" width="76" height="40" rx="10" fill="#1b222d" stroke="#2d3848" stroke-width="1.5" />
+                <!-- Joystick Stick angled up-right -->
+                <line x1="0" y1="0" x2="18" y2="-32" stroke="#0e1218" stroke-width="10" stroke-linecap="round" />
+                <line x1="0" y1="0" x2="18" y2="-32" stroke="#3d495a" stroke-width="6" stroke-linecap="round" />
+                <!-- Knurled Tip -->
+                <circle cx="18" cy="-32" r="8" fill="#202733" stroke="#5c6e85" stroke-width="2" />
+                <circle cx="18" cy="-32" r="4" fill="#3c4756" />
+              </g>
+
+              <!-- ======================================================== -->
+              <!-- HORIZONTAL BUTTON ROW (Exactly matches physical photo)   -->
+              <!-- ======================================================== -->
+
+              <!-- 1. FLIGHT OPTIONS: [A] and [B] side by side in capsule -->
+              <rect x="76" y="274" width="98" height="48" rx="14" fill="#0b0f15" stroke="#232d3b" stroke-width="1.8" />
+              <g class="interactive-btn" data-btn-id="4" id="svgBtn4">
+                <rect x="82" y="280" width="40" height="36" rx="8" class="btn-rect primary" />
+                <text x="102" y="303" class="btn-text large">A</text>
+              </g>
+              <g class="interactive-btn" data-btn-id="5" id="svgBtn5">
+                <rect x="128" y="280" width="40" height="36" rx="8" class="btn-rect primary" />
+                <text x="148" y="303" class="btn-text large">B</text>
+              </g>
+              <text x="125" y="338" fill="#9db0c6" font-size="8.5" font-family="'Segoe UI', Roboto, sans-serif" font-weight="bold" text-anchor="middle" letter-spacing="0.5">FLIGHT</text>
+              <text x="125" y="349" fill="#9db0c6" font-size="8.5" font-family="'Segoe UI', Roboto, sans-serif" font-weight="bold" text-anchor="middle" letter-spacing="0.5">OPTIONS</text>
+
+              <!-- 2. HOLD FOR POWER (⏻) Button -->
+              <circle cx="230" cy="298" r="19" fill="#10151f" stroke="#384556" stroke-width="1.8" />
+              <circle cx="230" cy="298" r="15" fill="#18202c" />
+              <!-- Power icon -->
+              <path d="M 226,293 A 6.5,6.5 0 1,0 234,293" fill="none" stroke="#e0e8f2" stroke-width="2" stroke-linecap="round" />
+              <line x1="230" y1="290" x2="230" y2="297" stroke="#e0e8f2" stroke-width="2" stroke-linecap="round" />
+              <text x="230" y="338" fill="#9db0c6" font-size="8" font-family="'Segoe UI', Roboto, sans-serif" font-weight="bold" text-anchor="middle">HOLD <tspan font-weight="normal" fill="#718296">FOR</tspan></text>
+              <text x="230" y="349" fill="#9db0c6" font-size="8" font-family="'Segoe UI', Roboto, sans-serif" font-weight="bold" text-anchor="middle">POWER</text>
+
+              <!-- 3. Silver Chrome Lanyard Loop (Dead Center) -->
+              <rect x="270" y="284" width="13" height="28" rx="6.5" fill="url(#chromeGrad)" stroke="#748394" stroke-width="1.2" />
+              <rect x="273.5" y="290" width="6" height="16" rx="3" fill="#0d1117" />
+
+              <!-- 4. FLY BUTTON (Vibrant Green Ring) -->
+              <circle cx="325" cy="298" r="21" fill="#090e14" stroke="#00e676" stroke-width="2.8" />
+              <text x="325" y="303" fill="#ffffff" font-size="11" font-weight="900" font-family="'Segoe UI', Roboto, sans-serif" text-anchor="middle" letter-spacing="0.5">FLY</text>
+              <!-- Dotted guideline down -->
+              <line x1="325" y1="322" x2="325" y2="340" stroke="#48596e" stroke-width="1" stroke-dasharray="2,2" />
+              <!-- Instructions below Fly -->
+              <text x="325" y="351" fill="#7d92a9" font-size="7.5" font-family="'Segoe UI', Roboto, sans-serif" text-anchor="middle"><tspan font-weight="bold" fill="#ffffff">HOLD</tspan> TO START MOTORS</text>
+              <text x="325" y="362" fill="#7d92a9" font-size="7.5" font-family="'Segoe UI', Roboto, sans-serif" text-anchor="middle"><tspan font-weight="bold" fill="#ffffff">HOLD</tspan> TO TAKEOFF OR LAND</text>
+              <text x="325" y="373" fill="#7d92a9" font-size="7.5" font-family="'Segoe UI', Roboto, sans-serif" text-anchor="middle"><tspan font-weight="bold" fill="#ffffff">PRESS</tspan> FOR STANDARD FLIGHT</text>
+
+              <!-- 5. RETURN HOME BUTTON (🏠) -->
+              <circle cx="415" cy="298" r="18" fill="#10151f" stroke="#384556" stroke-width="1.8" />
+              <circle cx="415" cy="298" r="14" fill="#18202c" />
+              <!-- House Icon -->
+              <path d="M 409,299 L 415,293 L 421,299 L 420,304 L 410,304 Z" fill="#e0e8f2" />
+              <rect x="413" y="300" width="4" height="4" fill="#18202c" />
+              <text x="415" y="338" fill="#9db0c6" font-size="8" font-family="'Segoe UI', Roboto, sans-serif" font-weight="bold" text-anchor="middle">RETURN</text>
+              <text x="415" y="349" fill="#9db0c6" font-size="8" font-family="'Segoe UI', Roboto, sans-serif" font-weight="bold" text-anchor="middle">HOME</text>
+
+              <!-- 6. PAUSE / AIR-BRAKE (❚❚) Button -->
+              <rect x="465" y="278" width="124" height="40" rx="20" fill="#171215" stroke="#482428" stroke-width="2" />
+              <!-- Pause Bars ❚❚ -->
+              <rect x="521" y="291" width="4" height="14" rx="1.5" fill="#f0f4f8" />
+              <rect x="529" y="291" width="4" height="14" rx="1.5" fill="#f0f4f8" />
+              <text x="527" y="338" fill="#e57373" font-size="8" font-family="'Segoe UI', Roboto, sans-serif" font-weight="bold" text-anchor="middle">PAUSE /</text>
+              <text x="527" y="349" fill="#e57373" font-size="8" font-family="'Segoe UI', Roboto, sans-serif" font-weight="bold" text-anchor="middle">AIR-BRAKE</text>
+
+              <!-- Bottom Raised Logo Tab: ▶ SOLO -->
+              <rect x="268" y="388" width="144" height="26" rx="6" fill="#111620" stroke="#253040" stroke-width="1.5" />
+              <path d="M 302,396 L 312,401 L 302,406 Z" fill="#ffffff" />
+              <text x="345" y="405" fill="#ffffff" font-size="13" font-weight="900" font-family="'Segoe UI', Roboto, sans-serif" letter-spacing="2.5" text-anchor="middle">SOLO</text>
+            </svg>
+          </div>
+
+          <!-- Quick Button Summary Cards below SVG -->
+          <div class="controller-legend">
+            <div class="legend-item" id="legendBtn4">
+              <span class="legend-badge">A</span>
+              <div class="legend-details">
+                <span class="legend-name">Button A (Face Left &bull; Flight Options)</span>
+                <span class="legend-desc" id="legendSummary4">Loading...</span>
+              </div>
+            </div>
+            <div class="legend-item" id="legendBtn5">
+              <span class="legend-badge">B</span>
+              <div class="legend-details">
+                <span class="legend-name">Button B (Face Left &bull; Flight Options)</span>
+                <span class="legend-desc" id="legendSummary5">Loading...</span>
+              </div>
+            </div>
+            <div class="legend-item" id="legendBtn6">
+              <span class="legend-badge">1</span>
+              <div class="legend-details">
+                <span class="legend-name">Preset 1 (Top Right)</span>
+                <span class="legend-desc" id="legendSummary6">Loading...</span>
+              </div>
+            </div>
+            <div class="legend-item" id="legendBtn7">
+              <span class="legend-badge">2</span>
+              <div class="legend-details">
+                <span class="legend-name">Preset 2 (Top Right)</span>
+                <span class="legend-desc" id="legendSummary7">Loading...</span>
+              </div>
+            </div>
+            <div class="legend-item" id="legendBtn8">
+              <span class="legend-badge">📷</span>
+              <div class="legend-details">
+                <span class="legend-name">Camera Trigger (Top Left)</span>
+                <span class="legend-desc" id="legendSummary8">Loading...</span>
+              </div>
+            </div>
+            <div class="legend-item non-interactive">
+              <span class="legend-badge pause-badge">❚❚</span>
+              <div class="legend-details">
+                <span class="legend-name">Pause / Air-Brake (Face Right)</span>
+                <span class="legend-desc">System Emergency Halt (Dedicated)</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Right: Button Configurations Cards List -->
+        <section class="config-editor-section">
+          <!-- GoPro Time Offset Bar -->
+          <div class="settings-card time-offset-card">
+            <div class="time-header">
+              <div class="time-title">
+                <span class="icon">⏰</span>
+                <strong>GoPro Video/Photo Time Offset</strong>
+                <span class="hint">(<code>timeOffsetHrs</code>)</span>
+              </div>
+              <div class="time-val-display" id="timeOffsetDisplay">None</div>
+            </div>
+            <div class="time-controls">
+              <p class="time-desc">
+                Adjusts camera clock offset relative to GPS UTC time. Useful when syncing flight video timestamps with your local time zone.
+              </p>
+              <div class="time-inputs">
+                <button type="button" class="btn btn-sm btn-outline" id="timeNoneBtn">None (UTC)</button>
+                <button type="button" class="btn btn-sm btn-outline" id="timeLocalBtn">Auto Local (-5 hrs)</button>
+                <input type="number" id="timeOffsetInput" step="0.5" min="-14" max="14" placeholder="Offset in hours (e.g. -5)">
+              </div>
+            </div>
+          </div>
+
+          <!-- Dynamic Button Cards Container -->
+          <div id="buttonCardsContainer" class="button-cards-list">
+            <!-- Injected by JavaScript -->
+            <div class="loading-spinner">Loading controller mappings...</div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <!-- Modal: Presets -->
+    <div class="modal-backdrop" id="presetsModal">
+      <div class="modal-box">
+        <div class="modal-header">
+          <h3>⚡ Quick Button Presets</h3>
+          <button class="modal-close" data-close-modal>&times;</button>
+        </div>
+        <div class="modal-body">
+          <p class="modal-intro">Choose a curated mapping profile tailored for your flying style. You can review and edit before saving to the copter.</p>
+          <div class="presets-grid">
+            <div class="preset-card" data-preset="default">
+              <div class="preset-badge">Stock</div>
+              <h4>Default Open Solo</h4>
+              <p>Standard OpenSolo setup: Button A toggles Stabilize / Auto missions; Button B toggles Drift / Sport; Camera Hold locks Gimbal.</p>
+              <button class="btn btn-sm btn-primary">Apply Profile</button>
+            </div>
+            <div class="preset-card" data-preset="cinematography">
+              <div class="preset-badge cinema">Film</div>
+              <h4>Cinematography &amp; Shots</h4>
+              <p>Quick access to Smart Shots: Button A triggers Cablecam / Orbit; Button B triggers Selfie / Panorama; Camera Hold locks Gimbal.</p>
+              <button class="btn btn-sm btn-primary">Apply Profile</button>
+            </div>
+            <div class="preset-card" data-preset="acro_sport">
+              <div class="preset-badge acro">Acro</div>
+              <h4>Acro &amp; Sport Pilot</h4>
+              <p>For aggressive FPV/manual flying: Button A engages Acro / Flip; Button B engages Sport / Auto-Tune; Camera Hold toggles Gimbal Lock.</p>
+              <button class="btn btn-sm btn-primary">Apply Profile</button>
+            </div>
+            <div class="preset-card" data-preset="payload_gripper">
+              <div class="preset-badge payload">Utility</div>
+              <h4>Payload / Gripper / Servo</h4>
+              <p>Hardware control: Button A toggles Servo 6 Low/High; Button B operates Gripper Close/Open; Camera Hold toggles Gimbal Lock.</p>
+              <button class="btn btn-sm btn-primary">Apply Profile</button>
+            </div>
+            <div class="preset-card" data-preset="survey_smartrtl">
+              <div class="preset-badge smart">Navigation</div>
+              <h4>Survey &amp; SmartRTL</h4>
+              <p>Mapping and safety: Button A commands Autonomous Waypoints; Button B commands SmartRTL (path retrace); Camera triggers Brake.</p>
+              <button class="btn btn-sm btn-primary">Apply Profile</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal: Raw Config Editor -->
+    <div class="modal-backdrop" id="rawModal">
+      <div class="modal-box modal-lg">
+        <div class="modal-header">
+          <h3>📝 Raw <code>/usr/bin/extSettings.conf</code> Editor</h3>
+          <button class="modal-close" data-close-modal>&times;</button>
+        </div>
+        <div class="modal-body">
+          <p class="modal-intro">Direct text editor for <code>extSettings.conf</code>. Validated automatically against Solo definitions.</p>
+          <textarea id="rawConfigTextarea" spellcheck="false"></textarea>
+          <div class="raw-actions">
+            <button id="rawRevertBtn" class="btn btn-secondary">Revert from GUI</button>
+            <button id="rawApplyToGuiBtn" class="btn btn-primary">Apply Changes to GUI</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal: Confirmation Diff Modal -->
+    <div class="modal-backdrop" id="confirmModal">
+      <div class="modal-box">
+        <div class="modal-header">
+          <h3>🚀 Confirm Changes &amp; Upload to Solo</h3>
+          <button class="modal-close" data-close-modal>&times;</button>
+        </div>
+        <div class="modal-body">
+          <p>The following configuration will be written to <code>/usr/bin/extSettings.conf</code> on the Solo copter (<code>10.1.1.10</code>). A safety backup will be created automatically.</p>
+          <div class="diff-view" id="diffViewContainer"></div>
+          <div class="confirm-actions">
+            <button class="btn btn-secondary" data-close-modal>Cancel</button>
+            <button id="confirmUploadBtn" class="btn btn-success">✅ Confirm &amp; Write to Solo</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast"></div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

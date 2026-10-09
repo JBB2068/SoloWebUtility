@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>3DR Solo Cockpit - Live MAVLink Flight Deck</title>
+    <link rel="stylesheet" href="cockpit.css?v=1791036354">
+    <script src="jmuxer.min.js"></script>
+</head>
+<body>
+    <!-- Top Annunciator Bar -->
+    <header class="top-bar">
+        <div class="brand-mini">
+            <svg viewBox="0 0 24 24"><path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg>
+            <span>Solo HUD</span>
+        </div>
+
+        <div class="annun-row">
+            <div id="armPill" class="pill pill-armed">DISARMED</div>
+            <div id="modePill" class="pill pill-mode">LOITER</div>
+            <div id="batPill" class="pill" style="color: var(--accent-emerald);">⚡ --V --%</div>
+            <div id="gpsPill" class="pill" style="color: var(--accent-blue);">🛰️ -- SATS</div>
+            <div id="linkPill" class="pill pill-live offline">
+                <span id="linkDot" class="live-dot offline"></span>
+                <span id="linkTxt">MAVLink (10.1.1.10)</span>
+            </div>
+            <div id="videoPill" class="pill pill-live offline">
+                <span id="videoDot" class="live-dot offline"></span>
+                <span id="videoTxt">HDMI (UDP 5600)</span>
+            </div>
+        </div>
+
+        <div class="annun-row">
+            <button id="btnVideoToggle" class="btn-icon active" title="Toggle Live Video / Horizon">📹 VIDEO</button>
+            <button id="btnUnitToggle" class="btn-icon btn-unit-toggle" title="Toggle Units (Metric / Imperial)">🌐 METRIC</button>
+            <button id="btnVoice" class="btn-icon active" title="Toggle Voice Alerts">🔊</button>
+            <button id="btnToggleHud" class="btn-icon active" title="Toggle HUD Overlays">👁️ HUD</button>
+            <button id="btnFullscreen" class="btn-icon" title="Fullscreen View">⛶</button>
+        </div>
+    </header>
+
+    <!-- Main Cockpit Body: Full-Bleed Live Video + Translucent Telemetry Glass Overlays -->
+    <div class="cockpit-body">
+        <!-- 1. FULLSCREEN BACKGROUND LIVE VIDEO & ARTIFICIAL HORIZON -->
+        <main class="pfd-viewport" id="pfdViewport">
+            <!-- Live HDMI Video Feed Background from Copter i.MX6 -->
+            <video id="liveVideoFeed" class="live-video-layer" autoplay muted playsinline></video>
+            
+            <!-- Video Standby Overlay (Displayed when waiting for HDMI stream) -->
+            <div id="videoStandbyOverlay" class="video-standby-overlay">
+                <div class="video-standby-card">
+                    <div class="standby-pulse"></div>
+                    <div class="standby-title">SOLO HDMI VIDEO FEED</div>
+                    <div class="standby-desc">RTP H.264 · UDP 5600 · Handshake 10.1.1.1:5502</div>
+                    <div id="videoSignalBadge" class="standby-badge">CONNECTING TO VIDEO STREAM...</div>
+                </div>
+            </div>
+
+            <!-- Primary Flight Display HUD Canvas Overlay -->
+            <canvas id="pfdCanvas"></canvas>
+        </main>
+
+        <!-- 2. FLOATING LEFT HUD OVERLAY (Compass, GPS, MAVLink Messages) -->
+        <aside id="leftHud" class="hud-panel left">
+            <!-- Mini HSI Compass (Collapsible) -->
+            <div class="hud-card" id="cardCompass">
+                <div class="hud-card-title">
+                    <span>Compass</span>
+                    <div style="display:flex; align-items:center; gap:5px;">
+                        <span id="hsiHdgTxt" style="color: var(--accent-blue); font-family: var(--font-mono);">000°</span>
+                        <button id="btnToggleCompass" class="btn-card-min" title="Toggle Compass View" type="button">▾</button>
+                    </div>
+                </div>
+                <div class="hud-canvas-wrap" id="wrapCompassCanvas">
+                    <canvas id="hsiMiniCanvas" width="75" height="75"></canvas>
+                </div>
+                <div class="data-row" id="rowCompassHome">
+                    <span class="data-label">Home</span>
+                    <span class="data-value"><span id="homeDistVal">0.0</span> <span class="unit-dist">m</span> @ <span id="homeBrgVal">000</span>°</span>
+                </div>
+            </div>
+
+            <!-- GPS Navigation Card (Compact) -->
+            <div class="hud-card" id="cardGps">
+                <div class="hud-card-title">
+                    <span>GPS Navigation</span>
+                    <span id="gpsFixTxt" style="color: var(--accent-emerald);">3D FIX</span>
+                </div>
+                <div class="data-row" style="background: rgba(56, 189, 248, 0.12); padding: 1px 4px; border-radius: 3px; margin: 1px 0;">
+                    <span class="data-label" style="color: var(--accent-blue); font-weight: 800;">Sats / HDOP</span>
+                    <span class="data-value" style="color: var(--accent-blue); font-size: 0.78rem;">
+                        <span id="gpsSatsCount">-- SATS</span> (<span id="gpsHdopVal">0.82</span>)
+                    </span>
+                </div>
+                <div class="data-row">
+                    <span class="data-label">Coords</span>
+                    <span class="data-value" style="font-size: 0.63rem;">
+                        <span id="gpsLatVal">0.000000</span>, <span id="gpsLonVal">0.000000</span>
+                    </span>
+                </div>
+                <div class="data-row">
+                    <span class="data-label">Alt MSL</span>
+                    <span class="data-value"><span id="altMslVal">0.0</span> <span class="unit-alt">m</span></span>
+                </div>
+            </div>
+
+            <!-- MAVLink Messages Card (High Vertical Space) -->
+            <div class="hud-card mavlink-card" id="cardMavlink">
+                <div class="hud-card-title">
+                    <span>MAVLink Messages</span>
+                    <div class="msg-header-actions">
+                        <span id="msgCountBadge" class="msg-count-pill">0 MSGS</span>
+                        <button id="btnScrollBottom" class="btn-card-action" title="Scroll to bottom" type="button">↓</button>
+                        <button id="btnExpandMsgs" class="btn-card-action" title="Maximize message window" type="button">⤢</button>
+                        <button id="btnClearMsgs" class="btn-card-action" title="Clear console view" type="button">✕</button>
+                    </div>
+                </div>
+                <div id="mavlinkMsgBox" class="mavlink-msg-box">
+                    <div class="mav-line"><span class="mav-time">[SYS]</span> Listening on 10.1.1.10:14560...</div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- 3. FLOATING RIGHT HUD OVERLAY (Battery & Health) -->
+        <aside id="rightHud" class="hud-panel right">
+            <!-- Solo 4S Battery Card -->
+            <div class="hud-card">
+                <div class="hud-card-title">
+                    <span>Solo 4S Battery</span>
+                    <span id="batTempTxt">25°C</span>
+                </div>
+                <div class="data-row" style="margin-top: 1px;">
+                    <span id="batVoltsBig" style="font-family: var(--font-mono); font-size: 1.15rem; font-weight: 800; color: var(--text-primary);">--.- V</span>
+                    <span id="batPctBig" style="font-family: var(--font-mono); font-size: 1.15rem; font-weight: 800; color: var(--accent-emerald);">--%</span>
+                </div>
+                <div class="bat-bar-bg">
+                    <div id="batBarFill" class="bat-bar-fill"></div>
+                </div>
+                <div class="data-row">
+                    <span class="data-label">Current</span>
+                    <span class="data-value"><span id="batAmpsVal">0.0</span> A</span>
+                </div>
+                <div class="data-row">
+                    <span class="data-label">Consumed</span>
+                    <span class="data-value"><span id="batConsumedVal">0</span> mAh</span>
+                </div>
+                <div class="cells-grid">
+                    <div class="cell-pill"><span>C1</span><span id="c1Val">--V</span></div>
+                    <div class="cell-pill"><span>C2</span><span id="c2Val">--V</span></div>
+                    <div class="cell-pill"><span>C3</span><span id="c3Val">--V</span></div>
+                    <div class="cell-pill"><span>C4</span><span id="c4Val">--V</span></div>
+                </div>
+                <div class="data-row" style="margin-top: 3px;">
+                    <span class="data-label">Flight Time</span>
+                    <span class="data-value" style="color: var(--accent-emerald);"><span id="flightTimeVal">--.-</span> min</span>
+                </div>
+            </div>
+
+            <!-- Health & Radio Link Card -->
+            <div class="hud-card">
+                <div class="hud-card-title">
+                    <span>Link & Telemetry</span>
+                    <span id="pktRateTxt" style="font-family: var(--font-mono);">0.0 Hz</span>
+                </div>
+                <div class="data-row">
+                    <span class="data-label">RC RSSI</span>
+                    <span class="data-value"><span id="rcRssiVal">--</span>%</span>
+                </div>
+                <div class="data-row">
+                    <span class="data-label">Vibe Clips</span>
+                    <span id="vibeVal" class="data-value">0</span>
+                </div>
+                <div class="data-row">
+                    <span class="data-label">Airspeed</span>
+                    <span class="data-value"><span id="airspeedHudVal">0.0</span> <span class="unit-spd">m/s</span></span>
+                </div>
+                <div class="data-row">
+                    <span class="data-label">Groundspeed</span>
+                    <span class="data-value"><span id="groundspeedHudVal">0.0</span> <span class="unit-spd">m/s</span></span>
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <!-- Bottom Controls Strip -->
+    <footer class="bottom-bar">
+        <div class="mode-btn-group">
+            <button class="btn-cmd active" onclick="sendFlightMode('LOITER')">LOITER</button>
+            <button class="btn-cmd" onclick="sendFlightMode('ALT_HOLD')">ALT HOLD</button>
+            <button class="btn-cmd" onclick="sendFlightMode('POSHOLD')">POS HOLD</button>
+            <button class="btn-cmd" style="border-color: var(--accent-amber); color: var(--accent-amber);" onclick="sendFlightMode('RTL')">RTL</button>
+            <button class="btn-cmd" style="border-color: var(--accent-purple); color: var(--accent-purple);" onclick="sendFlightMode('LAND')">LAND</button>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 6px;">
+            <button id="btnArm" class="btn-cmd btn-arm" onclick="sendArmToggle()">ARM MOTORS</button>
+        </div>
+    </footer>
+
+    <!-- Safety Arming Confirmation Modals (Top-Level Direct Child of Body) -->
+    <div id="armModalBackdrop" class="modal-backdrop" style="display: none;">
+        <!-- Step 1 Modal -->
+        <div id="armModalStep1" class="safety-modal">
+            <div class="modal-header">
+                <span class="modal-icon">⚠️</span>
+                <span class="modal-title">SAFETY WARNING: ARM MOTORS (Step 1 of 2)</span>
+            </div>
+            <div class="modal-body">
+                <p><strong>DANGER:</strong> Arming the autopilot will spin the motors and propellers immediately!</p>
+                <p style="margin-top: 6px; color: var(--text-secondary);">
+                    Ensure the drone is on a level surface outdoors and that all people, pets, and obstacles are clear of the propellers.
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button id="btnArmCancel1" class="btn-modal btn-default" onclick="cancelArming()">CANCEL (Safe)</button>
+                <button id="btnArmNext1" class="btn-modal btn-danger-action" onclick="openArmStep2()">PROCEED TO STEP 2 ➔</button>
+            </div>
+        </div>
+
+        <!-- Step 2 Modal (Final Confirmation) -->
+        <div id="armModalStep2" class="safety-modal" style="display: none;">
+            <div class="modal-header">
+                <span class="modal-icon">🚨</span>
+                <span class="modal-title" style="color: var(--accent-red);">FINAL CONFIRMATION: SPIN PROPELLERS (Step 2 of 2)</span>
+            </div>
+            <div class="modal-body">
+                <p><strong>FINAL CHECK:</strong> You are about to send the live command to <strong>ARM MOTORS</strong> on the copter.</p>
+                <p style="margin-top: 6px; color: var(--text-secondary);">
+                    Are you 100% sure you want to arm the drone right now?
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button id="btnArmCancel2" class="btn-modal btn-default" onclick="cancelArming()">CANCEL (Safe)</button>
+                <button id="btnArmConfirmFinal" class="btn-modal btn-arm-final" onclick="executeArmMotors()">⚠️ CONFIRM & ARM MOTORS</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="cockpit.js"></script>
+</body>
+</html>

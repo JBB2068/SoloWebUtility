@@ -1,0 +1,17 @@
+name = "open-solo-site"
+main = "index.js"
+compatibility_date = "2024-09-23"
+
+routes = [
+  { pattern = "open-solo.com/*", zone_id = "c2fcd2ab2a75d1213efda95f0032bf67" },
+  { pattern = "www.open-solo.com/*", zone_id = "c2fcd2ab2a75d1213efda95f0032bf67" }
+]
+
+[[r2_buckets]]
+binding = 'DOWNLOADS_BUCKET'
+bucket_name = 'open-solo-downloads'
+
+[[rules]]
+type = "Text"
+globs = ["**/*.html"]
+fallthrough = false

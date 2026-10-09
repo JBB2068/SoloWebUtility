@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="primary">#0F172A</color>
+    <color name="primary_dark">#020617</color>
+    <color name="accent">#38BDF8</color>
+    <color name="background">#0B0F19</color>
+    <color name="card_bg">#1E293B</color>
+    <color name="text_main">#F8FAFC</color>
+    <color name="text_muted">#94A3B8</color>
+    <color name="button_bg">#2563EB</color>
+    <color name="button_pressed">#1D4ED8</color>
+    <color name="success">#22C55E</color>
+    <color name="error">#EF4444</color>
+</resources>

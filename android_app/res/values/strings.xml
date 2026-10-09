@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">SoloLink Viewer</string>
+    <string name="status_searching">Searching for SoloLink Wi-Fi (sololink_*)...</string>
+    <string name="status_connecting">Connecting to SoloLink...</string>
+    <string name="status_connected">Connected to SoloLink! Loading web interface...</string>
+    <string name="status_failed">Could not connect to SoloLink</string>
+    <string name="status_waiting_server">Waiting for Solo Web Server at 10.1.1.10...</string>
+    <string name="btn_retry">Retry</string>
+    <string name="btn_wifi_settings">Wi-Fi Settings</string>
+</resources>

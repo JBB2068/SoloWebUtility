@@ -1,0 +1,1995 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3DR Solo Quadcopter — Official User Manual (Community 2026 Edition)</title>
+    <meta name="description" content="Official 3DR Solo Quadcopter User Manual. Complete flight safety, smart shots, battery maintenance, controller configuration, and hardware specifications.">
+    <link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAA=">
+    <style>
+        :root {
+            --bg-deep: #0a0e17;
+            --bg-card: #111827;
+            --bg-card-alt: #161f32;
+            --border: #1e293b;
+            --accent-blue: #3b82f6;
+            --accent-green: #10b981;
+            --accent-amber: #f59e0b;
+            --accent-red: #ef4444;
+            --accent-cyan: #06b6d4;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --text-dim: #64748b;
+        }
+
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-deep);
+            color: var(--text-main);
+            line-height: 1.7;
+            font-size: 15px;
+            padding: 24px 16px;
+        }
+
+        .manual-container {
+            max-width: 960px;
+            margin: 0 auto;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 40px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+
+        .header-banner {
+            border-bottom: 2px solid var(--border);
+            padding-bottom: 24px;
+            margin-bottom: 32px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 16px;
+        }
+
+        .header-title h1 {
+            font-size: 1.8rem;
+            font-weight: 800;
+            color: #ffffff;
+            margin-bottom: 6px;
+        }
+
+        .header-title p {
+            color: var(--accent-amber);
+            font-weight: 600;
+            font-size: 0.95rem;
+        }
+
+        .btn-download {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 20px;
+            background: var(--accent-green);
+            color: #ffffff;
+            font-weight: 700;
+            text-decoration: none;
+            border-radius: 8px;
+            transition: background 0.2s ease;
+        }
+
+        .btn-download:hover {
+            background: #059669;
+        }
+
+        h1, h2, h3, h4 {
+            color: #ffffff;
+            margin-top: 1.8em;
+            margin-bottom: 0.6em;
+            font-weight: 700;
+        }
+
+        h1 { font-size: 1.6rem; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+        h2 { font-size: 1.35rem; color: var(--accent-blue); border-bottom: 1px solid #1e293b; padding-bottom: 6px; }
+        h3 { font-size: 1.15rem; color: var(--accent-cyan); }
+
+        p { margin-bottom: 1.2em; color: #cbd5e1; }
+
+        ul, ol { margin-bottom: 1.2em; padding-left: 24px; color: #cbd5e1; }
+        li { margin-bottom: 6px; }
+
+        blockquote {
+            background: rgba(245, 158, 11, 0.1);
+            border-left: 4px solid var(--accent-amber);
+            padding: 14px 18px;
+            border-radius: 0 8px 8px 0;
+            margin-bottom: 1.4em;
+            color: #fef08a;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 1.5em;
+            background: var(--bg-card-alt);
+            border-radius: 8px;
+            overflow: hidden;
+            border: 1px solid var(--border);
+        }
+
+        th, td {
+            padding: 12px 16px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+
+        th {
+            background: #1e293b;
+            color: #ffffff;
+            font-weight: 700;
+        }
+
+        code {
+            background: #1e293b;
+            color: #38bdf8;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 0.9em;
+        }
+
+        pre {
+            background: #0f172a;
+            padding: 16px;
+            border-radius: 8px;
+            overflow-x: auto;
+            border: 1px solid var(--border);
+            margin-bottom: 1.4em;
+        }
+
+        pre code {
+            background: transparent;
+            padding: 0;
+            color: #f1f5f9;
+        }
+
+        a {
+            color: var(--accent-blue);
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        hr {
+            border: none;
+            border-top: 1px solid var(--border);
+            margin: 2em 0;
+        }
+
+        @media (max-width: 640px) {
+            .manual-container { padding: 20px 16px; }
+            .header-banner { flex-direction: column; align-items: flex-start; }
+        }
+    </style>
+</head>
+<body>
+    <div class="manual-container">
+        <div class="header-banner">
+            <div class="header-title">
+                <h1>🚁 3DR Solo Quadcopter User Manual</h1>
+                <p>Community Updated 2026 Edition</p>
+            </div>
+            <a href="/3DR_Solo_User_Manual_Updated_2026.pdf" download="3DR_Solo_User_Manual_Updated_2026.pdf" class="btn-download">
+                ⬇️ Download PDF Version
+            </a>
+        </div>
+
+        <div class="manual-content">
+<h1 id="solotm-user-manual-community-updated-edition">Solo™ User Manual — Community Updated Edition</h1>
+<blockquote>
+<p><strong>Editor's Note — October 2026</strong>
+This document is an updated edition of the original <em>3DR Solo User Manual V9</em> (published February 25, 2016). All factual content from the original manual has been preserved. Sections that describe processes, contacts, software, regulations, or hardware that have materially changed since 2016 are revised in-line, with the nature of each change noted. No changes have been made to the physical hardware instructions, flight mechanics, safety procedures, or specifications that remain accurate.</p>
+</blockquote>
+<hr />
+<h2 id="3dr-solo-community-support-resources">3DR Solo — Community Support Resources</h2>
+<blockquote>
+<p><strong>IMPORTANT — Support Status (Updated 2026)</strong>
+3D Robotics (3DR) ceased manufacturing and supporting the Solo drone platform in 2016. The entity now operating as "3DR, Inc." is a distinct company focused on enterprise software and does <strong>not</strong> provide support, warranty service, or parts for the original Solo hardware. The original support line, email addresses, and website (3dr.com) listed in this manual are <strong>no longer active</strong>.</p>
+</blockquote>
+<p><strong>Current Community Support Channels:</strong></p>
+<ul>
+<li><strong>Forum:</strong> 3DRPilots.com — the primary community hub for troubleshooting, firmware, and discussion</li>
+<li><strong>Facebook Group:</strong> "3DR Solo Owners Group" — active community for real-time help</li>
+<li><strong>ArduPilot Documentation:</strong> ardupilot.org — official documentation for the ArduPilot/ArduCopter firmware that powers Solo</li>
+<li><strong>Solo Web Utility:</strong> open-solo.com — free on-board management console with automated firmware update, calibrations, parameter tuning, and controller configuration (see Section 2.8)</li>
+</ul>
+<p><strong>Replacement Parts:</strong> Original 3DR parts are no longer produced. Community sources, secondary markets, and third-party suppliers are the available options. See Section 10 (Maintenance) for current guidance.</p>
+<hr />
+<p><em>Solo User Manual — Community Updated Edition</em>
+<em>© 2015 3D Robotics Inc. (original content)</em>
+<em>Updated 2026 by community contributors.</em>
+<em>Solo is a trademark of 3D Robotics, Inc.</em>
+<em>GoPro, HERO, the GoPro logo, and the GoPro Be a HERO logo are trademarks or registered trademarks of GoPro, Inc.</em></p>
+<hr />
+<h2 id="contents">Contents</h2>
+<ol>
+<li><a href="#1-introduction">Introduction</a></li>
+<li>1.1 System Overview</li>
+<li>1.2 Aircraft Overview</li>
+<li>1.3 Controller Overview</li>
+<li>1.4 Operating Parameters</li>
+<li>1.5 Autopilot</li>
+<li>1.6 Propulsion</li>
+<li>1.7 LED Meanings</li>
+<li><a href="#2-setup">Setup</a></li>
+<li>2.1 In the Box — Solo with The Frame</li>
+<li>2.2 In the Box — Solo with 3-Axis Gimbal</li>
+<li>2.3 Battery</li>
+<li>2.4 Controller</li>
+<li>2.5 Propellers</li>
+<li>2.6 Camera</li>
+<li>2.7 Mobile App</li>
+<li>2.8 Solo Web Utility</li>
+<li><a href="#3-the-solo-gimbal">The Solo Gimbal</a></li>
+<li><a href="#4-safety">Safety</a></li>
+<li><a href="#5-first-flight">First Flight</a></li>
+<li><a href="#6-using-the-solo-app">Using the Solo App</a></li>
+<li><a href="#7-alerts">Alerts</a></li>
+<li><a href="#8-advanced-settings">Advanced Settings</a></li>
+<li><a href="#9-support">Support</a></li>
+<li><a href="#10-maintenance">Maintenance</a></li>
+<li><a href="#11-appendix">Appendix</a></li>
+</ol>
+<hr />
+<h2 id="1-introduction">1 Introduction</h2>
+<p>We designed Solo to be the perfect aerial-video tool. It's powerful, simple, and reliable with intuitive Smart Shots inspired by our favorite cinema pilots. With Solo, you don't need a professional camera crew — you can get the perfect shot every time. Join us in capturing the next evolution of creative videography.</p>
+<h3 id="11-system-overview">1.1 System Overview</h3>
+<p>The Solo system includes Solo, the Controller, and the Solo App. As the operator, you interact with the controller and app on the ground, and the controller communicates with Solo during flight.</p>
+<h4 id="111-solo">1.1.1 Solo</h4>
+<p>Solo is a small unmanned aerial vehicle (UAV) powered by four motors and four propellers. Solo's onboard computers control navigation, attitude, and communications in flight while sending real-time telemetry and video output and receiving control inputs over the 3DR Link secure Wi-Fi network. Solo is optimized for capturing aerial video using a GoPro® HERO camera.</p>
+<h4 id="112-controller">1.1.2 Controller</h4>
+<p>The controller provides control mechanisms and displays in-flight data on a full-color screen. Using twin long-range antennas, the controller acts as the central hub for all communication on the 3DR Link network, receiving all communications from Solo and the app, forwarding telemetry outputs to the app, and managing the transmission of all control inputs to Solo.</p>
+<h4 id="113-app">1.1.3 App</h4>
+<blockquote>
+<p><strong>Updated — 2026:</strong> The original 3DR Solo App has been discontinued. The app's backend servers no longer operate, and the original app cannot complete its mandatory pre-flight update procedure on a new or factory-reset Solo. See <strong>Section 2.7, Mobile App</strong>, for current replacement apps.</p>
+</blockquote>
+<p>The Solo App outputs a live video stream from an onboard GoPro® camera to an Android or iOS device. The App allows you to view the live video with overlaid telemetry and access a simplified graphic interface for controlling Solo's advanced functions. The App also connects to the 3DR SoloLink network to receive video and telemetry outputs and send control inputs.</p>
+<p><em>Figure 1.1.3.1: Solo System Context Diagram</em></p>
+<h4 id="114-3-axis-gimbal">1.1.4 3-Axis Gimbal</h4>
+<p>The 3-Axis Solo Gimbal provides greater control of GoPro® HERO cameras. The Gimbal is included, fully installed, in the package Solo with 3-Axis Gimbal, and is also available separately for Solo. This powerful accessory is fully covered in Chapter 3 of this manual.</p>
+<hr />
+<h3 id="12-aircraft-overview">1.2 Aircraft Overview</h3>
+<h4 id="121-smart-battery">1.2.1 Smart Battery</h4>
+<blockquote>
+<p><strong>Updated — 2026:</strong> Original 3DR Solo Smart Batteries are no longer manufactured. Existing batteries have limited remaining service life. For current replacement and alternative battery options, see <strong>Section 2.3</strong> and <strong>Section 10</strong> (Maintenance).</p>
+</blockquote>
+<p>The battery connects to Solo's battery bay. Solo's power button is located on the battery; Solo can be powered only when the battery is connected.</p>
+<h4 id="122-motors-and-propellers">1.2.2 Motors and Propellers</h4>
+<p>Solo's arms are labeled 1 through 4 on the ends of the arms. Motors on arms #1 and #2 spin counterclockwise and use clockwise-tightening propellers with silver tops. Motors on arms #3 and #4 spin clockwise and use counterclockwise-tightening propellers with black tops.</p>
+<h4 id="123-orientation-leds">1.2.3 Orientation LEDs</h4>
+<p>Each arm contains an LED for ground-to-air directional awareness; when armed for flight, the two front arms (#1 and #3) display white, and the two rear arms (#2 and #4) display red. This LED scheme mimics the headlight and taillight style of a car.</p>
+<h4 id="124-fixed-camera-mount-and-hdmi-cable">1.2.4 Fixed Camera Mount and HDMI Cable</h4>
+<p>Solo includes a GoPro® The Frame™ fixed mount to mount a GoPro® HERO camera. The HDMI cable connects to the GoPro® to output video during flight.</p>
+<p><em>Figure 1.2.4.1: Solo Overview</em></p>
+<table>
+<thead>
+<tr>
+<th>Dimension</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Height</td>
+<td>10.2 in. (25.9 cm)</td>
+</tr>
+<tr>
+<td>Motor-to-motor</td>
+<td>18.1 in. (46 cm)</td>
+</tr>
+<tr>
+<td>Weight (no camera)</td>
+<td>3.3 lbs. (1.5 kg)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="13-controller-overview">1.3 Controller Overview</h3>
+<h4 id="131-mobile-device-holder">1.3.1 Mobile-Device Holder</h4>
+<p>Mount an Android or iOS device to run the Solo App and effortlessly integrate the App into the controller's operational flow. A user-supplied smartphone or tablet is required to initialize Solo and use Smart Shots.</p>
+<h4 id="132-joysticks">1.3.2 Joysticks</h4>
+<p>The controller's left and right joysticks provide direct manual control of Solo and physical control mechanisms for use with Smart Shots.</p>
+<h4 id="133-screen">1.3.3 Screen</h4>
+<p>The controller's full-color screen provides live in-flight data and prompts for certain Solo functions.</p>
+<h4 id="134-power-button">1.3.4 Power Button</h4>
+<p>Press the power button once to check the controller's battery level. Hold the power button until you see the controller startup screen to power on the controller.</p>
+<h4 id="135-fly-button">1.3.5 Fly Button</h4>
+<p>The Fly button lets you control Solo's main flight functions: starting motors, takeoff, land, and activating GPS flight.</p>
+<h4 id="136-return-home">1.3.6 Return Home</h4>
+<p>The Return Home button allows you to end your flight automatically at any point by returning Solo to its original launch point and landing.</p>
+<h4 id="137-pause-button">1.3.7 Pause Button</h4>
+<p>The Pause button is Solo's emergency air brake. Press Pause to stop Solo and hover in place at any time.</p>
+<h4 id="138-option-buttons">1.3.8 Option Buttons</h4>
+<p>The A and B buttons change functionality based on where you are in the operational flow. The screen shows the currently assigned functions of A and B at all times. You can program A and B to specific functions using the App. By default, the A button is assigned to Cable Cam and the B button is assigned to Orbit.</p>
+<h4 id="139-antennas">1.3.9 Antennas</h4>
+<p>The controller's long-range dipole antennas communicate with Solo during flight. See Section 4.12 for proper antenna configuration.</p>
+<h4 id="1310-gimbal-controls">1.3.10 Gimbal Controls</h4>
+<p>The paddle, buttons, and dial on the top of the controller are used to control the Solo Gimbal. You can also use them in some Smart Shots.</p>
+<p><em>Figure 1.3.10.1: Controller Overview</em></p>
+<hr />
+<h3 id="14-operating-parameters">1.4 Operating Parameters</h3>
+<p>The following operating parameters apply to Solo. Always operate Solo within these parameters. Solo's performance and behaviors may vary significantly if flying in conditions that violate the parameters listed below.</p>
+<p><em>Figure 1.4.1: Solo Operating Parameters</em></p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Estimated flight time</td>
+<td>up to 25 minutes*</td>
+</tr>
+<tr>
+<td>Default maximum altitude</td>
+<td>150 ft. (46 m) above ground level**</td>
+</tr>
+<tr>
+<td>Range</td>
+<td>0.5 mile*** (0.8 km)</td>
+</tr>
+<tr>
+<td>Payload capacity</td>
+<td>1 lb. (450 g)</td>
+</tr>
+<tr>
+<td>Cruise speed</td>
+<td>18 mph (8 m/s)</td>
+</tr>
+<tr>
+<td>Maximum speed</td>
+<td>33 mph (15 m/s)****</td>
+</tr>
+<tr>
+<td>Wind speed limitation</td>
+<td>25 mph (11 m/s)</td>
+</tr>
+<tr>
+<td>Operating temperature</td>
+<td>32°F – 113°F (0°C to 45°C)</td>
+</tr>
+</tbody>
+</table>
+<p>* Flight time varies with payload, wind conditions, elevation, temperature, humidity, flying style, and pilot skill. Listed flight time applies to elevations less than 2,000 ft above sea level.</p>
+<p>** To adjust maximum altitude, see Section 8.7.</p>
+<p>*** Depending on environmental conditions.</p>
+<p>**** This top speed corresponds to Solo when operating in Fly mode. Maximum speeds for advanced modes may vary; see Section 8.1 for more information.</p>
+<hr />
+<h3 id="15-autopilot">1.5 Autopilot</h3>
+<p>Solo uses a Pixhawk 2 autopilot running ArduPilot Copter software. ArduPilot is open-source flight control based on the MAVLink communication protocol. Pixhawk 2 runs an ARM Cortex-M4 STM32F427 processor with 2 MB of flash memory and 256 KB of RAM. Combined with an array of CAN, I2C, SPI, PWM, and UART interfaces, Pixhawk 2 uses a suite of onboard sensors to calculate Solo's orientation and motion in flight. This data is input into ArduPilot's inertial navigation and position-estimation algorithms and combined with control inputs to send commands to Solo's propulsion system.</p>
+<blockquote>
+<p><strong>Note — 2026:</strong> The community-maintained <strong>Open Solo</strong> firmware updates the ArduCopter firmware running on Solo's Pixhawk 2 to modern releases. Installing Open Solo 4.0 or later is strongly recommended for current users. See Section 2.7 for installation guidance.</p>
+</blockquote>
+<hr />
+<h3 id="16-propulsion">1.6 Propulsion</h3>
+<p>Solo uses four brushless 880 Kv motors and four self-tightening propellers for propulsion. For control and aerodynamic efficiency, two motors spin clockwise and two motors spin counterclockwise. Navigation in the air is achieved by mixing propulsion of the four motors to actuate flight control along the roll, pitch, and yaw axes.</p>
+<p>Each of the four motors is numbered by the marking on the arm. These numbers correspond to the autopilot calculations for these commands and are used for indicating motor replacement procedures. Each motor is controlled by an ESC (Electronic Speed Controller) that regulates the rotation of the motors to achieve the speed commanded by the autopilot.</p>
+<p><em>Figure 1.6.1: Solo Motor Order</em></p>
+<hr />
+<h3 id="17-led-meanings">1.7 LED Meanings</h3>
+<p>Solo's four LEDs indicate its status during startup and in flight.</p>
+<ul>
+<li><strong>Solid white (front) and red (back):</strong> Ready to fly, standard flight configuration</li>
+<li><strong>Pulsing white (front) and red (back):</strong> Solo is flying under autopilot control</li>
+<li><strong>Flashing red alternating front and back:</strong> Controller signal lost</li>
+<li><strong>Flashing rainbow:</strong> Update in progress</li>
+<li><strong>Solid green, then turning off one-by-one:</strong> Startup successful</li>
+<li><strong>Solid green without turning off automatically:</strong> Startup unsuccessful; restart Solo</li>
+</ul>
+<hr />
+<h2 id="2-setup">2 Setup</h2>
+<p>This section covers everything you need to set up Solo out of the box.</p>
+<h3 id="21-in-the-box-solo-with-the-frame">2.1 In the Box — Solo with The Frame</h3>
+<p>The Solo package includes the Solo Vehicle with The Frame (for mounting a GoPro camera), the Solo Controller, propellers (four plus two spares), the Solo Smart Battery, the Solo Smart Battery charger, and a charger for the Solo Controller.</p>
+<p><em>Figure 2.1.1: Solo Parts</em></p>
+<h3 id="22-in-the-box-solo-with-3-axis-gimbal">2.2 In the Box — Solo with 3-Axis Gimbal</h3>
+<p>The Solo with 3-Axis Gimbal package includes the Solo Vehicle with 3-Axis Gimbal installed, the Solo Controller, propellers (four plus four spares), the Solo Smart Battery, the Solo Smart Battery charger, and a charger for the Solo Controller.</p>
+<p><em>Figure 2.2.1: Solo with 3-Axis Gimbal Parts</em></p>
+<hr />
+<h3 id="23-battery">2.3 Battery</h3>
+<blockquote>
+<p><strong>Updated — 2026: Battery Availability</strong>
+The original 3DR Solo Smart Battery is no longer manufactured. Existing Smart Batteries have a finite service life and will eventually reach end-of-life. The following options are available to current users:</p>
+<ul>
+<li><strong>Original Smart Batteries (used/refurbished):</strong> Occasionally available through secondary markets and specialty hobbyist sellers. Inspect carefully before purchase and use.</li>
+<li><strong>BMSOne Adapter (community solution):</strong> The BMSOne is a widely used community-developed adapter that allows the Solo to operate on standard 4S LiPo battery packs (minimum 30A continuous discharge rating). It is available in internal and external configurations. Refer to community documentation at 3DRPilots.com for installation details.</li>
+<li><strong>DIY BMS Rebuild:</strong> Advanced users may rebuild an original battery shell with a replacement 4S LiPo cell pack. This requires soldering expertise and carries elevated safety risks due to lithium polymer chemistry. Follow established community guides carefully.</li>
+</ul>
+<p>When using any non-original battery solution, standard external LiPo balance chargers are required in place of the original 3DR Solo charger. Always follow the battery safety practices described in Section 4.10.</p>
+</blockquote>
+<p>Solo is powered by the rechargeable Solo Smart Battery, which provides up to 25 minutes of flight time per full charge. (Note: Flight time depends on payload, wind conditions, elevation, temperature, humidity, flying style, and pilot skill, so the actual flight time may vary.) As a lithium polymer battery, the Solo Smart Battery requires specific handling practices to ensure safe operation and prevent accidents. For more information about battery safety, see Section 4.10, Flight Battery.</p>
+<h4 id="231-charging">2.3.1 Charging</h4>
+<p>The level of the battery charge is indicated by the lights below the power button. Press the power button once to display the current power level. The Solo Smart Battery ships with approximately 50% charge, so charge fully before your first flight for maximum flight time.</p>
+<p>Remove the battery from Solo before charging by holding the release button and sliding the battery towards the back of Solo. Charge the battery using the designated Solo charger only; using a different charger can damage the battery or cause a fire.</p>
+<p>To charge the battery, connect the Solo charger to the battery and a wall outlet. While charging, the indicator lights pulse at the current level. An additional indicator on the battery charger turns from red to green when the battery is fully charged. The battery takes approximately 1.5 hours to charge to 100%.</p>
+<p>The optimal storage charge for the Solo Smart Battery is 50%. Storing the Solo Smart Battery at an excessively depleted charge (7 percent and under) for an extended period might result in shorter battery life or permanent damage to the battery.</p>
+<p><em>Figure 2.3.1.1: Charging the Solo Smart Battery</em></p>
+<h4 id="232-powering">2.3.2 Powering</h4>
+<p>To power Solo, insert the Smart Battery into Solo's battery bay and slide the battery forward until it clicks into place. To turn on Solo, press and hold the battery power button. When Solo powers on, the battery displays an LED animation and you hear the startup tone. Power Solo only with the designated 3DR Solo Smart Battery or a community-approved equivalent; using an unsupported battery can permanently damage Solo.</p>
+<blockquote>
+<p>Before powering on, make sure Solo is level and keep Solo still during startup and while the sensors initialize. Moving Solo during this process causes the sensors to calibrate incorrectly and can create a preflight error or affect in-flight performance.</p>
+</blockquote>
+<p><em>Figure 2.3.2.1: Powering Solo</em>
+1. Slide to connect
+2. Hold to power</p>
+<hr />
+<h3 id="24-controller">2.4 Controller</h3>
+<p>The Solo Controller includes a pre-installed rechargeable lithium ion (Li-ion) battery.</p>
+<h4 id="241-charging">2.4.1 Charging</h4>
+<p>Charge the controller using the designated controller charger only; using a different charger can damage the controller or cause a fire.</p>
+<p>To charge the controller, connect the controller charger to the barrel jack on the side of the controller and to a wall outlet. To check the battery level of the controller, press the power button. A fully charged controller lasts for approximately 6 hours. Always check the controller's battery level before you fly, and recharge when prompted by the controller. The controller takes approximately three hours to charge to 100%.</p>
+<p><em>Figure 2.4.1.1: Controller Charging</em></p>
+<h4 id="242-powering">2.4.2 Powering</h4>
+<p>To power on the controller, press and hold the controller power button until you see the startup screen.</p>
+<p><em>Figure 2.4.2.1: Power On Controller</em></p>
+<hr />
+<h3 id="25-propellers">2.5 Propellers</h3>
+<p>Solo uses two types of self-tightening propellers, indicated by the color of the circle at the center of the propeller.</p>
+<h4 id="251-attaching">2.5.1 Attaching</h4>
+<p>Attach the propellers with silver tops to the motors with a silver dot on the top of the motor shaft, and attach the black-top propellers to the motors with black dots. Make sure to remove the paper labels from the motors before attaching the propellers.</p>
+<p>Silver-top propellers tighten clockwise; black-top propellers tighten counterclockwise. Check the lock and unlock icons on each propeller to see the correct directions for tightening and removing.</p>
+<p><em>Figure 2.5.1.1: Attach Propellers</em></p>
+<hr />
+<h3 id="26-camera">2.6 Camera</h3>
+<blockquote>
+<p><strong>Updated — 2026: GoPro Compatibility</strong>
+The original Solo system was designed for the GoPro® HERO 3, 3+, and HERO 4 (Silver and Black). These models remain the <strong>natively supported</strong> cameras for full integration, including HDMI video streaming, in-app camera control, and gimbal operation.</p>
+<p><strong>HERO 5 and later:</strong> GoPro cameras from the HERO 5 generation onward are <strong>not natively compatible</strong> with the 3DR Solo's HDMI cable and gimbal control system. Community-developed hardware modifications exist for HERO 5, 6, and 7 (Black) models using custom wiring and microcontroller bridges, but these are advanced modifications with no official support. The GoPro HERO 8 and later do not include a native HDMI output port and require the GoPro Media Mod accessory to output video.</p>
+<p>For best results and reliable operation, the <strong>GoPro HERO 4 Black</strong> is the recommended camera for current Solo users.</p>
+</blockquote>
+<p>The Solo package includes a fixed GoPro® The Frame™ mount for your GoPro® HERO 3, 3+, or 4.</p>
+<p><em>Note: If you have Solo with 3-Axis Gimbal or have installed the Gimbal separately, see Section 3.2.5, Camera Installation.</em></p>
+<h4 id="261-attaching-gopro-to-the-frame">2.6.1 Attaching GoPro to The Frame</h4>
+<p>To attach the camera to the GoPro® The Frame™ fixed mount, insert your GoPro® upside down and connect the Solo HDMI cable to the camera.</p>
+<p><em>Figure 2.6.1.1: Attach Camera</em></p>
+<h4 id="262-settings">2.6.2 Settings</h4>
+<p>For best results, adjust the camera settings for inverted orientation and medium field of view. (Setting the field of view to medium ensures that you won't see the propellers in the frame.)</p>
+<p><em>Figure 2.6.2.1: Camera Configuration Process</em></p>
+<table>
+<thead>
+<tr>
+<th>Camera</th>
+<th>Setting</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>HERO3</td>
+<td>Camera Orientation</td>
+<td>Inverted (UP)</td>
+</tr>
+<tr>
+<td>HERO4</td>
+<td>Orientation</td>
+<td>Auto</td>
+</tr>
+<tr>
+<td>All</td>
+<td>Field of View</td>
+<td>Medium</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>Make sure the Wi-Fi on your GoPro® is turned <strong>OFF</strong>. Otherwise, it can interfere with Solo's communication signals and cause unexpected behavior.</p>
+</blockquote>
+<hr />
+<h3 id="27-mobile-app">2.7 Mobile App</h3>
+<p>The Solo App provides a streaming-video link to a mobile device and a simple graphic interface for using Smart Shots and other advanced Solo features.</p>
+<blockquote>
+<p><strong>Updated — 2026: App Status and Replacement</strong>
+The original <strong>3DR Solo App</strong> (previously available as "3DR Solo" on the App Store and Google Play) has been <strong>discontinued</strong>. The original app's backend servers no longer operate. As a result:
+- The original app cannot complete the mandatory first-flight update procedure on a new or factory-reset Solo.
+- The original app is no longer available for download from the App Store or Google Play Store.</p>
+<p><strong>Replacement Apps (currently supported by community):</strong></p>
+<table>
+<thead>
+<tr>
+<th>App</th>
+<th>Platform</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Solex</strong></td>
+<td>Android</td>
+<td>Primary replacement; supports Open Solo firmware updates, Smart Shots, and mission planning</td>
+</tr>
+<tr>
+<td><strong>SidePilot</strong></td>
+<td>iOS</td>
+<td>Primary iOS alternative; supports ArduPilot-based systems including Solo</td>
+</tr>
+</tbody>
+</table>
+<p>The procedures in this section describe the original app workflow for reference. Where steps differ using Solex or SidePilot, consult the respective app's documentation or the 3DRPilots.com forum.</p>
+</blockquote>
+<h4 id="271-install">2.7.1 Install</h4>
+<blockquote>
+<p><strong>Updated — 2026:</strong> Download <strong>Solex</strong> (Android) or <strong>SidePilot</strong> (iOS) from the respective app stores. These apps replace the original 3DR Solo App.</p>
+</blockquote>
+<h4 id="272-register">2.7.2 Register</h4>
+<blockquote>
+<p><strong>Updated — 2026:</strong> The original app registration process (which prompted for your Solo serial number and connected to 3DR's servers) is <strong>no longer functional</strong>. Solex and SidePilot do not require account registration with 3DR. Launch the replacement app, connect to Solo's Wi-Fi (SoloLink), and proceed directly to the flight interface.</p>
+</blockquote>
+<h4 id="273-connect-to-solo">2.7.3 Connect to Solo</h4>
+<p>To connect the app to Solo's 3DR Link Wi-Fi network, power on both Solo and the controller. On your mobile device, navigate to Wi-Fi settings and connect to the network named <strong>SoloLink_####</strong> (where #### is unique to your Solo). Enter the default password <strong>sololink</strong>. Once connected, return to the replacement app to continue. Both Solo and the controller must be powered on to connect to the App.</p>
+<p><em>Figure 2.7.3.1: Connect to SoloLink</em></p>
+<h4 id="274-change-sololink-password">2.7.4 Change SoloLink Password</h4>
+<p>Once connected to Solo Wi-Fi, change your password to secure your SoloLink network. Using Solex or SidePilot, access the vehicle settings section and navigate to Wi-Fi settings to set a new password. The password should be between 8 and 32 characters with no spaces. Select Apply to enable your changes. If you forget your SoloLink password, perform the factory reset procedure described in Section 10.7 to reset the password to the default (sololink).</p>
+<h4 id="275-update-firmware-open-solo">2.7.5 Update (Firmware — Open Solo)</h4>
+<blockquote>
+<p><strong>Updated — 2026: Firmware Update Procedure</strong>
+The original 3DR first-flight update procedure is <strong>no longer available</strong>. 3DR's update servers are offline. The replacement procedure uses <strong>Open Solo</strong> community firmware, installed via the Solex app (Android) or via manual SSH/SFTP methods.</p>
+<p><strong>Recommended update path (using Solex on Android):</strong></p>
+<ol>
+<li>Connect your Android device to the SoloLink Wi-Fi network.</li>
+<li>Open Solex and navigate to the Vehicle Setup section.</li>
+<li>Select the Open Solo firmware update option.</li>
+<li>Follow the in-app prompts to download and install Open Solo 4.0 (or the latest stable release) to both the Controller and Solo.</li>
+<li>Both the Controller and Solo must be powered on and connected. Ensure the controller battery is at least 50% charged before beginning.</li>
+<li>The controller will restart as part of the update. Total update time may be up to 10–15 minutes.</li>
+<li>After the update completes, Solo's LEDs turn green, then return to the standard white-and-red pattern.</li>
+</ol>
+<p><strong>Alternative (manual SSH method):</strong> Open Solo can be installed by placing firmware image files directly onto the SD cards inside Solo and the controller via SSH/SFTP (using tools such as WinSCP and PuTTY). Refer to the Open Solo documentation at github.com/OpenSolo/documentation for step-by-step instructions.</p>
+<p><strong>Important:</strong> Always update the Solo vehicle firmware and Controller firmware together. Mismatched firmware versions between Solo and the Controller can cause pairing and flight issues.</p>
+</blockquote>
+<h4 id="276-view-video">2.7.6 View Video</h4>
+<p>After the firmware update is complete, to view video in the app, first make sure Solo, the controller, and the GoPro® are powered on, and that the app is connected to Solo via Wi-Fi. Using Solex or SidePilot, access the fly/video screen. Before your first flight, verify that you can see video. If the video is inverted, see Section 2.6.2 for camera orientation settings.</p>
+<hr />
+<h2 id="28-solo-web-utility">2.8 Solo Web Utility</h2>
+<blockquote>
+<p><strong>New Section — 2026</strong>
+The 3DR Solo Web Utility is a free, open-source on-board management console that updates firmware from the internet and provides a full-featured browser-based flight deck. It is installed once via a Windows PC or Android device and lives permanently on the Solo drone — no mobile app or cloud connection required. Access it from any browser on any device connected to the SoloLink Wi-Fi network at <strong>http://10.1.1.10</strong>.</p>
+<p>The Solo Web Utility is designed to work in harmony alongside Solex and SidePilot, not replace them. Think of it as the on-board maintenance and configuration console, while Solex and SidePilot remain the primary flight control apps.</p>
+</blockquote>
+<h3 id="281-overview-and-architecture">2.8.1 Overview and Architecture</h3>
+<p>The Solo Web Utility runs natively on the Solo Copter's onboard i.MX6 Linux companion computer. It is written entirely in Python 2.7 for native compatibility with Solo's embedded Linux environment and has zero external dependencies on either the drone or the connecting device.</p>
+<p><strong>Key characteristics:</strong></p>
+<ul>
+<li>Installed to <code>/log/SoloWebUtility</code> on the Solo's 6.5 GB persistent ext4 storage partition</li>
+<li>Starts automatically on every boot via <code>/etc/rc.local</code></li>
+<li>Web server on port 80 — accessible from any browser on any phone, tablet, laptop, or desktop connected to SoloLink Wi-Fi</li>
+<li>MAVLink telemetry via UDP port 14560 through Solo's built-in <code>telem_forwarder</code></li>
+<li>Direct Pixhawk parameter read/write with ACK verification</li>
+<li>No internet connection required — fully self-contained and offline</li>
+</ul>
+<h3 id="282-installation">2.8.2 Installation</h3>
+<p>The Solo Web Utility is installed once from a Windows PC using a standalone executable installer. No Python, Git, or additional software is required on the PC.</p>
+<p><strong>Requirements:</strong></p>
+<ul>
+<li>Windows PC</li>
+<li>Solo and Controller powered on</li>
+<li>PC connected to the SoloLink Wi-Fi network (same connection used for the original 3DR Solo App)</li>
+</ul>
+<p><strong>Installation steps:</strong></p>
+<ol>
+<li>Download <strong>Solo Web Utility Installer.exe</strong> from open-solo.com (approximately 160 MB standalone executable).</li>
+<li>Power on Solo and the Controller and connect your PC to the SoloLink Wi-Fi network as you normally would.</li>
+<li>Double-click <code>Solo Web Utility Installer.exe</code>. The installer automatically connects to Solo via SSH at 10.1.1.10, uploads all application files and firmware images, verifies file integrity, configures persistent boot startup via <code>/etc/rc.local</code>, and starts the web server on port 80.</li>
+<li>When the installer completes, open any browser on any device connected to SoloLink and navigate to <strong>http://10.1.1.10</strong>. The utility is live and will persist across all future power cycles without reinstallation.</li>
+</ol>
+<blockquote>
+<p>The installer uses SSH/SFTP to transfer files. It uses unpipelined synchronous transfers to prevent the Solo's embedded OpenSSH server buffer from overflowing over Wi-Fi. If a transfer is interrupted, the installer automatically resumes from the exact byte offset on the next run.</p>
+</blockquote>
+<p><strong>Android APK:</strong> A lightweight Android application (<code>Solo Web Utility Installer.apk</code>, approximately 296 MB) is also available from open-solo.com for Android users who prefer a native app interface for initial setup and direct web console access.</p>
+<h3 id="283-automated-preflight-update-firmware">2.8.3 Automated Preflight Update (Firmware)</h3>
+<blockquote>
+<p><strong>Updated — 2026:</strong> The Solo Web Utility provides the most complete and automated path to resolving the "Preflight Update Required" loop caused by 3DR's decommissioned cloud update servers. All firmware images are stored permanently on Solo's internal storage. With a single click in the browser, the utility stages and flashes the complete drone stack.</p>
+</blockquote>
+<p>The automated firmware update pipeline performs the following in sequence:</p>
+<ol>
+<li><strong>Cube Autopilot Firmware</strong> — Flashes the Pixhawk flight controller with the selected ArduCopter firmware image.</li>
+<li><strong>Copter Linux OS</strong> — Updates the Solo Copter's companion computer Linux operating system.</li>
+<li><strong>Controller Linux OS</strong> — Updates the Artoo Controller's Linux operating system via SSH from the Copter.</li>
+</ol>
+<p><strong>Hardware compatibility:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Hardware</th>
+<th>Firmware Used</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Stock Solo Cube (Black)</td>
+<td><code>arducopter_solo.apj</code> — standard ArduCopter for Solo</td>
+</tr>
+<tr>
+<td>Green Cube upgrade</td>
+<td><code>arducopter_green.apj</code> — latest ArduCopter stable release</td>
+</tr>
+</tbody>
+</table>
+<p>A one-click toggle in the browser interface selects between the two autopilot firmware images. Both share the same battle-tested Linux rootfs.</p>
+<p>The update includes a live terminal output window showing real-time flash progress and an 8-minute reboot timer that survives page refreshes. Upon completion, the "Preflight Update Required" lock is permanently cleared.</p>
+<blockquote>
+<p><strong>Always update the Solo vehicle firmware and Controller firmware together.</strong> Mismatched firmware versions between Solo and the Controller can cause pairing and flight issues.</p>
+</blockquote>
+<h3 id="284-parameter-tuning">2.8.4 Parameter Tuning</h3>
+<p>The Solo Web Utility provides direct access to all 1,000+ ArduPilot parameters via real-time MAVLink read/write on UDP port 14560. Changes are committed directly to the Pixhawk flight controller with instant ACK verification.</p>
+<p><strong>Features:</strong></p>
+<ul>
+<li>Search and filter across all parameters by name or description</li>
+<li>Edit any parameter value with immediate write and confirmation</li>
+<li>Import parameters from a <code>.param</code> file</li>
+<li>Export current Pixhawk parameters to a <code>.param</code> file for backup or sharing</li>
+</ul>
+<p>This functionality provides the same parameter access as Mission Planner or QGroundControl, directly from any browser on SoloLink Wi-Fi.</p>
+<h3 id="285-calibrations">2.8.5 Calibrations</h3>
+<h4 id="2851-accelerometer-6-axis-calibration">2.8.5.1 Accelerometer (6-Axis) Calibration</h4>
+<p>A full interactive 6-position accelerometer and IMU calibration wizard. The browser displays visual orientation cards that guide you through each position (Level → Left Side → Right Side → Nose Down → Nose Up → On Back) with real-time MAVLink telemetry feedback from the Pixhawk sensors.</p>
+<h4 id="2852-compass-calibration">2.8.5.2 Compass Calibration</h4>
+<p>Dual-magnetometer compass calibration with guided 3-axis rotation cards, live per-compass progress bars, and real-time fitness scores. The Pixhawk automatically reboots 3 seconds after completion to lock in magnetic offsets. This calibration procedure is equivalent to the compass calibration described in Section 10.2.1 but performed entirely through the browser interface.</p>
+<h3 id="286-one-click-configuration-presets">2.8.6 One-Click Configuration Presets</h3>
+<p>The Solo Web Utility includes a set of battle-tested parameter presets that can be applied with a single click. Each preset writes directly to the Pixhawk via MAVLink with full ACK verification.</p>
+<table>
+<thead>
+<tr>
+<th>Preset</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Here 1 / Here 2 GPS Compass</td>
+<td>Sets <code>COMPASS_ORIENT = 0</code> for Here GPS units mounted upright facing forward</td>
+</tr>
+<tr>
+<td>Stock Solo Leg Compass</td>
+<td>Restores factory <code>COMPASS_ORIENT = 38</code> for the stock compass in the Solo leg</td>
+</tr>
+<tr>
+<td>Retractable Landing Gear</td>
+<td>Configures Servo 7 output, RC7 toggle, and automatic deploy/retract in RTL and Land modes</td>
+</tr>
+<tr>
+<td>Bait Drop / Payload Release</td>
+<td>Gripper servo on Servo 8 with RC8 controller trigger (grab at 1000µs, release at 2000µs)</td>
+</tr>
+<tr>
+<td>Sport Mode (High Velocity)</td>
+<td>15 m/s cruise, 12 m/s loiter, 35° lean angle, and faster climb/descent rates</td>
+</tr>
+<tr>
+<td>Cinematic Mode (Smooth)</td>
+<td>Ultra-smooth accelerations and gentle braking for stabilized video and photography</td>
+</tr>
+<tr>
+<td>Stock 4S LiPo Battery</td>
+<td>Factory 4S LiPo failsafe thresholds — 14.0V Low RTL, 13.5V Critical RTL, SMBus monitoring</td>
+</tr>
+<tr>
+<td>4S Li-ion (Madhacker / High-Cap)</td>
+<td>Optimized for 18650/21700 Li-ion packs — lowered cutoffs (11.6V/11.3V) with Smart RTL</td>
+</tr>
+</tbody>
+</table>
+<h3 id="287-controller-button-configuration">2.8.7 Controller Button Configuration</h3>
+<p>The Solo Web Utility includes an interactive Artoo Controller Setup interface. An SVG diagram of the 3DR Artoo Controller is displayed in the browser with clickable buttons. You can customize the <strong>Short Hold</strong> and <strong>Long Hold</strong> actions for the A, B, Preset 1, Preset 2, and Camera buttons. Changes are written directly to <code>/usr/bin/extSettings.conf</code> on the Solo Copter.</p>
+<p><strong>Configurable actions per button event:</strong></p>
+<ul>
+<li><strong>Smart Shot</strong> — Launch any Smart Shot (Selfie, Orbit, Cable Cam, Zipline, Record, Follow, Multi-point, Pano, Rewind, Transect, RTL)</li>
+<li><strong>Flight Mode</strong> — Switch directly to a flight mode (Stabilize, Acro, Fly:Manual, Fly/Loiter, Sport, Drift, Brake, SmartRTL, and others)</li>
+<li><strong>Function</strong> — Trigger a hardware function (Gimbal lock toggle, Servo 6/7/8 position, Gripper open/close)</li>
+</ul>
+<blockquote>
+<p>This replaces the need to use Solex or the original 3DR App to assign controller button functions. Changes take effect immediately without rebooting Solo.</p>
+</blockquote>
+<p>The configuration is stored in <code>/usr/bin/extSettings.conf</code> on the Copter and is read by Solo's shot manager on startup. A backup of the original file is preserved at <code>/usr/bin/extSettings.conf.backup</code>.</p>
+<h3 id="288-cockpit-hud-and-live-video">2.8.8 Cockpit HUD and Live Video</h3>
+<p>The Solo Web Utility includes a Cockpit Flight Deck with a real-time Primary Flight Display (PFD) and live HDMI video stream.</p>
+<p><strong>PFD instruments:</strong></p>
+<ul>
+<li>Artificial horizon with pitch ladder and roll arc</li>
+<li>Moving airspeed tape and altitude tape</li>
+<li>FPV On-Screen Display (OSD) overlay — GPS coordinates, satellite count, HDOP, home distance and bearing, battery voltage, individual cell voltages (Cell 1–4), current draw, flight time, and signal RSSI</li>
+</ul>
+<p><strong>Live video:</strong> Ultra-low latency H.264 video streamed directly from Solo's onboard HDMI capture, displayed in the browser.</p>
+<p><strong>Arming:</strong> A two-step confirmation sequence protects against accidental motor arming. The default focus is always on Cancel for safety.</p>
+<p><strong>Units:</strong> Toggle between Metric and Imperial. Preference is remembered across sessions.</p>
+<h3 id="289-wi-fi-nat-router">2.8.9 Wi-Fi NAT Router</h3>
+<p>The Solo Web Utility can configure the Controller to connect to your home 2.4 GHz Wi-Fi network while keeping the SoloLink access point active. Built-in IP forwarding and NAT masquerade allow your home computer to reach Solo's companion computer at 10.1.1.10 directly without disconnecting from your home internet. This enables simultaneous access to Solo's web interface and your home network.</p>
+<h3 id="2810-security">2.8.10 Security</h3>
+<p>The web interface is protected by a password with SHA-256 salted hashing and 24-hour session management. A built-in modal allows changing the password directly in the browser. A command-line password reset tool is also included. The SoloLink Wi-Fi password can still be changed using the procedure described in Section 2.7.4.</p>
+<h3 id="2811-quick-reference">2.8.11 Quick Reference</h3>
+<table>
+<thead>
+<tr>
+<th>Task</th>
+<th>Method</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Access the utility</td>
+<td>Connect to SoloLink Wi-Fi → browser → http://10.1.1.10</td>
+</tr>
+<tr>
+<td>Download installer</td>
+<td>open-solo.com</td>
+</tr>
+<tr>
+<td>Firmware update</td>
+<td>Utility → Firmware tab → select Cube type → click Update</td>
+</tr>
+<tr>
+<td>Compass calibration</td>
+<td>Utility → Calibrations → Compass</td>
+</tr>
+<tr>
+<td>Accelerometer calibration</td>
+<td>Utility → Calibrations → Accelerometer</td>
+</tr>
+<tr>
+<td>Edit parameters</td>
+<td>Utility → Parameters → search → edit → write</td>
+</tr>
+<tr>
+<td>Apply preset</td>
+<td>Utility → Presets → click preset name</td>
+</tr>
+<tr>
+<td>Configure controller buttons</td>
+<td>Utility → Controller Setup → click button → set action</td>
+</tr>
+<tr>
+<td>Change web password</td>
+<td>Utility → Settings → Change Password</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="3-the-solo-gimbal">3 The Solo Gimbal</h2>
+<p>The optional Solo Gimbal holds your GoPro® camera and lets you control it remotely. It taps Solo's intelligence to get perfectly automated shots, plus rock-solid footage, GoPro® control and charging, and long-range HD video feed. With the 3-Axis Solo Gimbal, you get:</p>
+<ul>
+<li>Smooth and fluid HD footage every flight.</li>
+<li>Start and stop recording (HERO4 models) while you fly so you can pick and choose the shots you want.</li>
+<li>Footage stabilized to within 0.1 degree of pointing accuracy for enhanced Smart Shots.</li>
+<li>Fine-grain camera tilt control, including angle presets and instant speed adjustment.</li>
+</ul>
+<p><em>Note: If you purchased the Solo with 3-Axis Gimbal package, skip to Section 3.2.5, Camera Installation.</em></p>
+<h3 id="31-in-the-box">3.1 In the Box</h3>
+<p>The Solo 3-Axis Gimbal package includes the Solo Gimbal, the sunshade, four balance weights for the GoPro® camera, and a screwdriver for installing the Gimbal.</p>
+<p><em>Figure 3.1.1: Solo Gimbal Parts</em></p>
+<h3 id="32-gimbal-installation">3.2 Gimbal Installation</h3>
+<p>Before installing the Solo Gimbal, make sure the firmware on Solo and your GoPro, as well as the Solo replacement app on your mobile device, are up to date for the best performance.</p>
+<blockquote>
+<p><strong>Updated — 2026: Recommended Firmware Versions</strong>
+The original version requirements referenced 3DR's firmware versioning system, which is no longer current. For current use:
+- <strong>Solo firmware:</strong> Install Open Solo 4.0 or later (see Section 2.7.5)
+- <strong>Ground control app:</strong> Solex (latest version) or SidePilot (latest version)
+- <strong>GoPro HERO4:</strong> Update to the latest available GoPro firmware via the Quik desktop app or GoPro mobile app</p>
+</blockquote>
+<h4 id="321-remove-the-frame">3.2.1 Remove The Frame</h4>
+<ol>
+<li>Flip Solo over to access the bottom of the vehicle.</li>
+<li>The Frame is secured to Solo by three captive screws. Since these screws don't come out all the way, loosen each screw until they can't be backed out any further.</li>
+<li>Detach the mount from Solo by gently lifting up on it.</li>
+<li>Route the HDMI cable out through the mount to complete the separation.</li>
+</ol>
+<p><em>Figure 3.2.1.1: Removing The Frame</em></p>
+<h4 id="322-connect-gimbal">3.2.2 Connect Gimbal</h4>
+<ol>
+<li>Remove the foam insert holding the gimbal in place and set it to the side.</li>
+<li>On the bottom of the gimbal plate are two ports: one for the HDMI cable and one for the gimbal cable. Plug in the cables running from Solo to their respective ports on the gimbal.</li>
+</ol>
+<p><em>Figure 3.2.2.1: Connecting cables</em></p>
+<h4 id="323-position-cables">3.2.3 Position Cables</h4>
+<p>With both cables now connected to the Solo Gimbal, position each cable out of the way of other internal components. The HDMI cable should rest on top of the gimbal cable.</p>
+<ol>
+<li>Position the gimbal cable out of the way by pushing any slack towards the front of the Solo shell.</li>
+</ol>
+<p><em>Figure 3.2.3.1: Positioning the Gimbal Cable</em></p>
+<ol>
+<li>Loop the HDMI cable around and inside the front of the body, pushing any extra slack towards the pocket of Arm #01.</li>
+</ol>
+<p><em>Figure 3.2.3.2: Positioning the HDMI Cable</em></p>
+<h4 id="324-mount-the-gimbal">3.2.4 Mount the Gimbal</h4>
+<ol>
+<li>Position the gimbal plate over the opening in the Solo shell, making sure that the three screw positions are aligned (two in the back and one in front).</li>
+<li>Slide the back of the plate in first, then pinch the two front prongs in and down to insert the plate.</li>
+</ol>
+<p><em>Figure 3.2.4.1: Mounting the Gimbal</em></p>
+<ol>
+<li>When the plate is inserted and resting flush with the Solo shell, tighten each of the three captive screws.</li>
+</ol>
+<p>If the plate isn't resting flush, back out any crooked screws with the screwdriver, then realign them manually before tightening.</p>
+<h4 id="325-camera-installation">3.2.5 Camera Installation</h4>
+<p>The 3-Axis Solo Gimbal holds your GoPro® HERO 3, 3+, or 4. To install your GoPro camera:</p>
+<ol>
+<li>Move the rubber HDMI plug out and away from the camera housing.</li>
+</ol>
+<p><em>Figure 3.2.5.1: HDMI Plug Positioning</em></p>
+<ol>
+<li>Slide your GoPro into place from the front and gently press it in until it is flush with the back of the camera housing.</li>
+</ol>
+<p><em>Figure 3.2.5.2: Attach GoPro</em></p>
+<ol>
+<li>Insert the rubber HDMI plug into the exposed side of your GoPro. This simultaneously fastens the GoPro into place and secures the HDMI connection.</li>
+</ol>
+<p><em>Figure 3.2.5.3: Fasten Camera</em></p>
+<h4 id="326-add-balance-weights">3.2.6 Add Balance Weights</h4>
+<p>Out of the box, the Solo Gimbal is perfectly weighted for use with the GoPro HERO4 Black. If you are using the GoPro HERO4 Silver or the GoPro HERO3+, add balance weights to the threaded inserts on the top and bottom of the camera housing.</p>
+<p><em>Figure 3.2.6.1: GoPro Weight Balancing</em></p>
+<table>
+<thead>
+<tr>
+<th>Camera Model</th>
+<th>Balance Weights</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>HERO4 Black</td>
+<td>No balance weights needed</td>
+</tr>
+<tr>
+<td>HERO4 Silver</td>
+<td>Add the 2.7g balance weights</td>
+</tr>
+<tr>
+<td>HERO3+ Silver</td>
+<td>Add the 6g balance weights</td>
+</tr>
+</tbody>
+</table>
+<h4 id="327-add-sunshade">3.2.7 Add Sunshade</h4>
+<p>Flying on a sunny day? Use the sunshade to protect your video from glare. Simply press-fit the sunshade onto the GoPro lens to install.</p>
+<p><em>Figure 3.2.7.1: Adding the Sunshade</em></p>
+<h4 id="328-update-your-gopro">3.2.8 Update Your GoPro</h4>
+<blockquote>
+<p><strong>Updated — 2026: GoPro Update Process</strong></p>
+<p><strong>Option 1 — Quik Desktop App:</strong>
+1. Download GoPro Quik for desktop from gopro.com/update.
+2. Connect the GoPro to your computer via USB.
+3. Follow the prompts to download and install the latest firmware.</p>
+<p><strong>Option 2 — GoPro App (mobile):</strong>
+1. Download the GoPro app for iOS or Android.
+2. Enable GoPro Wi-Fi on the camera and pair with the app.
+3. Follow in-app prompts to update firmware.</p>
+<p><strong>Before flying, make sure the GoPro's Wi-Fi is OFF.</strong></p>
+</blockquote>
+<p>The GoPro HERO4 Silver and HERO4 Black are fully optimized to work with the Solo Gimbal. To use functions like Start Recording and Stop Recording, your GoPro HERO4 must be fully up to date.</p>
+<h4 id="329-recommended-gopro-settings">3.2.9 Recommended GoPro Settings</h4>
+<p>For optimal results, adjust your camera settings to these recommended values.</p>
+<p><em>Figure 3.2.9.1: Camera Configuration Process</em></p>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Resolution</td>
+<td>1080p or 2.7K</td>
+</tr>
+<tr>
+<td>Field of View</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>Low Light</td>
+<td>Off</td>
+</tr>
+<tr>
+<td>Spot Meter</td>
+<td>Off</td>
+</tr>
+<tr>
+<td>Protune</td>
+<td>On (if available)</td>
+</tr>
+<tr>
+<td>White Balance</td>
+<td>Auto</td>
+</tr>
+<tr>
+<td>Color</td>
+<td>GoPro</td>
+</tr>
+<tr>
+<td>ISO</td>
+<td>400</td>
+</tr>
+<tr>
+<td>Sharpness</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>EV Comp</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>Make sure that the Wi-Fi on your GoPro® is turned <strong>OFF</strong>. Otherwise, it can interfere with Solo's communication signals and cause unexpected behavior.</p>
+</blockquote>
+<h3 id="33-gimbal-operation">3.3 Gimbal Operation</h3>
+<p>The Solo Gimbal is a nearly autonomous tool that handles camera balancing and stabilization for you automatically.</p>
+<h4 id="331-controlling-the-solo-gimbal">3.3.1 Controlling the Solo Gimbal</h4>
+<p>To manually adjust the tilt angle of the Solo Gimbal, use the tilt control paddle to move the gimbal up and down. You can also set up an automatic tilt control using the '1' and '2' button presets, located above and below the tilt speed dial. To tilt to a preset angle, press either button and use the dial to adjust the tilt speed. To save a new preset angle, hold '1' or '2'.</p>
+<p><em>Figure 3.3.1.1: Gimbal Controls</em></p>
+<h4 id="332-led-signals">3.3.2 LED Signals</h4>
+<p>On the back of the Solo Gimbal is an LED that signals different status modes of the gimbal.</p>
+<p><em>Figure 3.3.2.1: LED Gimbal Signal</em></p>
+<ul>
+<li><strong>Breathing green:</strong> the gimbal is functioning properly and ready for use.</li>
+<li><strong>Blinking orange:</strong> the gimbal is booting up (commonly seen while performing an update).</li>
+<li><strong>Blinking blue:</strong> the gimbal has lost the communication signal. Consult community resources at 3DRPilots.com.</li>
+<li><strong>Breathing red:</strong> the gimbal is in a temporary fault mode. Restart the gimbal; if the issue persists, see Section 9 for community resources.</li>
+<li><strong>Solid red:</strong> the gimbal is in an unrecoverable fault mode. Restart the gimbal; if the issue persists, see Section 9 for community resources.</li>
+</ul>
+<h4 id="333-troubleshooting">3.3.3 Troubleshooting</h4>
+<p>If the Solo Gimbal is not working properly, follow the steps below to troubleshoot the problem:</p>
+<h5 id="3331-the-gimbal-is-not-centered-with-respect-to-solo">3.3.3.1 The gimbal is not centered with respect to Solo</h5>
+<ul>
+<li><strong>Symptoms:</strong> The gimbal angle seems cockeyed or the beauty plate does not mount flush with the Solo bottom surface.</li>
+<li><strong>Reason:</strong> Improper cable routing can cause the gimbal to be off-center.</li>
+<li><strong>Resolution:</strong> Make sure the HDMI cable is coiled from left to right in the big radius following the contour of the Solo. Make sure the Gimbal Data cable is unwound and is not twisted. For community guidance, visit 3DRPilots.com.</li>
+</ul>
+<h5 id="3332-frozen-gopro">3.3.3.2 Frozen GoPro</h5>
+<ul>
+<li><strong>Symptoms:</strong> GoPro doesn't respond to a button press.</li>
+<li><strong>Reason:</strong> GoPro firmware is not up to date.</li>
+<li><strong>Resolution:</strong> Your GoPro model must be HERO 3+ or higher. Remove the GoPro from the gimbal, remove the battery, wait 20 seconds, replace the battery, and power on. Ensure the GoPro firmware is the latest version.</li>
+</ul>
+<h5 id="3333-the-gimbal-is-not-turning-on-or-responding">3.3.3.3 The gimbal is not turning on or responding</h5>
+<ul>
+<li><strong>Symptoms:</strong> Gimbal appears not to be receiving power.</li>
+<li><strong>Reason:</strong> Possible connectivity issues.</li>
+<li><strong>Resolution:</strong> Check the LED on the gimbal and refer to the color guide in Section 3.3.2. If the LED is off, make sure the gimbal connector is plugged in and seated properly.</li>
+</ul>
+<p>If none of the preceding steps resolved your gimbal issue, consult community resources at 3DRPilots.com or the 3DR Solo Owners Group on Facebook.</p>
+<hr />
+<h2 id="4-safety">4 Safety</h2>
+<p>The following best practices will help ensure safe, successful flights and help reduce the risk of accident and serious injury:</p>
+<ul>
+<li>Always fly under adult supervision and with your full attention at all times.</li>
+<li>Do not fly under the influence of drugs or alcohol or when your ability to operate Solo safely is impaired.</li>
+<li>Use common sense to avoid unsafe situations and always operate Solo responsibly.</li>
+</ul>
+<blockquote>
+<p>Read and understand these important safety instructions before your first flight to help reduce the risk of accident and serious injury.</p>
+</blockquote>
+<h3 id="41-location">4.1 Location</h3>
+<p>When choosing an appropriate place to fly Solo, keep these location factors in mind:</p>
+<ul>
+<li>Don't fly Solo indoors.</li>
+<li>Always fly outside in clear, open areas at a safe distance from yourself, other people, power lines, animals, vehicles, trees, and buildings.</li>
+<li>When flying in areas with potential hazards, maintain a distance of at least 100 feet (30 m) from any people, vehicles, or structures. As the operator, you are responsible for navigating Solo to avoid obstacles, including during Smart Shots.</li>
+<li>Don't fly within the controlled airspace of an airport or within any airspace restricted by your local, state, or national airspace authority without proper authorization. As the operator, you are responsible for knowing and understanding the regulations that govern small, unmanned aircraft like Solo in your jurisdiction. See Section 4.13 for current airspace authorization guidance.</li>
+</ul>
+<h3 id="42-environmental-awareness">4.2 Environmental Awareness</h3>
+<p>Don't fly Solo in extreme weather conditions such as rain, high winds, snow, or fog. Such weather conditions can permanently damage Solo or cause instability in flight.</p>
+<p>Before flying, determine the boundaries of the safe flying area at your location. Be aware of any risks, including bodies of water, structures, trees, power lines, etc., and designate a few areas where you can land Solo in case of an unsafe situation. Throughout your flight, be prepared to recover Solo manually or use an emergency procedure if Solo flies outside the safe flying area.</p>
+<h3 id="43-visual-line-of-sight">4.3 Visual Line of Sight</h3>
+<p>Always fly Solo within your visual line of sight. Don't let Solo get so far away from you that you cannot see its orientation or so that any physical obstructions block your view of Solo.</p>
+<blockquote>
+<p>Physical obstructions can also block communication signals with the controller, causing Solo to attempt to Return Home along an obstructed path.</p>
+</blockquote>
+<h3 id="44-flight-school">4.4 Flight School</h3>
+<p>If you're new to flying, review video tutorials before your first flight to learn to operate Solo safely and correctly.</p>
+<blockquote>
+<p><strong>Updated — 2026:</strong> The original 3DR App's Flight School videos are no longer accessible. Equivalent introductory drone flying resources are available from the Academy of Model Aeronautics (modelaircraft.org) and from the FAA (faa.gov/uas).</p>
+</blockquote>
+<p><em>Figure 4.4.1: App Flight School</em></p>
+<h3 id="45-propellers">4.5 Propellers</h3>
+<p>To avoid hazardous contact with Solo's high-speed propellers, always power off Solo before handling Solo or the propellers. When prompted to start motors before takeoff, always ensure that the propellers are clear of any obstructions and at least 20 feet away from any people, animals, or property before activating. Do not touch moving propellers or approach Solo while the propellers are spinning.</p>
+<p>After landing or returning home, Solo automatically detects the landing and stops the motors. Do not approach Solo until the propellers stop spinning, and always power off Solo before picking it up.</p>
+<blockquote>
+<p>Spinning propellers can cause serious injury. Never touch moving propellers or place any objects in the way of the propeller arcs while Solo is powered.</p>
+</blockquote>
+<h3 id="46-gps">4.6 GPS</h3>
+<p>Solo requires an active GPS signal for flight. After powering on, Solo can take up to five minutes to acquire a strong GPS lock. Always choose a flying location with a clear view of the sky to improve GPS signal strength. The following requirements define a GPS lock:</p>
+<ul>
+<li>Reported horizontal position accuracy: &lt; 16 ft. (5 m)</li>
+<li>Reported speed accuracy: &lt; 2 mph (1 m/s)</li>
+<li>Number of satellites: ≥ 6</li>
+<li>Difference between GPS and inertial navigation vertical velocity: &lt; 2 mph (1 m/s)</li>
+</ul>
+<p>If satellite coverage drops beneath a reliable threshold during flight, Solo will automatically switch to Fly:Manual mode. This mode does not provide the flight-stabilizing GPS functionality, but it still lets you control Solo.</p>
+<h3 id="47-home-position">4.7 Home Position</h3>
+<p>Solo's home position is the latitude and longitude coordinates of the launch point and is used by the autopilot as the end point of a return-home command. The autopilot saves the home position location to where the motors are started, assuming GPS lock has been achieved. If Solo has taken off without GPS lock and then achieves GPS lock mid-flight, the home position will be set to wherever GPS lock was acquired. The location of the home position depends on GPS signal strength and is usually within one to two meters of accuracy. Always take off from an open location with a clear path for Solo to return home safely. For home position safety in advanced mode, see Section 8.4.</p>
+<h3 id="48-altitude-limit">4.8 Altitude Limit</h3>
+<p>Always fly at appropriate altitudes for your flying location and local regulations. Solo cannot avoid obstacles on its own, so always select altitudes that avoid any obstacles, such as trees, buildings, and power lines.</p>
+<p>Solo includes a safety fence enabled by default at 150 ft. (46 m). If Solo reaches the altitude limit, it stops ascending and limits throttle input to stay below the altitude limit. To adjust the altitude limit, see Section 8.7.</p>
+<blockquote>
+<p><strong>Updated — 2026: FAA Altitude Regulations</strong>
+FAA regulations require recreational and Part 107 drone pilots to operate at or below <strong>400 feet above ground level (AGL)</strong> in uncontrolled airspace. Under Part 107, pilots may fly up to 400 feet above a structure while remaining within 400 feet of it laterally. Always operate within Solo's default 150 ft. altitude limit unless you understand and comply with applicable regulations.</p>
+</blockquote>
+<h3 id="49-emergency-procedures">4.9 Emergency Procedures</h3>
+<p>If you experience a problem in flight, use one of the following emergency procedures to stop Solo, end your flight, or shut off the motors.</p>
+<h4 id="491-pause">4.9.1 Pause</h4>
+<p>The controller's Pause button allows you to stop Solo in mid-air. Solo hovers at the paused location until given another command. Use the Pause button to stop Solo from hitting an obstacle or to reorient Solo for navigation. During Return Home or Land, you can pause Solo and stop the landing by pressing Pause. Pause is available only with GPS lock.</p>
+<h4 id="492-regain-manual-control">4.9.2 Regain Manual Control</h4>
+<p>Keep the controller easily accessible at all times during flight, including during Smart Shots, and be prepared to regain manual control at any time. To return to standard flight during Smart Shots, Return Home, or Land, press the Fly button.</p>
+<h4 id="493-return-home">4.9.3 Return Home</h4>
+<p>If Solo acquired GPS lock prior to takeoff, you can return it to the launch point and land by pressing Return Home on the controller. Solo does not avoid obstacles while returning home; always verify that the return path is clear before activating Return Home.</p>
+<h4 id="494-land">4.9.4 Land</h4>
+<p>To land Solo at its current position, press and hold the Fly button. To exit the landing procedure at any time, lift the throttle. If Solo does not have GPS lock, automatic positioning is not available as Solo descends, and drifting can occur depending on environmental conditions.</p>
+<h4 id="495-motor-shutoff">4.9.5 Motor Shutoff</h4>
+<p>In the event that Solo's motors do not stop after landing or for an emergency in-flight kill switch, Solo includes an emergency motor shutoff procedure. To shut off the motors at any time, either in flight or on the ground, hold the A, B, and Pause buttons at the same time. An initial screen will appear on the controller to confirm the shutoff command; continue to hold A, B, and Pause buttons to activate motor shutoff. <strong>Use the emergency motor shutoff only as a last resort.</strong></p>
+<p><em>Figure 4.9.5.1: Controller — Motor Shutoff</em></p>
+<h3 id="410-flight-battery">4.10 Flight Battery</h3>
+<p>Use caution when handling the Solo Smart Battery; lithium polymer batteries can cause a fire if handled incorrectly. Never alter, puncture, throw, bend, or impact the battery. Keep the battery away from liquids, fire, microwaves, and other hazardous or combustible materials. Don't expose the battery to extreme temperatures. If the battery is hot to the touch, wait for it to cool before using or charging.</p>
+<p>Inspect the battery before and after each flight. If you notice any abnormal features such as damage to the exterior shell, swelling, deformation, abnormal smell, leakage, or other unexpected behavior, do not use the battery. To prevent a hazard in case of fire or explosion, disconnect the battery and place it in a safe area outside of any buildings or vehicles and away from flammable materials. Do not dispose of the battery in the trash; bring it to a battery recycling center. In the US and Canada, visit <strong>call2recycle.org</strong> to find a location.</p>
+<p>For long-term storage, store the battery in a 64°F (18°C) to 82°F (28°C) environment, between 45–85% relative humidity, and with 50% charge. Always store the battery in a place where it won't be exposed to extreme temperatures or direct sunlight.</p>
+<h3 id="411-controller">4.11 Controller</h3>
+<p>The controller's rechargeable lithium ion (Li-ion) battery is housed inside the controller, accessible by the battery door on the back of the controller. The controller battery is pre-attached to the controller, and shouldn't be disconnected unless:</p>
+<ul>
+<li>You plan to store the controller for over three months without using it. In this case, disconnect the battery from the controller and leave the battery inside the controller to store it.</li>
+<li>You need to replace or upgrade the controller battery.</li>
+</ul>
+<blockquote>
+<p><strong>Updated — 2026: Controller Battery Availability</strong>
+The original extended controller battery (double capacity) was available from store.3dr.com, which is no longer operational. Compatible replacement lithium ion batteries may be available through third-party electronics suppliers. Consult 3DRPilots.com for current sourcing recommendations. Always verify voltage and connector compatibility before installing any replacement battery.</p>
+</blockquote>
+<p>Keep the controller away from liquids, fire, microwaves, and other hazardous or combustible materials. Don't expose the controller to extreme temperatures. Perform periodic visual inspections of the controller battery to check for any damage, and handle the controller battery using the same safety precautions as the flight battery.</p>
+<h3 id="412-antenna-configuration">4.12 Antenna Configuration</h3>
+<p>For the strongest connection to Solo, position the antennas down and away from the controller so they are approximately perpendicular to Solo in flight, and tilt each antenna out and away from one another at a 20° angle.</p>
+<p><em>Figure 4.12.1: Controller Antenna Orientation</em></p>
+<hr />
+<h3 id="413-regulatory-compliance-current-requirements">4.13 Regulatory Compliance (Current Requirements)</h3>
+<blockquote>
+<p><strong>New Section — 2026</strong>
+Drone regulations in the United States have changed significantly since this manual was originally published. The following is a summary of current requirements. <strong>Always verify current regulations at faa.gov before operating.</strong></p>
+</blockquote>
+<h4 id="4131-registration">4.13.1 Registration</h4>
+<p>Any drone weighing more than <strong>0.55 lbs (250 grams)</strong> must be registered with the FAA. The 3DR Solo weighs 3.3 lbs and <strong>must be registered</strong>. Register at <strong>FAA DroneZone</strong> (faadronezone.faa.gov). Registration costs \$5 and is valid for three years. You must mark your Solo with its FAA registration number on a visible exterior surface where it is visible without tools.</p>
+<h4 id="4132-trust-test-recreational-flyers">4.13.2 TRUST Test (Recreational Flyers)</h4>
+<p>Recreational pilots are required by law to pass the <strong>Recreational UAS Safety Test (TRUST)</strong>, a free online safety test. You must carry proof of passage whenever flying and present it if requested by law enforcement or FAA personnel. Take the test through any FAA-approved administrator listed at faa.gov/uas/recreational_flyers.</p>
+<h4 id="4133-part-107-commercial-operations">4.13.3 Part 107 (Commercial Operations)</h4>
+<p>Any non-recreational drone operation requires a <strong>Remote Pilot Certificate</strong> under FAA Part 107. Visit faa.gov/uas/commercial_operators for certification requirements. The original manual's "five miles from an airport" guidance has been superseded — all airspace rules are now managed through the LAANC system described in Section 4.13.5.</p>
+<h4 id="4134-remote-id">4.13.4 Remote ID</h4>
+<p>As of <strong>March 16, 2024</strong>, FAA Remote ID compliance is <strong>fully enforced</strong>. The 3DR Solo does not have built-in Remote ID capability. To comply, you must either:</p>
+<ol>
+<li>Attach an <strong>FAA-accepted Remote ID broadcast module</strong> to your Solo, or</li>
+<li>Operate exclusively at an <strong>FAA-Recognized Identification Area (FRIA)</strong>.</li>
+</ol>
+<p>Consult faa.gov/uas/getting_started/remote_id for the current list of accepted broadcast modules and FRIA locations.</p>
+<h4 id="4135-airspace-authorization-laanc">4.13.5 Airspace Authorization (LAANC)</h4>
+<p>Do not fly in controlled airspace (Class B, C, D, or surface Class E) without prior FAA authorization. Use an <strong>FAA-approved LAANC (Low Altitude Authorization and Notification Capability) provider</strong> to check airspace and request near-real-time flight authorization. Approved providers include:</p>
+<ul>
+<li><strong>Aloft</strong> (aloft.ai)</li>
+<li><strong>Airspace Link</strong> (airspacelink.com)</li>
+<li><strong>AutoPylot</strong> (autopylot.com)</li>
+</ul>
+<p>A current list of all approved LAANC providers is maintained at faa.gov/uas/programs_partnerships/data_exchange.</p>
+<blockquote>
+<p>The original Solo App's "Plan Your Flight" airspace awareness feature is no longer accessible. Use an FAA-approved LAANC provider app as a replacement for pre-flight airspace checking.</p>
+</blockquote>
+<hr />
+<h2 id="5-first-flight">5 First Flight</h2>
+<p>This section covers basic Solo flight procedures, including takeoff, landing, and manual control.</p>
+<h3 id="51-preflight-checklist">5.1 Preflight Checklist</h3>
+<p>Before flying, check the following conditions:</p>
+<h4 id="511-location">5.1.1 Location</h4>
+<ul>
+<li>»» Your current location and environmental conditions are suitable for flight. (Section 4.1)</li>
+<li>»» Solo is on a level surface at a clear launch point a sufficient distance from yourself and others. (Section 4.1)</li>
+</ul>
+<h4 id="512-components">5.1.2 Components</h4>
+<ul>
+<li>»» The propellers are correctly attached. (Section 2.5)</li>
+<li>»» The propellers can spin smoothly and without obstruction when turned.</li>
+<li>»» No components on Solo appear loose or damaged.</li>
+</ul>
+<h4 id="513-power">5.1.3 Power</h4>
+<ul>
+<li>»» The controller is powered on with at least 50% charge. (Section 2.4)</li>
+<li>»» Solo is powered on with a fully charged battery. (Section 2.3)</li>
+</ul>
+<h4 id="514-regulatory-updated-2026">5.1.4 Regulatory (Updated — 2026)</h4>
+<ul>
+<li>»» Your Solo is registered with the FAA and marked with your registration number. (Section 4.13.1)</li>
+<li>»» You have passed the TRUST test and are carrying proof of passage (recreational pilots). (Section 4.13.2)</li>
+<li>»» You have confirmed your planned flight area is in uncontrolled airspace, or you have obtained LAANC authorization. (Section 4.13.5)</li>
+<li>»» Your Solo has a Remote ID broadcast module installed, or you are operating at a FRIA. (Section 4.13.4)</li>
+</ul>
+<h4 id="515-video-optional">5.1.5 Video (Optional)</h4>
+<ul>
+<li>»» The Solo app is connected to Solo and streaming video. (Section 2.7)</li>
+<li>»» The GoPro® is recording. If you have the Solo Gimbal and the GoPro HERO4, you can start and stop recording mid-flight.</li>
+</ul>
+<h3 id="52-takeoff">5.2 Takeoff</h3>
+<p>The takeoff process has two steps: start the motors, then take off. Always place Solo at a clear launch point for takeoff, at least 20 feet away from you, other people, and structures.</p>
+<h4 id="521-activating-motors">5.2.1 Activating Motors</h4>
+<p>When Solo is ready to fly, the controller will prompt you to hold the Fly button to start Solo's motors. Hold Fly until the propellers spin. Solo is now active, ready for takeoff, and needs to be treated with appropriate caution. To stop the motors, press the Pause button any time Solo is on the ground with the motors spinning.</p>
+<p><em>Figure 5.2.1.1: Controller — Start Motors Prompt</em></p>
+<blockquote>
+<p>Flying close to obstacles like buildings and trees can reduce GPS accuracy and might result in unexpected flight behavior.</p>
+<p><strong>Spinning propellers can cause serious injury! Always make sure Solo is clear of any obstructions and all people and animals are away from Solo before spinning the props.</strong></p>
+</blockquote>
+<h4 id="522-initiating-takeoff">5.2.2 Initiating Takeoff</h4>
+<p>Hold Fly again to initiate takeoff. Solo will rise to 10 feet (3 m) and hover until it receives further control inputs.</p>
+<p><em>Figure 5.2.2.1: Controller — Takeoff Prompts</em></p>
+<blockquote>
+<p>Be aware of Solo's orientation before takeoff so you can safely navigate Solo up and away from you once it's in the air. If Solo is facing towards you at takeoff, move the right stick back; if Solo is facing away from you, move the right stick forward.</p>
+</blockquote>
+<h3 id="53-landing">5.3 Landing</h3>
+<p>To land Solo at its current location, hold the Fly button.</p>
+<p><em>Figure 5.3.1: Controller — User-Initiated Landing</em></p>
+<p>After landing, the propellers will stop spinning automatically; wait until the propellers stop spinning before approaching Solo. If the propellers do not stop, press the controller's Pause button or use the emergency shutoff option described in Section 4.9.5.</p>
+<blockquote>
+<p>When you command Solo to land, it will land at the current location, wherever it is. Always make sure there is a clear path to a safe landing point directly below Solo before landing.</p>
+<p><strong>Never approach Solo while the propellers are spinning.</strong> After an auto-landing or return-to-home, always wait until the propellers stop before approaching or touching Solo.</p>
+</blockquote>
+<h3 id="54-return-home">5.4 Return Home</h3>
+<p>The Return Home function brings your flight to an end by recalling Solo to its launch location and landing. You can initiate Return Home manually by pressing the Return Home button on the Controller. Alternatively, in certain circumstances, Solo initiates Return Home autonomously; for details, see Section 7.2, In-Flight Errors.</p>
+<p>Keep in mind that Return Home requires enough battery charge to get back to the launch point. If you need to end your flight immediately, land manually or hold the Fly button. Return Home requires GPS lock prior to takeoff.</p>
+<p><em>Figure 5.4.1: Return Home Button</em></p>
+<blockquote>
+<p><strong>Always verify that there is a clear path to the home point before activating Return Home.</strong></p>
+</blockquote>
+<h4 id="541-smart-return-home-functionality">5.4.1 Smart Return Home Functionality</h4>
+<p>When a call to Return Home is triggered, it is critical that Solo make a swift and safe journey back to the Home Position. To help eliminate unnecessary ascents in favor of more efficient return flights, the system uses the "Cone Zone."</p>
+<p><em>Figure 5.4.1.1: The Cone Zone</em></p>
+<p>The Cone Zone represents the volume that is least likely to be filled with problematic obstacles. The shape of this cone is based on a 1:3 ratio of horizontal distance to altitude. So as your altitude increases, so does the cross-sectional area of the cone. Once Solo reaches the boundaries of the cone or is already within the cone, its main priority is to traverse to directly over the Home Position and land.</p>
+<h4 id="542-obstacle-free-cone-zone">5.4.2 Obstacle-Free Cone Zone</h4>
+<p><strong>Case #1: Above the Return Home Altitude</strong></p>
+<p><em>Figure 5.4.2.1: Above Return Home</em></p>
+<p>When Return Home is triggered and Solo is flying above the Return Home Altitude (default: 25m), Solo:
+1. Climbs 10m
+2. Traverses to the Home Position
+3. Descends and lands</p>
+<p><strong>Case #2: Within the Cone</strong></p>
+<p><em>Figure 5.4.2.2: Within the Cone</em></p>
+<p>When Solo is inside the cone and Return Home is triggered, Solo:
+1. Climbs 2.5m
+2. Traverses to the Home Position
+3. Descends and lands</p>
+<p><strong>Case #3: Below the Return Home Altitude and Outside the Cone</strong></p>
+<p><em>Figure 5.4.2.3: Below Return Home and Outside the Cone</em></p>
+<p>If Solo's lateral distance from the Home Position exceeds the 1:3 cone ratio, it is outside the cone. Upon a call to Return Home, Solo:
+1. Either climbs to the boundary of the cone or to the Return Home Altitude, whichever happens first
+2. Moves to the Home Position
+3. Descends and lands</p>
+<h3 id="55-in-flight-data">5.5 In-Flight Data</h3>
+<p>Use the controller's main data display to monitor Solo's status in flight.</p>
+<p><em>Figure 5.5.1: Controller — In-Flight Data</em></p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Data Element</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Flight battery percentage remaining</td>
+</tr>
+<tr>
+<td>2</td>
+<td>GPS signal strength and number of active satellites</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Active mode or Smart Shot ("Fly" indicates standard flight)</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Controller battery level</td>
+</tr>
+<tr>
+<td>5</td>
+<td>Solo Wi-Fi signal strength</td>
+</tr>
+<tr>
+<td>6</td>
+<td>Horizontal distance from the home position (launch point)</td>
+</tr>
+<tr>
+<td>7</td>
+<td>Current altitude</td>
+</tr>
+<tr>
+<td>8</td>
+<td>Currently assigned functions of controller A and B buttons</td>
+</tr>
+</tbody>
+</table>
+<h3 id="56-joystick-control">5.6 Joystick Control</h3>
+<p>The controller's two joysticks allow you to navigate Solo in flight. The left stick controls Solo's altitude and rotation.</p>
+<p><em>Figure 5.6.1: Controller Left Joystick</em>
+<em>Figure 5.6.2: Throttle Joystick Behaviors</em>
+<em>Figure 5.6.3: Yaw Joystick Behavior</em></p>
+<table>
+<thead>
+<tr>
+<th>Left Stick Input</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Up</td>
+<td>Increase altitude / takeoff</td>
+</tr>
+<tr>
+<td>Center</td>
+<td>Maintain current altitude</td>
+</tr>
+<tr>
+<td>Down from center</td>
+<td>Decrease altitude</td>
+</tr>
+<tr>
+<td>Fully down (near ground)</td>
+<td>Land</td>
+</tr>
+<tr>
+<td>Left</td>
+<td>Rotate counterclockwise</td>
+</tr>
+<tr>
+<td>Right</td>
+<td>Rotate clockwise</td>
+</tr>
+<tr>
+<td>Release</td>
+<td>Stop rotating, maintain orientation</td>
+</tr>
+</tbody>
+</table>
+<p>Use the right stick to fly Solo forward, back, left, and right. These movements are relative to Solo's current orientation.</p>
+<p><em>Figure 5.6.4: Controller Right Joystick Controls</em>
+<em>Figure 5.6.5: Pitch Joystick Controls</em>
+<em>Figure 5.6.6: Roll Joystick Controls</em></p>
+<table>
+<thead>
+<tr>
+<th>Right Stick Input</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Forward</td>
+<td>Fly forward</td>
+</tr>
+<tr>
+<td>Back</td>
+<td>Fly backward</td>
+</tr>
+<tr>
+<td>Left</td>
+<td>Fly left</td>
+</tr>
+<tr>
+<td>Right</td>
+<td>Fly right</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>If you're new to drones, take some time to learn the basics before your first flight. Visit 3DRPilots.com or check out the FAA's drone safety resources at faa.gov/uas to learn about flight controls and best practices.</p>
+</blockquote>
+<hr />
+<h2 id="6-using-the-solo-app">6 Using the Solo App</h2>
+<blockquote>
+<p><strong>Updated — 2026:</strong> All references in this section to the original "3DR Solo" app interface apply to the replacement apps <strong>Solex</strong> (Android) and <strong>SidePilot</strong> (iOS). The layout and menu structure of Solex and SidePilot differ from the original app. The flight functions and Smart Shot capabilities described below are available in both replacement apps, though specific navigation steps may differ.</p>
+</blockquote>
+<h3 id="61-app-interface-overview">6.1 App Interface Overview</h3>
+<p>The Solo App provides a simplified interface for viewing Solo's video feed and managing Smart Shots.</p>
+<p><em>Figure 6.1.1: Solo App Home Screen (original layout)</em></p>
+<p>The primary function is to access the main flight screen. Additional controls include Settings, Flight School resources (available via faa.gov/uas and modelaircraft.org), and Support (via 3DRPilots.com — see Section 9).</p>
+<h4 id="611-plan-your-flight">6.1.1 Plan Your Flight</h4>
+<blockquote>
+<p><strong>Updated — 2026:</strong> The original "Plan Your Flight" feature in the 3DR Solo App is <strong>no longer available</strong> through any Solo-compatible app. Use an FAA-approved LAANC provider app before each flight to check airspace and weather. Current approved providers include <strong>Aloft</strong> (aloft.ai), <strong>Airspace Link</strong> (airspacelink.com), and <strong>AutoPylot</strong> (autopylot.com). See Section 4.13.5 for a complete list.</p>
+<p>The original airspace filter categories (TFRs, Prohibited Airspace, Airports, Restricted Airspace, Controlled Airspace, Heliport, Infrastructure, National Parks, NOAA Marine Protection) remain relevant for pre-flight planning and are available within LAANC provider apps.</p>
+</blockquote>
+<h4 id="612-main-interface">6.1.2 Main Interface</h4>
+<p>This is the screen you'll use most of the time when flying Solo. It's available by accessing the fly/video screen in Solex or SidePilot. The main screen provides the live video feed from the GoPro camera, telemetry statistics, access to Smart Shots, and more.</p>
+<p><em>Figure 6.1.2.1: App — Main Interface</em></p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Element</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Live video feed</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Go to home screen</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Horizontal distance from launch point</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Altitude</td>
+</tr>
+<tr>
+<td>5</td>
+<td>Current flight mode</td>
+</tr>
+<tr>
+<td>6</td>
+<td>Solo battery percentage remaining</td>
+</tr>
+<tr>
+<td>7</td>
+<td>Controller signal strength</td>
+</tr>
+<tr>
+<td>8</td>
+<td>Shot List: Access to Smart Shots</td>
+</tr>
+<tr>
+<td>9</td>
+<td>Map view</td>
+</tr>
+<tr>
+<td>10</td>
+<td>Camera controls</td>
+</tr>
+<tr>
+<td>11</td>
+<td>Alerts and instructions</td>
+</tr>
+</tbody>
+</table>
+<p>To toggle advanced telemetry data, tap any of the telemetry readouts:</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Advanced Data</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Solo's current air speed</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Number of satellites and HDOP</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Solo battery voltage and amperage</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Wi-Fi signal strength between Solo and Controller</td>
+</tr>
+</tbody>
+</table>
+<h4 id="613-map-view">6.1.3 Map View</h4>
+<p>To access the small map view, swipe left a short distance from the right edge of the app. To full-screen the map, swipe left again. To hide the small map, swipe to the right. To return from the full-screen map, tap the picture-in-picture video display at the top-left of the map.</p>
+<p>A live map view is normally available only with GPS lock and on devices with mobile data (cellular Internet).</p>
+<blockquote>
+<p><strong>Updated — 2026: Map Tile Provider</strong>
+The original Map Tile Provider setting is no longer applicable. Map settings and tile providers are managed within Solex or SidePilot through their respective settings menus.</p>
+</blockquote>
+<h4 id="614-camera-controls-and-settings">6.1.4 Camera Controls and Settings</h4>
+<p>The Record button on the right side of the main App screen lets you start and stop recording with the GoPro camera (3-Axis Gimbal only). When Video Mode is active the button is red; when Photo Mode is active it's white.</p>
+<p><em>Figure 6.1.4.1: Camera button states</em></p>
+<ul>
+<li><strong>A:</strong> Video mode, not recording</li>
+<li><strong>B:</strong> Video mode, recording (camera settings disabled)</li>
+<li><strong>C:</strong> Photo mode</li>
+<li><strong>D:</strong> Video mode, GoPro recording disabled</li>
+<li><strong>E:</strong> Video mode, Camera Roll recording disabled by Camera Settings control</li>
+</ul>
+<p>The camera settings include:
+- <strong>Camera Mode:</strong> Video Mode or Photo Mode
+- <strong>Video Resolution:</strong> The resolution the camera uses to capture video
+- <strong>FPS:</strong> Frames per second
+- <strong>FOV:</strong> Field of View
+- <strong>Low Light:</strong> On or off
+- <strong>Protune:</strong> On or off
+- <strong>Photo Resolution:</strong> Resolution for still images in Photo mode
+- <strong>GoPro Model:</strong> Choose the model of GoPro camera you're using
+- <strong>Save to Camera Roll:</strong> Records the video received by the app to the mobile device's internal memory
+- <strong>Record during shots:</strong> GoPro automatically records video whenever a Smart Shot is active</p>
+<hr />
+<h3 id="62-smart-shots">6.2 Smart Shots</h3>
+<p>Solo's four different Smart Shots automate flying Solo to make it easy to get stunning aerial video. By default, Cable Cam and Orbit are assigned to the controller's A and B buttons. Use the app to access Selfie or Follow. Smart Shots are available only with the Solo app.</p>
+<blockquote>
+<p><strong>Tip:</strong> When using Smart Shots without a Solo Gimbal, Solo cannot ensure that the subject is in the frame at all times. You can improve the chances of keeping the subject in the frame by adjusting the camera mount so the camera is fixed at an appropriate angle.</p>
+</blockquote>
+<p><em>Figure 6.1: App — Main Screen</em>
+<em>Figure 6.2: App — Shot List</em></p>
+<blockquote>
+<p><strong>Tip:</strong> To see directions for a Smart Shot, tap its icon while Solo is on the ground.</p>
+</blockquote>
+<hr />
+<h3 id="63-selfie">6.3 Selfie</h3>
+<p>In Selfie, Solo flies a smooth up-and-back path to capture a subject in a cinematic establishing shot. Before starting a Selfie shot, always ensure that there is a clear path 200 feet (61 m) behind and above Solo. Solo flies up and away from the subject to a point 164 feet (50 m) from the subject at 82 feet (25 m) altitude.</p>
+<p><em>Figure 6.3.1: Selfie Path and Settings</em></p>
+<h4 id="631-selfie-setup">6.3.1 Selfie Setup</h4>
+<p>To start Selfie, fly Solo to a starting point facing the subject from approximately 10 feet away, and select Selfie from the Shot List. The app prompts you to position Solo so the camera is facing you and to ensure that the path it will follow is clear. To continue, tap this screen.</p>
+<p><em>Figure 6.3.1.1: App — Selfie Activation</em></p>
+<h4 id="632-selfie-operation">6.3.2 Selfie Operation</h4>
+<p>To move Solo along the Selfie path, tap the forward and back arrows in the App, labeled "Fly out" and "Return." The default cruise speed is 9 mph (4 m/s). To stop Solo at any time, press Pause. To exit to standard flight, press Fly.</p>
+<p><em>Figure 6.3.2.1: App — Selfie Control</em>
+<em>Figure 6.3.2.2: Controller — Selfie Control</em></p>
+<h4 id="633-settings">6.3.3 Settings</h4>
+<p>To access the settings from the in-flight Selfie interface, select Options with the three dots at the bottom-left of the main screen. To adjust Distance Away, Altitude Up, and Cruise Speed, use the sliders.</p>
+<p><em>Figure 6.3.3.1: App — Selfie Settings</em></p>
+<hr />
+<h3 id="64-cable-cam">6.4 Cable Cam</h3>
+<p>Cable Cam creates a smooth shot by flying Solo automatically along a virtual cable between any number of waypoints that you specify. After starting the shot, fly Solo to each successive waypoint, press A on the controller, and so on. To save the last waypoint, press B, after which you can start Solo flying along its virtual cable.</p>
+<h4 id="641-starting-cable-cam">6.4.1 Starting Cable Cam</h4>
+<p>To start Cable Cam, press A on the controller, or select Cable Cam from the Shot List in the App. Fly Solo to the start point and press A to save it as the first waypoint. Fly to each successive point, pressing A to save each one. Press B to finish recording waypoints and transition to the flying phase.</p>
+<p><em>Figure 6.4.1.1: App — Cable Cam Setup</em></p>
+<p><em>Note: Each Cable Cam waypoint must be at a different location than the one before it.</em></p>
+<h4 id="642-cable-cam-operation">6.4.2 Cable Cam Operation</h4>
+<blockquote>
+<p>Before running a Cable Cam shot, always ensure that the entire path is free of potential obstructions.</p>
+</blockquote>
+<p><em>Figure 6.4.2.1: App — Cable Cam Controls</em></p>
+<p>After pressing B, the App switches to the control screen. Tap the right arrow to fly through the waypoints in recorded order; tap the left arrow to fly through them in reverse. Cable Cam's default cruise speed is 9 mph (4 m/s).</p>
+<p>To operate using the Controller, move the right stick to the left to fly towards the start of the sequence and to the right to fly towards the endpoint. To pause, release the right stick. To stop Solo at any time, press Pause. To exit to standard flight, press Fly.</p>
+<p><em>Figure 6.4.2.2: Controller — Cable Cam Controls</em></p>
+<h4 id="643-cable-cam-settings">6.4.3 Cable Cam Settings</h4>
+<p>To access the settings, select Options with the three dots at the bottom-left of the main screen.</p>
+<ul>
+<li><strong>Free Look:</strong> When on, you can adjust camera direction with the controller left stick.</li>
+<li><strong>Time Lapse:</strong> When on, greatly increases the maximum Time Of Cable setting for very slow-motion capture.</li>
+<li><strong>Time of Cable:</strong> Adjusts the total time Solo takes to travel the full route.</li>
+</ul>
+<h4 id="644-saving-cable-cam-shots-and-using-saved-shots">6.4.4 Saving Cable Cam Shots and Using Saved Shots</h4>
+<p>When you set up a Cable Cam shot, the app automatically saves it, including the general location and waypoints. The Saved Shots feature lets you retrieve the shot at any time to repeat it exactly as initially set up.</p>
+<h4 id="645-deleting-saved-cable-cam-sequences">6.4.5 Deleting Saved Cable Cam Sequences</h4>
+<p>Tap Select, then tap the thumbnails for the shots you want to delete. Tap the trash-can icon to delete them, or tap Cancel to exit.</p>
+<h4 id="646-running-a-saved-cable-cam-sequence">6.4.6 Running a Saved Cable Cam Sequence</h4>
+<p>Tap a saved shot thumbnail. If Solo's current location isn't close enough to the saved shot's starting point, a prompt guides you to fly Solo within the acceptable proximity radius. Once within range, tap Load Cable to run the saved shot.</p>
+<hr />
+<h3 id="65-orbit">6.5 Orbit</h3>
+<p>Use Orbit to fly Solo along a preset circle while fixing the camera on a central target.</p>
+<h4 id="651-starting-orbit">6.5.1 Starting Orbit</h4>
+<p>Select Orbit from the Shot List. The App switches to the map screen showing Solo's location and the orbit center point. Drag the map to position the center point, then press A to save it.</p>
+<p><em>Figure 6.5.1.1: App — Orbit Setup</em></p>
+<h4 id="652-orbit-operation">6.5.2 Orbit Operation</h4>
+<p>To fly Solo along the Orbit path, tap the Orbit Left and Orbit Right arrows. The default cruise speed for Orbit is 2.2 mph (1 m/s).</p>
+<p>To control Orbit using the Controller, move the right stick left and right to fly along the Orbit path; move it up and down to change radius. Move the left stick to temporarily override the camera lock or to adjust altitude. Press Pause to stop; press Fly to exit.</p>
+<p><em>Figure 6.5.2.1: App — Orbit Controls</em>
+<em>Figure 6.5.2.2: Orbit Controls</em></p>
+<blockquote>
+<p>Solo orbits at a constant altitude relative to its launch point and does not account for changes in ground level. Before starting Orbit, always ensure there is a clear path for Solo.</p>
+</blockquote>
+<h4 id="653-orbit-settings">6.5.3 Orbit Settings</h4>
+<p>To access the settings, select Options with the three dots at the bottom-left of the main screen. To adjust Cruise Speed, use the slider.</p>
+<p><em>Figure 6.5.3.1: App — Orbit Settings</em></p>
+<hr />
+<h3 id="66-follow">6.6 Follow</h3>
+<p>Follow creates a virtual tether between Solo and your GPS-enabled mobile device, allowing Solo to track you as you move. Follow has two modes:</p>
+<ul>
+<li><strong>Look At Me:</strong> Solo remains in one place while turning to face the subject.</li>
+<li><strong>Follow:</strong> Solo moves at the same rate as the subject while continually aiming the camera at the subject.</li>
+</ul>
+<blockquote>
+<p><strong>Important:</strong> To use Follow, your mobile device must have GPS capability.</p>
+</blockquote>
+<p>If the Follow subject cannot safely hold the controller, a safety pilot must hold the controller and remain ready to regain manual control at any time. Don't exceed 500 feet of distance between the controller and the mobile device.</p>
+<blockquote>
+<p>Always ensure that there is a clear path for Solo during Follow. It does not avoid obstacles.</p>
+</blockquote>
+<h4 id="661-follow-setup">6.6.1 Follow Setup</h4>
+<p>To start Follow, select Follow from the Shot List in the app and navigate Solo to face the subject. When Follow starts, it's in Look At Me mode. To activate Follow mode, tap Follow at the bottom of the screen.</p>
+<p><em>Figure 6.6.1.1: Follow in Look At Me mode</em>
+<em>Figure 6.6.1.2: Follow in Follow mode</em></p>
+<h4 id="662-follow-mode-operation">6.6.2 Follow Mode Operation</h4>
+<p>When Follow mode is active, Solo automatically follows the mobile device. In the App, the subject can orbit Solo around them by pressing the Orbit Left and Orbit Right arrows. On the Controller, adjust follow distance with the right stick vertically, and orbit the subject with the right stick horizontally. Adjust altitude with the left stick vertically. To stop Solo, press Pause; to exit to standard flight, press Fly.</p>
+<p><em>Figure 6.6.2.1: Follow Controls</em></p>
+<h4 id="663-follow-settings">6.6.3 Follow Settings</h4>
+<p>The <strong>Free Look</strong> option lets you control the camera independently with the left joystick on the controller. To enable Free Look, make sure Follow is set to Follow mode, tap the Options button, and toggle Free Look on. Read the warning, then tap OK.</p>
+<p><em>Figure 6.6.3.1: App — Follow Settings</em>
+<em>Figure 6.6.3.2: App — Free Look warning</em></p>
+<hr />
+<h2 id="7-alerts">7 Alerts</h2>
+<p>The following alerts will appear on the controller in the event of a preflight or in-flight error. Always monitor the controller for alerts and perform the recommended actions.</p>
+<h3 id="71-preflight-errors">7.1 Preflight Errors</h3>
+<p>Before starting the motors, Solo runs a series of automatic checks to ensure that the system is ready for flight.</p>
+<h4 id="711-calibration">7.1.1 Calibration</h4>
+<table>
+<thead>
+<tr>
+<th>Alert</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Altitude calibrating / Please wait</td>
+<td>Wait</td>
+</tr>
+<tr>
+<td>Calibrating Solo / Please wait</td>
+<td>Wait</td>
+</tr>
+<tr>
+<td>Calibrating compass / Please wait</td>
+<td>Wait</td>
+</tr>
+<tr>
+<td>Uneven surface / Move Solo to a level surface</td>
+<td>Relocate Solo</td>
+</tr>
+<tr>
+<td>Compass error / Please calibrate using the Solo app</td>
+<td>See Section 10.2.1</td>
+</tr>
+<tr>
+<td>Level error / Please calibrate using the Solo app</td>
+<td>See Section 10.2.2</td>
+</tr>
+<tr>
+<td>Calibration error / Please restart Solo</td>
+<td>Restart Solo</td>
+</tr>
+<tr>
+<td>Sensor error / Please try and restart Solo</td>
+<td>Restart Solo</td>
+</tr>
+</tbody>
+</table>
+<p><em>Figure 7.1.1.1: Controller — Calibration in Progress Alerts</em>
+<em>Figure 7.1.1.2: Controller — Uneven Surface Alert</em>
+<em>Figure 7.1.1.3: Controller — Re-Calibration Required Alerts</em>
+<em>Figure 7.1.1.4: Controller — Calibration Error Alert</em></p>
+<h4 id="712-service-alerts">7.1.2 Service Alerts</h4>
+<p>The following alerts indicate a system error that requires service. Consult community resources at 3DRPilots.com. A control stick error can occur either in flight or before takeoff. If the control stick error is received in flight, Solo will return home and land.</p>
+<p><em>Figure 7.1.2.1: Controller — Service Alerts</em></p>
+<table>
+<thead>
+<tr>
+<th>Alert</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Service required</td>
+<td>Consult Section 9 for community resources</td>
+</tr>
+<tr>
+<td>Control stick error / Contact customer support</td>
+<td>Consult Section 9 (3DR support no longer active)</td>
+</tr>
+<tr>
+<td>Control stick error / Solo will return home</td>
+<td>Allow Solo to land; do not fly until resolved</td>
+</tr>
+</tbody>
+</table>
+<h3 id="72-in-flight-errors">7.2 In-Flight Errors</h3>
+<p>During flight, the controller monitors Solo's GPS signal, controller signal, flight battery level, and controller battery level.</p>
+<h4 id="721-altitude-limit">7.2.1 Altitude Limit</h4>
+<p>If Solo reaches the altitude limit during flight, it maintains that altitude and the controller displays an alert.</p>
+<p><em>Figure 7.2.1.1: Controller — Altitude Limit Alert</em></p>
+<ul>
+<li><strong>Maximum altitude / Preset max altitude reached</strong> — Lower the throttle to descend.</li>
+</ul>
+<h4 id="722-app-connection">7.2.2 App Connection</h4>
+<p>Maintain an active connection to the Solo app at all times during flight. If the connection to the App is lost during flight, Solo will not return home.</p>
+<p><em>Figure 7.2.2.1: Controller — App Connection Alerts</em></p>
+<h4 id="723-controller-signal-alerts">7.2.3 Controller Signal Alerts</h4>
+<p>Flying behind solid objects, like buildings and trees, blocks communication signals. Always maintain visual contact with Solo. Cell phone towers and nearby Wi-Fi signals can cause interference. If the controller becomes unpaired from Solo during flight, the controller displays an alert and Solo initiates Return Home. See Section 10.3 for pairing instructions.</p>
+<p><em>Figure 7.2.3.1: Controller — Controller Disconnected Alert</em>
+<em>Figure 7.2.3.2: Controller — Controller Signal Alerts</em></p>
+<h4 id="724-gps-signal-alerts">7.2.4 GPS Signal Alerts</h4>
+<p>If Solo loses GPS during flight, it switches into Fly:Manual. Land Solo and wait to acquire GPS lock before taking off again. Without GPS, Pause, Return Home, and Smart Shots are not available.</p>
+<p><em>Figure 7.2.4.1: Controller — GPS Signal Alerts</em></p>
+<h4 id="725-flight-battery-alerts">7.2.5 Flight Battery Alerts</h4>
+<p>At 25% and 15% power remaining, the controller displays "Return home soon." If the battery reaches 10%, Solo initiates Return Home. After landing, turn off Solo immediately; if the battery level reaches 0%, irreversible damage occurs and the battery should be recycled.</p>
+<p><em>Figure 7.2.5.1: Controller — Low Battery Alerts</em>
+<em>Figure 7.2.5.2: Controller — Critical Battery Alert</em></p>
+<h4 id="726-controller-battery-alerts">7.2.6 Controller Battery Alerts</h4>
+<table>
+<thead>
+<tr>
+<th>Alert</th>
+<th>Trigger</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Low controller battery / charge soon</td>
+<td>10%</td>
+<td>Charge at next opportunity</td>
+</tr>
+<tr>
+<td>Controller Battery at 5% / land soon</td>
+<td>5%</td>
+<td>Land and charge promptly</td>
+</tr>
+<tr>
+<td>Controller battery at 0% / Returning home</td>
+<td>0%</td>
+<td>Allow return home to complete</td>
+</tr>
+</tbody>
+</table>
+<p><em>Figure 7.2.6.1: Controller — Controller Battery Alerts</em></p>
+<hr />
+<h2 id="8-advanced-settings">8 Advanced Settings</h2>
+<p>This section provides instructions for accessing and using Solo's advanced features and settings.</p>
+<h3 id="81-advanced-flight-modes">8.1 Advanced Flight Modes</h3>
+<p>Solo includes five advanced flight modes: Fly:Manual, Stabilize, Acro, Sport, and Drift. To access these modes, see Sections 8.2 and 8.3.</p>
+<blockquote>
+<p><strong>Advanced flight modes are for experienced operators only.</strong> Do not attempt to use these modes unless you are comfortable flying multicopters without positioning and altitude assistance. <strong>Do not fly in Acro mode unless you are an extremely experienced operator.</strong></p>
+</blockquote>
+<h4 id="811-flymanual">8.1.1 Fly:Manual</h4>
+<p>Fly:Manual mode is a version of standard flight without GPS lock. The throttle stick controls altitude the same way as standard flight (Fly mode). Because it does not use GPS positioning, when you release the right stick, Solo does not hold its position but instead drifts according to wind conditions and existing momentum.</p>
+<h4 id="812-stabilize">8.1.2 Stabilize</h4>
+<p>Stabilize mode provides full manual control without autopilot assistance. The autopilot regulates Solo's roll and pitch angles so that it automatically returns to level when you release the right stick. The throttle stick controls power and acceleration directly; it does not correspond to altitude. Stabilize does not require GPS lock.</p>
+<h4 id="813-drift">8.1.3 Drift</h4>
+<p>Drift mode requires GPS lock and provides a plane-like flying experience, ideal for FPV navigation. Move the right stick to initiate a coordinated turn. Releasing the right stick causes Solo to drift to a stop over two seconds. Solo does not automatically control altitude in Drift.</p>
+<h4 id="814-acro">8.1.4 Acro</h4>
+<p>Acro provides unrestricted control over Solo's roll and pitch angles. Acro is intended for aerial acrobatics, flips, and maneuvers requiring extreme angles. It provides no altitude or position assistance. Acro does not require GPS lock.</p>
+<h4 id="815-sport">8.1.5 Sport</h4>
+<p>Sport mode is a modified version of Acro with altitude assistance and earth-frame orientation. The throttle stick behaves the same as in standard Fly mode. Sport does not require GPS lock.</p>
+<h3 id="82-enabling-advanced-flight-modes">8.2 Enabling Advanced Flight Modes</h3>
+<p>To unlock Solo's advanced flight modes using the App, choose Settings from the home screen, then select Advanced Settings. Toggle the Enable Advanced Flight Modes option to gain access to Solo's advanced modes.</p>
+<p><em>Figure 8.2.1: App — Advanced Settings</em></p>
+<h3 id="83-accessing-advanced-flight-modes">8.3 Accessing Advanced Flight Modes</h3>
+<p>After enabling advanced flight modes, assign them to the controller's A and B buttons using the App. In the app, go to Settings &gt; Solo and select Preset A or Preset B. Once assigned, use the controller to activate advanced modes during flight.</p>
+<p><em>Figure 8.3.1: App — A and B Presets</em></p>
+<h3 id="84-home-position-safety">8.4 Home Position Safety</h3>
+<p>Fly:Manual, Stabilize, Acro, and Sport modes do not require GPS lock. Without an active GPS signal, Return Home, Pause, and Smart Shots are disabled. If you take off without GPS lock, Solo does not save a home position at the launch point.</p>
+<blockquote>
+<p>If Solo did not acquire GPS lock prior to takeoff, do not use Return Home.</p>
+</blockquote>
+<h3 id="85-performance-adjustment">8.5 Performance Adjustment</h3>
+<p>To access the performance sliders, go to Settings, choose Solo, and then select Performance. The Flight slider controls how fast Solo flies and its responsiveness. The Camera Pan slider regulates rotation speed. Move the slider towards the turtle for slower, more cushioned movement, or towards the rabbit for faster, more responsive movement.</p>
+<p><em>Figure 8.5.1: App — Performance Sliders</em></p>
+<blockquote>
+<p><strong>Tip:</strong> When using the Solo Gimbal, for best results set Performance to Medium.</p>
+</blockquote>
+<h3 id="86-units">8.6 Units</h3>
+<p>To change the units in the Solo App between Imperial and Metric, go to Settings and then choose Units.</p>
+<p><em>Figure 8.6.1: App — Change Units</em></p>
+<h3 id="87-maximum-altitude-adjustment">8.7 Maximum Altitude Adjustment</h3>
+<p>To adjust the altitude limit, go to Settings, choose Solo, and then select Altitude Limits. Scroll the list horizontally to change the upper limit.</p>
+<p>A No Limit option is available if you turn on Advanced Settings &gt; Enable Advanced Flight Modes. <strong>Note:</strong> FAA regulations impose a 400 ft. AGL maximum for most operations regardless of Solo's software altitude limit setting. Always operate within applicable regulations.</p>
+<p><em>Figure 8.7.1: App — Altitude Limit</em></p>
+<h3 id="88-map-tile-provider">8.8 Map Tile Provider</h3>
+<blockquote>
+<p><strong>Updated — 2026:</strong> The original Map Tile Provider setting (Google vs. Map Box) was part of the original 3DR Solo App and is no longer applicable. Map settings and tile providers are managed within Solex or SidePilot through their respective settings menus. Consult the respective app's documentation.</p>
+</blockquote>
+<hr />
+<h2 id="9-support">9 Support</h2>
+<blockquote>
+<p><strong>Updated — 2026: Support Status</strong>
+3DR's original support infrastructure—including the phone support lines (+1 858-225-1414, +1 855-982-2898), email address (support@3dr.com), and support website (3dr.com/support)—is <strong>no longer operational</strong>. The original in-app trouble ticket feature is also no longer functional.</p>
+</blockquote>
+<p><strong>Current support resources:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Resource</th>
+<th>URL</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>3DRPilots Community Forum</td>
+<td>3drpilots.com</td>
+</tr>
+<tr>
+<td>3DR Solo Owners Group (Facebook)</td>
+<td>Search "3DR Solo Owners Group" on Facebook</td>
+</tr>
+<tr>
+<td>Solo Web Utility (on-board console)</td>
+<td>open-solo.com</td>
+</tr>
+<tr>
+<td>Open Solo Documentation</td>
+<td>github.com/OpenSolo/documentation</td>
+</tr>
+<tr>
+<td>ArduPilot Documentation</td>
+<td>ardupilot.org</td>
+</tr>
+<tr>
+<td>ArduPilot Community Forum</td>
+<td>discuss.ardupilot.org</td>
+</tr>
+</tbody>
+</table>
+<p>For hardware failures or issues not resolvable through community resources, consult a local electronics repair technician or drone repair service with experience in ArduPilot-based systems.</p>
+<p><em>Figure 9.1: App — Submit Trouble Ticket (original app; no longer functional)</em></p>
+<hr />
+<h2 id="10-maintenance">10 Maintenance</h2>
+<p>This section covers basic operational maintenance procedures for Solo. For repairs not covered in this manual, consult community resources at 3DRPilots.com.</p>
+<blockquote>
+<p><strong>Updated — 2026: Parts Availability</strong>
+Original 3DR replacement parts are no longer manufactured or sold. The original store (store.3dr.com) is no longer operational. Community sources for Solo replacement parts include secondary market sellers (eBay, Facebook Marketplace), 3DRPilots.com community members, and 3D printing files for some plastic components.</p>
+</blockquote>
+<p>Solo's exterior components are designed to absorb impact from hard landings and protect the core electronics. Before opening the battery bay or performing any maintenance on Solo, always ensure that Solo is powered off with the battery removed.</p>
+<h3 id="101-controller-battery-replacement">10.1 Controller Battery Replacement</h3>
+<p>To replace the controller battery, open the battery door on the back of the controller. Remove the foam block and disconnect the battery from the port in the side of the battery compartment. To install a battery, connect the battery to the controller, and use the foam block to pad the empty space in the compartment for standard-size batteries. For information on safely storing spare controller batteries, see Section 4.11.</p>
+<p><em>Figure 10.1.1: Controller Battery Installation</em></p>
+<h3 id="102-calibrations">10.2 Calibrations</h3>
+<p>Use the Solo app to perform compass and level calibrations when prompted by the controller. Remove Solo's propellers before performing calibrations.</p>
+<h4 id="1021-compass-calibration">10.2.1 Compass Calibration</h4>
+<p>To calibrate Solo's compass, connect the app to Solo Wi-Fi, go to Settings &gt; Solo and select Compass Calibration. Ensure that Solo and the controller are powered on with the propellers removed. Solo requires an interference-free environment for compass calibration; ensure that you are away from metal buildings, reinforced concrete, or other metal structures before starting calibration.</p>
+<p><em>Figure 10.2.1.1: App — Compass Calibration Setup</em></p>
+<p>The app prompts you to rotate Solo end-over-end multiple times until the bar at the top of the screen is completely green. If the calibration fails, move to a different location and try again.</p>
+<p><em>Figure 10.2.1.2: App — Compass Calibration Procedure</em></p>
+<h4 id="1022-level-calibration">10.2.2 Level Calibration</h4>
+<p>A level calibration zeroes Solo's accelerometers to recognize static states. Remove the propellers from Solo and connect the app to Solo Wi-Fi. Go to Settings &gt; Solo and choose Level Calibration, and follow the prompts to place Solo perfectly still on each side in turn. In each step, wait a few seconds after moving Solo before pressing Next.</p>
+<p><em>Figure 10.2.2.1: App — Level Calibration</em></p>
+<h3 id="103-pairing-the-controller">10.3 Pairing the Controller</h3>
+<ol>
+<li>Turn off the Solo and the controller that you want to pair, along with any other Solos and controllers nearby.</li>
+<li>Power on the Solo and controller that you want to pair.</li>
+<li>Wait 30 seconds for Solo and the controller to fully boot up.</li>
+<li>Identify the Pair button underneath Solo. It's a small button inside the hole labeled Pair. Use a paper clip, small screwdriver, or similar tool to push it.</li>
+</ol>
+<p><em>Figure 10.3.1: Pair Button</em></p>
+<ol>
+<li>Press the Pair button underneath Solo and hold for one second.</li>
+<li>When the controller detects Solo, it prompts you to accept the pairing request. (If the controller does not detect Solo after thirty seconds, try pressing the Pair button again and repeat as needed.)</li>
+</ol>
+<p><em>Figure 10.3.2: Detected Solo</em></p>
+<ol>
+<li>Press A, then B and hold both buttons down. Once the controller vibrates, release the buttons. Within 20 seconds, the Controller displays "Solo Paired."</li>
+</ol>
+<p><em>Figure 10.3.3: Solo Paired</em></p>
+<h3 id="104-legs">10.4 Legs</h3>
+<p>Solo uses three unique types of legs: two legs with an antenna module (#1 and #2), a leg with no electronic components (leg #3), and a leg with a compass module (leg #4).</p>
+<p><em>Figure 10.4.1: Leg Types</em></p>
+<h4 id="1041-leg-3">10.4.1 Leg #3</h4>
+<p>To replace a standard leg, use a #2 Phillips screwdriver to remove the two screws, detach the old leg, and attach the new leg using the provided screws.</p>
+<p><em>Figure 10.4.1.1: Standard Leg Replacement Process</em></p>
+<h4 id="1042-legs-1-and-2-with-antennas">10.4.2 Legs #1 and #2 with Antennas</h4>
+<p>To replace a leg with an antenna module where the existing antenna is physically intact, remove the antenna from the old leg before replacing it. Remove the plastic sheet from the leg (1) and detach the antenna from the Velcro by carefully pulling the cable (2). Follow the standard leg replacement procedure to detach the old leg (3).</p>
+<p><em>Figure 10.4.2.1: Detaching the Antenna from the Leg</em></p>
+<p>Attach the new leg by threading the antenna cable through the notch in the top of the leg (1) and securing using the provided screws (2).</p>
+<p><em>Figure 10.4.2.2: Attaching a New Leg with an Existing Antenna</em></p>
+<p>To secure the antenna to the new leg, attach the yellow-backed Velcro strip to the antenna's Velcro, then attach it to the inside of the leg with the antenna tip 5 mm from the edge of the rubber foot (1). Fold the plastic sheet at right angles (2), remove the adhesive backing, and stick it to secure the antenna (3).</p>
+<p><em>Figure 10.4.2.3: Attaching an Existing Antenna to a New Leg</em></p>
+<h4 id="1043-leg-4-with-compass">10.4.3 Leg #4 with Compass</h4>
+<p>Solo's right-rear leg (#4) contains the compass module. Detach the leg from the arm as you would a standard leg — but the leg won't be removable until you disconnect the compass. Remove the battery tray (see Section 10.5). Locate the compass connector in the corner of the board closest to the leg being replaced. Disconnect the compass connector by holding down the tab on the far side and lifting up.</p>
+<p><em>Figure 10.4.3.1: Compass Connector on Mainboard</em></p>
+<p>With the compass disconnected, remove the old leg and cable. Place the new leg into position, thread the new compass cable through the arm, and connect it in the same location as the old compass.</p>
+<p><em>Figure 10.4.3.2: Insert New Leg with Compass</em></p>
+<p>Secure the new leg in place and replace the battery tray.</p>
+<h3 id="105-battery-tray">10.5 Battery Tray</h3>
+<p>The battery tray holds the battery and GPS in place and allows access to the main electronics bay.</p>
+<h4 id="1051-gps-cover">10.5.1 GPS Cover</h4>
+<p>The GPS cover is the flat, black end cap in front of the battery tray. To remove it, use your fingernails (1) to release the side clips outward, then lift slightly while pushing forward (2) to pop the cover off.</p>
+<p><em>Figure 10.5.1.1: GPS Cover Removal</em></p>
+<h4 id="1052-battery-tray-removal">10.5.2 Battery Tray Removal</h4>
+<p>Use a small Philips screwdriver to remove the seven screws securing the battery tray to Solo. The battery tray is still connected via the GPS cable; carefully lift out the tray just enough to access the board beneath.</p>
+<p><em>Figure 10.5.2.1: Battery Tray Removal</em>
+<em>Figure 10.5.2.2: Battery Tray Detachment</em></p>
+<h3 id="106-motor-mods">10.6 Motor Mods</h3>
+<p>Replacement motors come as clockwise and counterclockwise Motor Pods. Use a counterclockwise Motor Pod to replace motors #1 and #2, and use a clockwise Motor Pod to replace motors #3 and #4. Replace motor pods after every 150 hours of flight or when they can no longer turn smoothly.</p>
+<blockquote>
+<p><strong>Updated — 2026:</strong> Motor pod replacements are no longer available from 3DR. Compatible brushless motors may be available from third-party RC suppliers. Consult 3DRPilots.com for currently recommended compatible replacements.</p>
+</blockquote>
+<p>To replace a Motor Pod, first use a small, flat prying tool to remove the LED cover from the underside of the arm.</p>
+<p><em>Figure 10.6.1: LED Cover Removal</em></p>
+<p>Use a #2 Phillips screwdriver to remove the four screws securing the pod to the arm.</p>
+<p><em>Figure 10.6.2: Motor Pod Removal</em></p>
+<p>Disconnect the wide beige connector (DF13), the red wire, and the black wire to remove the old motor pod. To remove the DF13 connector, carefully lift the edges away from the pod until they pop out. <strong>Don't pull on the wires — the connector can break if force is used.</strong></p>
+<p><em>Figure 10.6.3: Motor Pod Disconnection</em></p>
+<p>Connect the three cables from the arm to the new motor pod. Tuck the cables inside the arm and set the new pod into place.</p>
+<p><em>Figure 10.6.4: Motor Pod Connection</em></p>
+<p>Secure the new motor pod using the four provided screws. Do not reuse the screws from the old Motor Pod. Snap the LED cover back into place.</p>
+<p><em>Figure 10.6.5: Motor Pod and LED Cover Attachment</em></p>
+<h3 id="107-factory-reset">10.7 Factory Reset</h3>
+<p>Performing a factory reset restores Solo and the controller to their state prior to the first flight update. Use a factory reset if you forget your Solo Wi-Fi password or need to restore Solo's factory settings.</p>
+<blockquote>
+<p><strong>Contact community support at 3DRPilots.com before performing a Factory Reset. This procedure can cause irreparable damage to Solo if performed incorrectly.</strong></p>
+</blockquote>
+<p><strong>Step 1: Reset the Vehicle</strong></p>
+<p>Power off Solo. Use a paper clip or similar tool to press and hold Solo's Pair button while powering on Solo. (Verify that you feel the Pair button click down.) Continue holding the Pair button for at least 15 seconds.</p>
+<p><em>Figure 10.7.1: Pair Button</em></p>
+<p>Below the Accessory Port, adjacent to the Pair button, is a small orange LED Pair indicator light. Once this light starts flashing rapidly (strobing about five times per second), release the Pair button.</p>
+<p><em>Figure 10.7.2: Strobing Pairing Light</em></p>
+<p><strong>Step 2: Reset the Controller</strong></p>
+<p>Start with the Controller powered off. Hold the Power and Fly buttons simultaneously until you see the controller-updating display. The Controller then restarts, taking up to five minutes, then the screen turns off for one minute.</p>
+<p><em>Figure 10.7.3: Controller Reset</em></p>
+<p>When the Controller reset is complete, one of two completion screens will appear.</p>
+<p><em>Figure 10.7.4: Controller Update</em></p>
+<p>As the vehicle reset nears completion, the lights under the arms change between many different colors, followed by a sequence of beeps. When the lights stop changing color, the reset is complete; the lights will freeze on their current colors.</p>
+<p><strong>Step 3: Reboot Solo and the Controller</strong></p>
+<p>While rebooting, Solo emits its regular startup tones. The lights underneath Solo's arms light up green and change to white in the front and red in the back. If you do not see these signals, reboot Solo again.</p>
+<p>After you reboot the controller, it displays the Preflight Update or Waiting for Solo screen.</p>
+<p><em>Figure 10.7.5: Controller Screen After Reset</em></p>
+<p><strong>Step 4: Pair Solo and the Controller</strong></p>
+<p>For instructions on pairing Solo and the Controller, see Section 10.3.</p>
+<p><strong>Step 5: Update Your System</strong></p>
+<p>After performing a factory reset, follow the firmware update procedure in Section 2.7.5 to reinstall Open Solo. The Factory Reset procedure is now complete.</p>
+<hr />
+<h2 id="11-appendix">11 Appendix</h2>
+<h3 id="111-specifications">11.1 Specifications</h3>
+<p>Solo is a quad-rotor aerial vehicle powered by the 3DR Pixhawk 2 autopilot system and ArduPilot Copter (ArduCopter) flight control software.</p>
+<table>
+<thead>
+<tr>
+<th>Specification</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Autopilot</td>
+<td>3DR Pixhawk 2</td>
+</tr>
+<tr>
+<td>Flight code</td>
+<td>ArduPilot Copter (Open Solo 4.0 or later recommended)</td>
+</tr>
+<tr>
+<td>Control</td>
+<td>3DR Solo Controller</td>
+</tr>
+<tr>
+<td>Wireless communication</td>
+<td>3DR Link 1.0</td>
+</tr>
+<tr>
+<td>Frequency</td>
+<td>2.4 GHz</td>
+</tr>
+<tr>
+<td>Height</td>
+<td>10 in. (25 cm)</td>
+</tr>
+<tr>
+<td>Motor-to-motor dimension</td>
+<td>18 in. (46 cm)</td>
+</tr>
+<tr>
+<td>Propulsion</td>
+<td>880 KV motors; two CW and two CCW rotating motors</td>
+</tr>
+<tr>
+<td>Propeller</td>
+<td>10 in. × 4.5 in. (25 cm × 11.4 cm)</td>
+</tr>
+<tr>
+<td>Weight with battery</td>
+<td>3.3 lbs. (1.5 kg)</td>
+</tr>
+<tr>
+<td>Controller battery life</td>
+<td>3 hours (standard) / 6 hours (extended)</td>
+</tr>
+<tr>
+<td>Controller battery</td>
+<td>Li-ion 2600 mAh 7.2 Vdc (5200 mAh for extended)</td>
+</tr>
+<tr>
+<td>Power</td>
+<td>Electric (rechargeable lithium polymer battery)</td>
+</tr>
+<tr>
+<td>Battery</td>
+<td>Lithium polymer, 5200 mAh, 14.8 Vdc</td>
+</tr>
+<tr>
+<td>Battery weight</td>
+<td>1 lb. (0.5 kg)</td>
+</tr>
+<tr>
+<td>Estimated flight time</td>
+<td>Up to 25 minutes*</td>
+</tr>
+<tr>
+<td>Default maximum altitude</td>
+<td>150 ft. (46 m); adjustable up to 400 ft.</td>
+</tr>
+<tr>
+<td>Range</td>
+<td>0.5 miles** (0.8 km)</td>
+</tr>
+<tr>
+<td>Payload capacity</td>
+<td>1.1 lbs. (500 g)</td>
+</tr>
+<tr>
+<td>Cruise speed</td>
+<td>18 mph (8 m/s)</td>
+</tr>
+<tr>
+<td>Maximum speed</td>
+<td>33 mph (15 m/s) (Fly mode)</td>
+</tr>
+<tr>
+<td>Maximum climb rate</td>
+<td>11 mph (5.0 m/s)</td>
+</tr>
+<tr>
+<td>Maximum descent rate</td>
+<td>5.5 mph (2.5 m/s)</td>
+</tr>
+<tr>
+<td>Headwind / crosswind limitation</td>
+<td>25 mph (11 m/s)</td>
+</tr>
+<tr>
+<td>Camera (native)</td>
+<td>GoPro® HERO 3, 3+, or 4 (HERO 4 Black recommended)</td>
+</tr>
+<tr>
+<td>App compatibility</td>
+<td>Solex (Android) / SidePilot (iOS) — see Section 2.7</td>
+</tr>
+<tr>
+<td>Operating temperature</td>
+<td>32°F – 113°F (0°C – 45°C)</td>
+</tr>
+<tr>
+<td>Operating relative humidity</td>
+<td>0–85% RH</td>
+</tr>
+</tbody>
+</table>
+<p>* Flight time varies with payload, wind conditions, elevation, temperature, humidity, flying style, and pilot skill. Listed flight time applies to elevations less than 2,000 ft above sea level.</p>
+<p>** Range varies with location, antenna orientation, background noise, and multi-path.</p>
+<hr />
+<h3 id="112-warranty">11.2 Warranty</h3>
+<blockquote>
+<p><strong>Updated — 2026: Warranty Status</strong>
+3D Robotics' original one-year limited warranty applied to products purchased from authorized retailers prior to the company's restructuring in 2016. <strong>This warranty is no longer valid or honored by any entity.</strong> The current company operating under the 3DR name does not assume warranty obligations for original 3DR Solo products.</p>
+</blockquote>
+<p><em>Original warranty text (for reference):</em></p>
+<p>3D Robotics warranted to the original retail purchaser of Solo that this product was free from material defect in materials and workmanship for one year from the date of purchase. This warranty extended only to consumers who purchased the product from a 3D Robotics authorized reseller and did not apply to abnormal use or accidents, exposure to moisture or extreme conditions, use with unauthorized accessories, damage from external causes, commercial use, or use in violation of law.</p>
+<hr />
+<h3 id="113-regulatory-compliance">11.3 Regulatory Compliance</h3>
+<h4 id="1131-us-fcc-federal-communications-commission">11.3.1 U.S. — FCC (Federal Communications Commission)</h4>
+<p>3DR Solo FCC ID: <strong>2ADYD-S111A</strong>
+3DR Solo Controller FCC ID: <strong>2ADYD-AT11A</strong></p>
+<p>This device complies with Part 15 of the FCC rules. Operation is subject to the following two conditions: (1) This device may not cause harmful interference, and (2) this device must accept any interference received, including interference that may cause undesired operation.</p>
+<p>Changes or modifications not expressly approved by 3D Robotics could void the user's authority to operate the equipment.</p>
+<p><strong>Radiation Exposure Statement:</strong>
+The Solo system has been tested to ensure compliance with FCC-mandated limits for general population radio frequency (RF) exposure for an uncontrolled environment. The body's Specific Absorption Rate (SAR) for the Solo controller is 1.33 watts per kilogram (W/kg) in compliance with the FCC limit of 1.6 W/kg. To reduce exposure to RF energy, hold Solo at least 20 cm away from your body at all times during operation. Do not operate the Solo controller co-located or in conjunction with any other antenna or transmitter.</p>
+<h4 id="1132-declaration-of-conformity">11.3.2 Declaration of Conformity</h4>
+<blockquote>
+<p><strong>Updated — 2026:</strong> The original Declaration of Conformity was issued under EU Directive 1999/5/EC, which has since been replaced by the EU Radio Equipment Directive (RED) 2014/53/EU. The original declaration referenced help@3dr.com, which is no longer a functioning email address. No updated declaration of conformity has been issued for current EU requirements.</p>
+</blockquote>
+<h4 id="1133-canada-industry-canada">11.3.3 Canada — Industry Canada</h4>
+<p>3DR Solo IC: <strong>12768A-S114A</strong> (Model: S110A)
+3DR Solo Controller IC: <strong>12768A-AT14A</strong> (Model: AT10A)</p>
+<p>This device complies with Industry Canada license-exempt RSS standard(s). Operation is subject to the following two conditions: (1) this device may not cause interference, and (2) this device must accept any interference, including interference that may cause undesired operation of the device.</p>
+<p><em>Le présent appareil est conforme aux CNR d'Industrie Canada applicables aux appareils radio exempts de licence. L'exploitation est autorisée aux deux conditions suivantes : (1) l'appareil ne doit pas produire de brouillage, et (2) l'utilisateur de l'appareil doit accepter tout brouillage radioélectrique subi, même si le brouillage est susceptible d'en compromettre le fonctionnement.</em></p>
+<p><strong>IC Radiation Exposure Statement:</strong>
+The Solo system has been tested to ensure compliance with IC-mandated limits for general population radio frequency (RF) exposure for an uncontrolled environment. To reduce exposure to RF energy, hold Solo at least 20 cm away from your body at all times during operation. Do not operate the Solo controller co-located or in conjunction with any other antenna or transmitter. Changes or modifications not expressly approved by 3D Robotics could void the user's authority to operate the equipment.</p>
+<hr />
+<p><em>3DR Solo User Manual — Community Updated Edition</em>
+<em>Based on original Solo User Manual V9 © 2015 3D Robotics Inc.</em>
+<em>Updated content: October 2026</em></p>
+        </div>
+    </div>
+</body>
+</html>

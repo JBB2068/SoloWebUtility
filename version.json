@@ -1,0 +1,405 @@
+{
+  "version": "1.0.71",
+  "iteration": 71,
+  "updated_at": 1791480161,
+  "changelog": [
+    {
+      "version": "1.0.67",
+      "iteration": 67,
+      "date": "2026-10-06 13:40:00",
+      "description": "Fixed Windows cmd.exe multi-line heredoc quote breaking by adding Paramiko direct SSH execution (_ssh_paramiko), defined missing renderWifiStatus function in app.js, and corrected string format specifiers."
+    },
+    {
+      "version": "1.0.66",
+      "iteration": 66,
+      "date": "2026-10-06 10:15:00",
+      "description": "Restored exact proven v1.0.58 Controller Wi-Fi connection engine (POSIX heredoc deployment, pure wlan0 cycling, udhcpc DHCP leasing, Copter route preservation, and robust association polling criteria) to fix Controller Wi-Fi cycling, internet connectivity, and seamless progression into checking for firmware updates."
+    },
+    {
+      "version": "1.0.1",
+      "date": "2026-09-29 18:36:18",
+      "description": "Initial Release of 3DR Solo Web Utility (Open Solo 4.7.1 & Flashing Manager)."
+    },
+    {
+      "version": "1.0.2",
+      "date": "2026-09-30 14:04:50",
+      "description": "Fixed controller SSH BatchMode hang; replaced sololink_config --update-apply with nohup reboot. Removed all Pairing UI; replaced with brief prerequisite note before calibration steps."
+    },
+    {
+      "version": "1.0.3",
+      "date": "2026-09-30 15:13:00",
+      "description": "Fixed Controller SSH authentication failure (added PTY auto-password handling and Copter-Controller SSH key exchange). Updated pairing note to specify holding Pair button on bottom of Solo for 5 seconds."
+    },
+    {
+      "version": "1.0.4",
+      "date": "2026-09-30 15:51:00",
+      "description": "Relocated SoloWebUtility installation to persistent partition (/log/SoloWebUtility) to preserve utility files and storage space. Added symlinks and rc.local auto-start for permanent access on Open Solo."
+    },
+    {
+      "version": "1.0.5",
+      "date": "2026-09-30 16:18:00",
+      "description": "Added version.json to upload list so version displays correctly. Updated Step 3 calibrations note for Solex, SidePilot, Mission Planner, and QGC. Fixed Wi-Fi management Failed to fetch errors by enabling multi-threaded HTTP server, combining SSH calls, and preventing hostapd drop."
+    },
+    {
+      "version": "1.0.6",
+      "date": "2026-09-30 16:30:00",
+      "description": "Fixed Controller home Wi-Fi connection engine: added full wpa_supplicant config generation, wlan1 interface control, udhcpc DHCP lease client, and iwconfig live link detection. Added auto-polling during association."
+    },
+    {
+      "version": "1.0.7",
+      "date": "2026-09-30 16:35:00",
+      "description": "Fixed web panel password authentication: made HTTP Content-Length header case-insensitive in server request reader and added fail-safe acceptance for default password 'sololink'."
+    },
+    {
+      "version": "1.0.8",
+      "date": "2026-09-30 16:43:00",
+      "description": "Fixed session validation loop: added Python 2 mimetools getheader support for X-Auth-Token and Cookie, added Set-Cookie HTTP header on login, and normalized session tokens in auth.py."
+    },
+    {
+      "version": "1.0.9",
+      "date": "2026-09-30 17:00:00",
+      "description": "Fixed password prompt loop: appended token query param to all API requests, added persistent disk-backed sessions in /tmp/solo_sessions.json, simplified page load auth check, and removed all default password hints."
+    },
+    {
+      "version": "1.0.10",
+      "date": "2026-09-30 17:45:00",
+      "description": "Permanent fix for password loop: deterministic SHA256 signature master token immune to drone system clock jumps or thread restarts, added browser cache-busting headers (no-cache/no-store) and script query versioning (?v=1.0.10), and streamlined frontend page load."
+    },
+    {
+      "version": "1.0.11",
+      "date": "2026-09-30 19:56:00",
+      "description": "Forced fresh upload of all application files (disabled size-matching skip), wiped legacy /home/root/SoloWebUtility directory and replaced with clean symlink to /log, and cleaned up rc.local startup to ensure new web interface loads."
+    },
+    {
+      "version": "1.0.12",
+      "date": "2026-09-30 20:00:00",
+      "description": "Comprehensive process cleanup: eliminated fallback port binding on 8080 by strictly binding port 80 with SO_REUSEADDR and multi-level process termination (fuser, killall, pidof, ps/awk) to terminate any zombie process holding port 80."
+    },
+    {
+      "version": "1.0.13",
+      "date": "2026-09-30 21:25:00",
+      "description": "Fixed web server startup failure: eliminated nohup dependency (unavailable in Busybox Linux) by using standard background redirection (< /dev/null &) paired with Python in-app SIGHUP and SIGPIPE signal handlers; fixed Python 2 byte-string encoding in auth.py; and added active process and server log verification to installer."
+    },
+    {
+      "version": "1.0.14",
+      "date": "2026-09-30 21:30:00",
+      "description": "Robust file upload engine: terminated running processes prior to file sync, added pre-upload destination file removal and automatic SSH direct write fallback (cat stream) on SFTP Failure, added post-upload remote Python syntax validation, and bumped cache-busters to v1.0.14."
+    },
+    {
+      "version": "1.0.15",
+      "date": "2026-09-30 21:45:00",
+      "description": "Automated filesystem repair & fail-safe fallback: added writeability test on /log partition with automatic ext4 repair (fsck/remount rw) on error flags, automatic fallback to rootfs /home/root/SoloWebUtility (77MB free) if /log is read-only, base64-encoded stream upload, and RAM tmpfs logging (/tmp)."
+    },
+    {
+      "version": "1.0.16",
+      "date": "2026-09-30 22:15:00",
+      "description": "Fixed Controller Wi-Fi client connection: replaced non-existent wlan1 interface and invalid sololink_config command with official 3DR dual-mode STA-AP wpa_supplicant wlan0 engine, automated dnsmasq gateway/DNS configuration, copter route auto-setup, and extended status polling."
+    },
+    {
+      "version": "1.0.17",
+      "date": "2026-09-30 22:30:00",
+      "description": "Restored original lightweight Wi-Fi management: restored the clean, fast sololink_config --set-wifi-sta and wpa_cli reconfigure implementation exactly as in the initial release."
+    },
+    {
+      "version": "1.0.18",
+      "date": "2026-09-30 22:45:00",
+      "description": "Integrated proven SoloUpdater Wi-Fi connection pipeline: sololink.set_wifi Python API, sololink_config --set-wifi-sta, direct wpa_supplicant-wlan1.conf base64 writing, wpa_cli reconfigure with wpa_supplicant daemon fallback, and udhcpc DHCP client."
+    },
+    {
+      "version": "1.0.19",
+      "date": "2026-09-30 23:30:00",
+      "description": "Persisted Wi-Fi station credentials directly into /etc/sololink.conf on the Controller using ConfigParser (sta_ssid/sta_pass/staSSID/staPassword), ensuring the Controller links to home Wi-Fi both immediately and upon reboot."
+    },
+    {
+      "version": "1.0.20",
+      "date": "2026-09-30 23:45:00",
+      "description": "Eliminated installer stall during background web server launch by unblocking SSH session channel and adding connect/max timeouts to curl healthcheck."
+    },
+    {
+      "version": "1.0.21",
+      "date": "2026-09-30 23:55:00",
+      "description": "Implemented proven Solo Wi-Fi Setup architecture: concurrent wlan0/wlan0-ap AP-STA connection with temporary hostapd association yield, dnsmasq gateway (10.1.1.1) and DNS (8.8.8.8) advertisement, iptables NAT masquerading, and drone default route/DNS configuration."
+    },
+    {
+      "version": "1.0.22",
+      "date": "2026-10-01 06:55:00",
+      "description": "Guaranteed DHCP gateway and DNS distribution by directly appending dhcp-option=3,10.1.1.1 and dhcp-option=6,8.8.8.8 to dnsmasq.conf, and verified home mesh router dual-band 2.4/5GHz channel alignment."
+    },
+    {
+      "version": "1.0.23",
+      "date": "2026-10-01 07:35:00",
+      "description": "Directly converted the proven standalone setup-wifi.bat / solo_wifi.py automation utility into the web panel, eliminating ConfigParser nested quoting errors and adding frontend association polling."
+    },
+    {
+      "version": "1.0.24",
+      "date": "2026-10-01 08:10:00",
+      "description": "Restored wifi_mgr.py and frontend association logic to the exact original clean, lightweight 3DR developer implementation."
+    },
+    {
+      "version": "1.0.25",
+      "date": "2026-10-01 08:25:00",
+      "description": "Integrated proven setup-wifi.bat / solo_wifi.py configuration engine: wlan0 home interface, wpa_client.conf generation, background connect-home-wifi execution, and real-time status polling."
+    },
+    {
+      "version": "1.0.26",
+      "date": "2026-10-01 09:25:00",
+      "description": "Fixed Cube Autopilot flashing failure: eliminated logging UNIX socket connection error in pixhawk.py, prioritized bundled patched tools, set safe cwd=/tmp across subprocesses, and added exit code verification."
+    },
+    {
+      "version": "1.0.27",
+      "date": "2026-10-01 10:15:00",
+      "description": "Enhanced frontend firmware flashing UI: handled mobile Wi-Fi drop during hardware reboot by automatically advancing progress to 100%, triggering the 8-minute countdown timer, and persisting timer in localStorage across browser refreshes."
+    },
+    {
+      "version": "1.0.28",
+      "date": "2026-10-01 10:35:00",
+      "description": "Fixed first-launch deploy_to_solo.exe failure: added automatic Wi-Fi link retry loop (5 attempts) to absorb initial Windows ARP/socket wake-up latency, added SSH connection retries, and enforced clean root cwd across remote commands."
+    },
+    {
+      "version": "1.0.29",
+      "iteration": 29,
+      "date": "2026-10-01 11:07:03",
+      "description": "Fixed Bait Drop preset and parameter manager MAVLink communication: replaced direct /dev/ttymxc1 serial access with safe UDP MAVLink (udpout:10.1.1.10:14550) to prevent hardware UART lockup, and aligned Bait Drop preset with accessory bay AUX pins."
+    },
+    {
+      "version": "1.0.30",
+      "iteration": 30,
+      "date": "2026-10-01 11:20:56",
+      "description": "Fixed Fetch Live and Autopilot parameter commit via active UDP MAVLink heartbeat registration on port 14560, and added parameter change list preview and confirmation dialog to all presets."
+    },
+    {
+      "version": "1.0.31",
+      "iteration": 31,
+      "date": "2026-10-01 11:35:04",
+      "description": "Configured Bait Drop to RC8/Servo8, Landing Gear to RC7/Servo7, Here 1/2 GPS to COMPASS_ORIENT=0 only, and added Stock Leg Compass restore preset (COMPASS_ORIENT=38)."
+    },
+    {
+      "version": "1.0.32",
+      "iteration": 32,
+      "date": "2026-10-01 11:47:43",
+      "description": "Direct MAVLink write confirmation for presets and batch saves, removed individual save buttons, synchronized modified parameter state with Save Changes button, and categorized presets into GPS/Compass, Battery, Payload, and Speed groups."
+    },
+    {
+      "version": "1.0.33",
+      "iteration": 33,
+      "date": "2026-10-01 11:55:16",
+      "description": "Configured primary MAVLink telemetry connection to port 14550 (udpout:10.1.1.10:14550, udpout:127.0.0.1:14550, udpin:0.0.0.0:14550) for reliable parameter writes and live fetch."
+    },
+    {
+      "version": "1.0.34",
+      "iteration": 34,
+      "date": "2026-10-01 12:08:14",
+      "description": "Fixed embedded pymavlink source_component incompatibility and enabled direct Pixhawk MAVLink parameter write and fetch via port 14560"
+    },
+    {
+      "version": "1.0.35",
+      "iteration": 35,
+      "date": "2026-10-01 23:05:19",
+      "description": "Test iteration 1"
+    },
+    {
+      "version": "1.0.36",
+      "iteration": 36,
+      "date": "2026-10-01 23:05:19",
+      "description": "Test iteration 2"
+    },
+    {
+      "version": "1.0.37",
+      "iteration": 37,
+      "date": "2026-10-01 23:12:15",
+      "description": "Added automated IMU calibration, autopilot reboot, and compass calibration pipeline"
+    },
+    {
+      "version": "1.0.38",
+      "iteration": 38,
+      "date": "2026-10-02 06:55:51",
+      "description": "Isolate telemetry endpoints to 127.0.0.1:14560 on Solo copter to eliminate 14550 contention and controller flapping; debounced status polling."
+    },
+    {
+      "version": "1.0.39",
+      "iteration": 39,
+      "date": "2026-10-02 08:51:05",
+      "description": "Fixed MAVLink heartbeat timeout: added local udpin:0.0.0.0:14560 ShotManager listener and multi-endpoint fallback with source_system=254 to prevent Controller ID collision."
+    },
+    {
+      "version": "1.0.40",
+      "iteration": 40,
+      "date": "2026-10-02 09:05:28",
+      "description": "Fixed calibration sequence timing: guaranteed complete IMU sensor sampling (8-10s) and non-volatile storage commit settle delay before initiating autopilot reboot."
+    },
+    {
+      "version": "1.0.41",
+      "iteration": 41,
+      "date": "2026-10-02 09:43:00",
+      "description": "Decoupled calibrations into two independent steps (Step 3: IMU Calibration & Step 4: Compass Calibration) with manual reboot prompt between steps and comprehensive walkthrough guides."
+    },
+    {
+      "version": "1.0.42",
+      "iteration": 42,
+      "date": "2026-10-02 10:05:00",
+      "description": "Implemented interactive full 6-axis accelerometer calibration (Accurately Level, Left, Right, Nose Down, Nose Up, On Back) with live orientation cards and Continue button prompts."
+    },
+    {
+      "version": "1.0.43",
+      "iteration": 43,
+      "date": "2026-10-02 10:22:00",
+      "description": "Fixed web server port 80 auto-start on boot: resolved /etc/rc.local duplicate execution race condition, strictly enforced port 80 binding, and modernized service daemon startup."
+    },
+    {
+      "version": "1.0.44",
+      "iteration": 44,
+      "date": "2026-10-02 10:34:00",
+      "description": "Added automatic Pixhawk autopilot reboot 3 seconds after successful compass calibration with live countdown and heartbeat reconnection."
+    },
+    {
+      "version": "1.0.45",
+      "iteration": 45,
+      "date": "2026-10-02 10:40:00",
+      "description": "Ensure compass calibration tracks all detected compasses (external GPS & internal Pixhawk) and waits for all to complete successfully before initiating 3-second auto-reboot."
+    },
+    {
+      "version": "1.0.46",
+      "iteration": 46,
+      "date": "2026-10-02 11:19:00",
+      "description": "Refined compass calibration labels to External Compass & Pixhawk Internal Compass and added GPS lock recommendation to Outdoor Requirement."
+    },
+    {
+      "version": "1.0.47",
+      "iteration": 47,
+      "date": "2026-10-02 13:07:49",
+      "description": "Integrated Artoo Controller hardware button setup GUI (/usr/bin/extSettings.conf) into SoloWebUtility as dedicated tab with accurate Artoo diagram, unified action dropdowns, preset profiles, and direct live sync."
+    },
+    {
+      "version": "1.0.48",
+      "iteration": 48,
+      "date": "2026-10-02 13:25:01",
+      "description": "Simplified Artoo Controller header toolbar: removed Presets and Raw Config buttons, enlarged and enhanced Save Controller Settings button with prominent golden gradient, glowing shadow, and dynamic unsaved-changes pulse indicator."
+    },
+    {
+      "version": "1.0.49",
+      "iteration": 49,
+      "date": "2026-10-02 14:57:00",
+      "description": "Integrated Cockpit HUD & Live HDMI Video as a dedicated tab on Solo Web Utility with real-time MAVLink telemetry, floating Primary Flight Display, artificial horizon, live video background, metric/imperial toggle, and 2-step motor safety arming confirmation."
+    },
+    {
+      "version": "1.0.50",
+      "iteration": 50,
+      "date": "2026-10-02 15:35:00",
+      "description": "Fixed MAVLink telemetry stream sync and rate to 270Hz real-time telemetry over WebSockets/REST."
+    },
+    {
+      "version": "1.0.51",
+      "iteration": 51,
+      "date": "2026-10-02 15:58:00",
+      "description": "Patched JMuxer low-latency intra-refresh NAL sample detection and deferred video initialization for background tabs."
+    },
+    {
+      "version": "1.0.52",
+      "iteration": 52,
+      "date": "2026-10-02 16:24:00",
+      "description": "Resolved off-center crosshair & right-side telemetry cutoff by changing .cockpit-body to 100% width. Patched JMuxer MSE buffer creation & initSegment dispatch for Solo i.MX6 VPU intra-refresh H.264 video feed."
+    },
+    {
+      "version": "1.0.53",
+      "iteration": 53,
+      "date": "2026-10-02 16:40:00",
+      "description": "Fixed /api/action mode parameter mapping and multi-target MAVLink/pymavlink flight mode command dispatch. Ensured video element muted property and playback error diagnostics."
+    },
+    {
+      "version": "1.0.54",
+      "iteration": 54,
+      "date": "2026-10-03 06:51:54",
+      "description": "Fixed Controller home Wi-Fi boot persistence: added wlan0 driver wait loop, converted shebang to /bin/sh, and installed native SysVinit auto-start service."
+    },
+    {
+      "version": "1.0.55",
+      "iteration": 55,
+      "date": "2026-10-03 10:23:07",
+      "description": "Reverted wifi_mgr.py to exact proven working v1.0.25 implementation."
+    },
+    {
+      "version": "1.0.56",
+      "iteration": 56,
+      "date": "2026-10-03 12:55:00",
+      "description": "Resolved Controller home Wi-Fi reboot persistence: installed native SysVinit auto-start service (/etc/init.d/solo-home-wifi -> /etc/rc5.d/S99solo-home-wifi) with BusyBox /bin/sh compatibility and POSIX wlan0 wait loop (no seq dependency)."
+    },
+    {
+      "version": "1.0.57",
+      "iteration": 57,
+      "date": "2026-10-04 17:30:00",
+      "description": "Configured Controller home Wi-Fi as strictly volatile in RAM (/tmp/wpa_client.conf) with no boot persistence (manual reconnection required after reboot). Added armed safety interlock to automatically disconnect home Wi-Fi when vehicle is armed, and locked firmware flashing/installation controls whenever the vehicle is armed."
+    },
+    {
+      "version": "1.0.58",
+      "iteration": 58,
+      "date": "2026-10-05 22:07:48",
+      "description": "Finalized connection handoff and IDR fix for seamless Solex integration."
+    },
+    {
+      "version": "1.0.59",
+      "iteration": 59,
+      "date": "2026-10-05 23:16:10",
+      "description": "Added Check for Updates button to firmware update page and integrated APJ Builder system to query official stable releases, compile APJ files for CubeSolo and Green Cube, and update setup files."
+    },
+    {
+      "version": "1.0.60",
+      "iteration": 60,
+      "date": "2026-10-06 00:07:59",
+      "description": "Built and staged official stable ArduCopter 4.7.1 for Green Cube (Build 60b80ac4) with embedded SoloGreen parameters; updated setup packages and deploy installer."
+    },
+    {
+      "version": "1.0.61",
+      "iteration": 61,
+      "date": "2026-10-06 07:06:28",
+      "description": "Added Wi-Fi network scanning (SSID detection) and show/hide password toggle to firmware prompt and Wi-Fi manager tab; base64-encoded volatile connection script."
+    },
+    {
+      "version": "1.0.62",
+      "iteration": 62,
+      "date": "2026-10-06 07:22:42",
+      "description": "Added Broadcom wl and wpa_cli multi-radio scanning, merged Copter and Controller scans, and added prominent 2.4 GHz hardware requirements and guidance."
+    },
+    {
+      "version": "1.0.63",
+      "iteration": 63,
+      "date": "2026-10-06 08:15:32",
+      "description": "Restored proven setup-wifi routine, fixed single-scan detection for 2.4 GHz airwaves, and added resilient SoloLink AP reconnection handling with guidance."
+    },
+    {
+      "version": "1.0.64",
+      "iteration": 64,
+      "date": "2026-10-06 09:16:25",
+      "description": "Restored complete Copter-to-Internet routing and fallback: added ensure_copter_internet_route, Controller SSH proxy fallback for firmware API/downloads, ctrl_interface for wpa_supplicant, and live controller setup logging."
+    },
+    {
+      "version": "1.0.65",
+      "iteration": 65,
+      "date": "2026-10-06 09:29:38",
+      "description": "Replaced base64 dependency in connect_home_wifi with proven POSIX heredoc deployment to ensure controller WiFi cycles and connects reliably."
+    },
+    {
+      "version": "1.0.68",
+      "iteration": 68,
+      "date": "2026-10-06 15:10:44",
+      "description": "Extended ArduCopter custom build polling timeout to 1200s and added real-time live compilation progress logging to the update modal."
+    },
+    {
+      "version": "1.0.69",
+      "iteration": 69,
+      "date": "2026-10-06 16:15:00",
+      "description": "Locked in Home Wi-Fi connecting engine and internet gateway routing, aligned release version baseline to v1.0.69 across all installer and utility packages."
+    },
+    {
+      "version": "1.0.70",
+      "iteration": 70,
+      "date": "2026-10-08 10:51:48",
+      "description": "Added Owner's Manual tab to SoloWebUtility with downloadable PDF manual, updated Solex & SidePilot tribute section with direct app links, and updated compatibility text to all 3DR Solo Systems."
+    },
+    {
+      "version": "1.0.71",
+      "iteration": 71,
+      "date": "2026-10-08 12:22:41",
+      "description": "Packaged self-contained Android APK (sololink_viewer.apk) with all firmware images, application scripts, static assets, and documentation."
+    }
+  ]
+}

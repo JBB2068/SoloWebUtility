@@ -1,0 +1,32 @@
+Do not automatically run testing scripts or terminal loops. If a serial port test fails or times out, stop immediately, do not attempt to auto-fix it, and report the error to me.
+
+Build a concise web page for updating the 3dr Solo using these files.
+"C:\Users\User\Documents\Solo mod\Firmware\471 Cube Solo\Open Solo 4.0.0 Clean Install (Copter-4.7.1).zip"
+"C:\Users\User\Documents\Solo mod\Firmware\471 Cube Green\Open Solo 4.0.0 Clean Install GREEN CUBE (Copter-4.7.1).zip"
+
+Install it on a web server on the Solo.
+Use the existing built in scripts for the installation processes.
+The controller has its own files which are not the same as the copter.
+For the copter the only difference between Solo Cube and Green cube installations is the APJ File. The rest of the files are duplicates.
+Only keep the files needed for the program to work.
+It must flash the cube first, then copter imx6, then Controller imx6. Make each one reboot automatically after the installation.
+Make a selector for Solo Cube or Green Cube, and a selector for full install or Cube only.
+
+Make another section with the ability to connect the Controller to the home wifi for internet, and the ability to make it Bi-directional, and the ability to set it back to default. Use the method provided by the 3dr devs.
+
+Make another page for Parameters with the ability to search and edit and save parameters. Have preset parameters like Here GPS Settings, Retractable Landing Gear, Speed control, Bait drop, Default Lipo batt parameters, Li-ion batt parameters
+
+use as much built-in function as possible.
+
+Make it password protected with the default password sololink, and make a utility to change the password.
+
+Make it complete the Pairing process if possible.
+
+Put the automatic Pairing before the tips on calibrations, just after Open Solo installation.
+
+Make it automatically open a web browser and load the page upon the client connecting to the sololink wifi.
+
+Make versioning happen starting at 1.0.1 and incrementing 0.0.1 each iteration.
+
+I will test and make sure everything works as it should.
+

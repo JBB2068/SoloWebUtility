@@ -1,0 +1,46 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Large distribution binaries and installer packages
+*.exe
+*.apk
+*.apk.idsig
+*.zip
+*.tar.gz
+
+# Build outputs & packaging artifacts
+build/
+dist/
+distribution/
+android_app/dist/
+android_app/build_temp/
+res_compiled/
+build_temp/
+*.spec
+
+# Backups and temporary working files
+*_backup/
+backups/
+scratch/
+scratch_page0.png
+.wrangler/
+index_temp*.html
+cockpit_temp*
+cockpit_mgr_temp*
+cockpit_broken.css
+test_*.pdf
+
+# Dynamic session & sensitive configuration files
+auth.json
+solo_sessions.json
+
+# IDE and environment files
+.venv/
+env/
+venv/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

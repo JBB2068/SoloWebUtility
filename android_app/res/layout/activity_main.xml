@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/background">
+
+    <!-- Fullscreen WebView -->
+    <WebView
+        android:id="@+id/webView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#000000"
+        android:visibility="gone" />
+
+    <!-- Thin Top Progress Bar -->
+    <ProgressBar
+        android:id="@+id/loadProgressBar"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="3dp"
+        android:layout_gravity="top"
+        android:indeterminate="false"
+        android:max="100"
+        android:visibility="gone" />
+
+    <!-- Floating Discreet Quick Controls (Top-Right) -->
+    <LinearLayout
+        android:id="@+id/topBarControls"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_margin="12dp"
+        android:orientation="horizontal"
+        android:visibility="gone">
+
+        <Button
+            android:id="@+id/btnQuickRefresh"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:background="@drawable/btn_secondary_bg"
+            android:text="Refresh"
+            android:textAllCaps="false"
+            android:textColor="@color/text_main"
+            android:textSize="12sp" />
+
+        <Button
+            android:id="@+id/btnQuickReconnect"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/btn_secondary_bg"
+            android:text="Reconnect"
+            android:textAllCaps="false"
+            android:textColor="@color/text_main"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <!-- Overlay Status & Connection HUD -->
+    <LinearLayout
+        android:id="@+id/statusOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:maxWidth="450dp"
+            android:background="@drawable/card_bg"
+            android:gravity="center_horizontal"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="SoloLink Viewer"
+                android:textColor="@color/accent"
+                android:textSize="22sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="Auto-Connect: sololink_* (pass: sololink)"
+                android:textColor="@color/text_muted"
+                android:textSize="13sp" />
+
+            <ProgressBar
+                android:id="@+id/statusSpinner"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_marginTop="24dp"
+                android:layout_marginBottom="16dp" />
+
+            <TextView
+                android:id="@+id/txtStatus"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:text="@string/status_searching"
+                android:textColor="@color/text_main"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/txtDetails"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:gravity="center"
+                android:text="Looking for 3DR Solo Wi-Fi network..."
+                android:textColor="@color/text_muted"
+                android:textSize="13sp" />
+
+            <!-- Action buttons when needed -->
+            <LinearLayout
+                android:id="@+id/actionButtonsLayout"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:gravity="center"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/btnRetry"
+                    android:layout_width="0dp"
+                    android:layout_height="44dp"
+                    android:layout_marginEnd="8dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/btn_bg"
+                    android:text="@string/btn_retry"
+                    android:textAllCaps="false"
+                    android:textColor="#FFFFFF"
+                    android:textSize="14sp" />
+
+                <Button
+                    android:id="@+id/btnWifiSettings"
+                    android:layout_width="0dp"
+                    android:layout_height="44dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/btn_secondary_bg"
+                    android:text="@string/btn_wifi_settings"
+                    android:textAllCaps="false"
+                    android:textColor="@color/text_main"
+                    android:textSize="14sp" />
+            </LinearLayout>
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+</FrameLayout>

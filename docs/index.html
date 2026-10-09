@@ -1,0 +1,1105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3DR Solo Web Utility | Compatible with all 3DR Solo Systems, any version — Automated Preflight Update &amp; Flight Console</title>
+    <meta name="description" content="The 3DR Solo Web Utility is a free, open-source on-board console for the 3DR Solo drone. Complete automated Preflight Update compatible with all 3DR Solo Systems, any version, real-time MAVLink parameters, calibrations, and live video.">
+    <link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAX4klEQVR42tWbe5RU1bXuf/tR7+qq6uoH3c2rkSgCAuERUY+KNygYPMFHIo4E7s0TFQERDsSRc+Re1IMZJnoPInAgas7DJA4VvEfBEemAeoVAsBW8IqAiT6Xppqnuqurqeuzae637R9XeqYZ+oeTecdYYNXhU7bXXnGvOb835zTUVuhlSShWQiqJIKaUCfBOYaVnWNUAVoNDHkBKU834lS/5ufylK/q10+zspJYqi9PE+iaoqUkpimqbsAnUzvLxdUWZZtkyKogj6XrjUSv4+W0q5R/4nHZZlvS+l/GFxE7vI1qvw2Wx2hJRy+znzmVJKS0opevvkTVNIKUUinxdSSmFZlujrmZ4+ZvHZjuJc9tx9fKziWkWJInZIKUf3qgT7CynlTZZlxYrP5osT9muYeVNKKeWft26Vj193nXxn06biAswvs3tSSinf+Y9X5C9vmCJ3vbG18A7zguayijJIKWU8n89/G+Ctt97SexL+RimlUSJ8v4YoWdhvfv87+ZPxX5d/GjxU/uahhwqryOcvXAHF+f714RVy1+BB8u7xX5f/9sILjhKEEBeiTLNEIX9bKrNiAx5wCfAeEAEsQKMfQ0pZBCCVZ599hmee+xfqKysZYln83W+eY8CAAQUoUxQuZEhZAMKzra38049/xFFF41gsxk9/9APmzr0bIQSKovR7XiGEUFVVATqBKxVFOSSlVNUS+P2XovDmhQgPoKoqK1euZP36DQwdPIh4PscdD6+gpqamXwje3VCUAvpXVVczc8XDtBk5hg4ayIYNG/jFLx5DVdUua+hrqIUHBBAE/k1KqQOoiqJYwCzguqLwen+FVxQFy7J48MEH2bRpE0OGDKGlpYU7br+Dq7/xDSzLchb6ZYaqqliWxVWTJnHnd75LS0sL9fX1bNy4kWXLlmFZlqOofg6tKOM3LMv6b4qiCKWgCfEuqF8vakjrr/CZTIaf/exnvPfee9TV1ZFKpbj00ktZtWoViqKgquqX2v2ukYNEWIXje/HiB/j4448Jh8M0NZ1m/PjxPP744wQCgQuxNAEoQoiPVVUdr0gp/wvwZhEHlP76fCaTYeHChXz66adUV1cDoOs6q1atoq6uDiHEV9r9ru8UKIpKU9MpFi16wLGslpYWvva1r7FmzRq8Xu+FKNyW9W9VIcQd54RkvQEJpplHVVU2bNjA3r17qaysREpJNptl/vz51NXVfWXTPx8PVIQQ1NUNZOHChWSzWSzLoqqqin379rFu3To0TcM0zf66gyjKc4cqpbzmnNi0R+FVVcXlctPU1ERDwx8ZNGgQQgiSySQ33ngjU6ZMwbIsNE3jYg8bD66//nqmT59OIpHAsizq6ur44x//SHNzMy6Xq4gJoleAFEKoxT+vVoUQl/SlABtsmpqauPvuudx441Q6O1P4fD58Ph8TJ07k3nvv7bfZXwBonacEIQR33303kyZNwuPx4PP5yGazTJs2jZ/85CecOnUKUJxjsod5lKJcw1TLskK9KqC4WMuyWLp0KQ0NDfj9PlwuHUVRaG1tZd68efj9fizL6pdwXwUYLcvC5/Mxf/58zp49i6qqqKqK2+1m27ZtLF26lHzecLCqj+FVgV63TBSDnKNHj7J7925qauq4/vobqKio5MCBA0gpWbRoEVu2bMHlcqGqKqZpXnQXsK3Q5XLx+uuvc//996PrOocOHSISiXDllZMZOHAgjY2NHD58uGgtfW+G3tduCCHQdZ3PPvuM8vJyIpEwu3fvxuv1EgwGHWHXrFlDY2MjixYtIhqNYpomiqJ0wQN7R3raGXstpWsSQiClRNM04vE4Tz31FLt27cLr9ZLNZgkEAsRiMU6fPk11dRXZbIYjR44xevQVSGn1tb8omUxGer3eXoHv4MGDPPLII6iqSnt7O0eOHKGsrAyv10tnZyeapjF06FDHT3/84x8zY8aMLgLYcUE/w1YnvLaVsXXrVp555hny+Twul4vjx49jmiZ+v49cLodlCYYOHYrX68GyBI888gijRo3qFZdyuVzPCrB3KR6Ps3DhQjo6Oiimyhw6dIjq6mqqq6tJp9OkUimy2Sw1NTVUVVXR3NzM2LFj+f73v8+ECRNwuVwAZDIZ2traSKVSdHZ2ks/nEULgcrkIBoMEAgGi0SiBQMAx+3379vH888+zb98+6urqnN32er0EAn68Xh+tra0kEglGjx5dCPc0Db/fz+rVq4lGoz3iTi6XQ8lms9Lj8XTrc5qmsXz5chobG9F1HU3TOHnyJN/97ndpampiz5496LpOWVkZhmEQi8WIRqMMHz6ceDxOMplk4MCB1NTUkMlkOH36NIlEwrEGy7Ic5WSzWRRFIRwOU1dXRyAQoKWlhRMnThAKhYhGoxw5coRYLEZVVRVut4tEIoFpWkyaNImhQ4eyefNmBgwYgGVZ5PN5Jk6cyMqVK3s8mntUgP3Ab3/7W55//nmCwSBCCI4fP860adNYtGgRsViMTz75hIaGBvbs2QNAVVUVPp8P0zSJRCJEIhHi8ThtbW0YhoHP50NRFPx+P8OGDSOdTqHrblRV5bPPPgPANE2y2Swul4toNEp5eTnxeJz29nZ0XSebzdLa2oqiKEyePJmpU6dy2WWXEY1GWb9+PW+88QaDBw9G0zSy2Szf+973mDNnTrdK6FYBts/s2bOHv//7nxOJhMnnTWKxNubMmcPcuXNpbW0lmUxiGAa5XI5jx46xdetW9u7dSzAYpKqqCsMwnCPL7XaTyWSwLAtd11FVFZ/Ph2Fk0XUXbreHjo4OpJTk84VIMxAIYBgGmUwGRVHweDzOeydMmMDNN9/M8OHD0XUdl8tFWVkZAwYM4Nlnn+N3v/stlZWVuFwu4u3tPPqPj3L11dechwfnYYCQAhWF2NkY9943zxEwmUzy4IMPcuutt2IYBqZpksvl6OjooKOjg3w+j5SSjz/+mBdffJEjR44wZMgQx8xtk/d4PDQ1NTlRXAFnCmG5pmmEw2EGDhxINpt1znFd1xFCcOLECYYNG8Zdd93FyJEjARzBg8EgXq8Xl8uFx+Nh8+bNPPbYY4TCITxuD263i/X/vIHKysqCjEUldFGA/UIBLF22jKOHP8PIG5j5PCtXrmTy5MmYpomqqkgpHT/LZrOkUikSiQT5fJ7Ozk42btzI1q1bqa+vx+v1IoQgn8+TTCZJpVKOmZfyCW63G4/Hg9/vp6ysDLe74Bq5XI6jR48yffp07rrrLnw+H5qmEQqFKCsrcyxM0zQUBYSw0HU3e/bs4R/+4SF0l4bH5eWSEZfyq18+jiaLgKgo5HI5tIceemiFrWVV09i8Zi2fvP46pxSoLI+y+unVXHHFFY752iyMqqpomobL5XIWL4TAsizGjx9PMBjk3XffpayszMke4/E4pmnidrvx+/2EQiECgQButxtFUTAMA8Mw8Hg8Djh+/vnnzJ49m1mzZqEoCmVlZVRWVhIKhfD7/Y7wdkSoqhqWZTF48GCmTJnCznd2EEskiBw5hpLLMmLy5EKYbFtnqQucbG3l7ZtuIprK8cq1V/I//+kpIuWRHlHUsRohME2TTCZDMpkkFouhaRovvvgir732GtXV1UgpSSaTtLa2MnLkSAYOHOgEUbqu09TUxMGDB6moqCAcDqPrOi0tLcyYMYPZs2eTz+epqKggFArh8/mcqLMnWsxeczzezuIlD3Dbzj+TLgvwN394gyHF9D2Xy/0lEpRSUhkqQ//WDDp0jXXLH8Lr9vSa3dkvL7UIezdaW1u5+eabaWxs5MyZM9TW1jpzBYNBcrkc+XwekOi6hs9X8GEpJR6Ph+bmZqqrq7nllluwLIvq6mrC4TBer7eLJfZI/WgaQggikXLWb3iWV/7xUaxsjoqiRdrP6qXC+D1evv+Lx7rscH9S29LF+Hw+AMeUx4wZQ0NDg2MhNoVlh8mFiE+3cy6y2SymaSKEYMyYMVRWVuLxeAiHw47/9zeitPHK43LxvYcf6T4X6CYOLRSmLoBxLX0h4OQJmqZRVVWFEAIhRK+ZoK1E26XsXS8rK8Pj8eD1eotAp3RLz/VFriJlId09R3l6N1LwVVg82xVsUHS73c4iu1t8TwmREMIR3O1292j2/dkkG/W7Xe+XJSf6eqGmac6i+yJCbDA9V1Gqqjoh+FflEXpMhy/2hLaQNjDabmG7QE9KsUPk0t/az5YC9cVWgn6xJywFuXMBsixYViBM8nkogmVpYhQIBJwAqzuG92KvVUqJyl9hlApvm69lWUgkhpkvBL8lR6g9MplMFy6v9Pu/hvkrinLxXaA7JZSeAn6fD13Xz/N/RVEIBoNdkrL/F0P/a4BgqV/bgmia5mSIatFNSikyTdNIJBJOnN9TNaq/x9//NxDsDt0VRUHXdSf6E+cwtjZupNNpNE0jGo06dcfS332VzepJYedhgBQCaVldbun0k2I+b1fPNWU7RugpHrC/P5cb7C1e6O9apBDIbtzqvFNAKYmUegpg+vL70nPdsixHkP5Egvb3lmU5IXFfz/a1FkVRUHoI6dVS/j9j5Hh++XJe+uUvCyXUEh/+Mjy+EIJEItGlll8KiN0FQqWMcDwed8Li/lph16j+L2a/8ckn+P2K/04ml0WUzOMoQFUUWtpi5F7ZhOfXz/B39y8gk8065agL8TX7LO/s7GT//v1d4nibPbLDW03TcLvdCCEwDMM5Ov1+PwcPHnQYp1JL6N8GCFS1QHosWfIArl8/i9i0kVOtragllvQXC7BMhtbUUfmjH7K7Msp7H+5nwX33EYvFnEClv8Kn02l8Ph8vv/wyn376KeXl5RiGgdvtxuv1cvbsWc6ePetQava/bXbHJlWPHTvGSy+9hM/nI51OO9bTlyIKaXehhjFv3jz+/N5edpRHcN81m2GDBiNKZOlCiSElhmWxZPEDnDz5OR3JJKGyEKueWsUll1zSKzdgE5p24eKFF15g7dq11NbWkkqlyOVyJBIJ/H4/+XyetrY2Z65C3h7B6/WSSqUIhUJ4vV5CoRCnTp3innvuYc6cOZim6ZCgPaXE9hqPHj3KkiVLiCcSRCJhqqqqWLV6NX6P18GI80nRImt64uRJ7rvnXlxuF4lkEoAnnniCiRMnnqeEUpN3uVzE43HWrl3Lli1bGDduHPF4nM7OTtLpNNlslkwm49QAzj3afD4ffr8fl8tFIBDA5/NRXl7OgQMHuOmmG1mwYCEVFVHy+Ty6rqPrri6AZ6/tgw8+4IEHHkBKSUVFBXnD4Ok1a6ivr+/CDOdyObTly5evsCMz++wtLy+norKCbdu2UxGNIoRky5YtDBs2zLEE+7emaTr83c6dO1mxYgX79u1l1KhRtLW1kclkcLvdzqLt4qllCQpZqoKiFEjRQqXH69Dm2WyWbDbLkCFD2LdvH2+99Rbl5VGGDRuG2+3GMIwuR6amaezYsYNly5bhdruJRCLEYjHuX7SIK6+88rzNsyyr98LIr371K7Zt20ZZWRn5fJ7m5mYeffRRpk2bRiaTKXL7Bo2NjWzcuImPPvqQyspKvF4fLS0tXRildDpNR0cHHo8HXdeJRMIYRh7LKph1Z2cay7KcgmcgEHBOISklNTU1GIbBmTNnGDHicr7znTu46qqr8Pl8zlq2b9/Oz3/+c6qrq51axA033MCDDz7Y/8JI6bGUMwyWLF7MqVOnHJ9JpVK8+uqrlJeX8/bbb7Nx40Y++ugjysqCDtdnGHln1xOJBOl0GsBhf0Fy6aVfI5fLOQzS8eMnHdewTwqv10skEsHlcjkW5PF4yGQypFIpRowYwcyZM5k6dSqdnZ3cfvvtDomiKAq1tbWsWrUKj8fTbTzTa23Q9pXDhw+zePFiJ4FpaWnh2muvRUrJ+++/X9wpOHv2LG1tbVRXDyAcDtPc3EwmkyEajeLxeMhms05B1OVyOZUbwyiExx0dKQzDwOVy4ff7HeuKxWL4/X5qampIJBKcOXOGSCRCRUUFmqaRTqcZOXIkHo+H3bt3U1FRgaqqGIbBk08+yciRI3usEPdaHS51hYaGBlavXk0wGCQej3PgwAFqamqoq6vjzJkzdHR0oKoq4XAY0zQ5e7aVSy+9jOnTp3P55Zc7bO/bb7/NCy+8gNvtdshPRSmEv16vB8MwmDVrFlOnTnWw4pNPPmHbtm0cOnSIiooK3G437e3tmKZJIBCgrq6OlpYWvvjiC0aPHk0kEqGjo4P77rvPYZRt8rU7C9D7opZN02TatGl0dHTw9NNP4/V6nYU0NTVhGAbBYJBwOExLSzMej4ef/vRurrvuWnw+nxMR6rrOFVdcwfDhw0mlUg6u2IGP/X82E2wYBrquU1lZyaRJk9i9ezcvvfQS7e3t1NTUkEwmSafTNDV9ga4XLEpVVZqbm5k7dy633HKL4za9hdF6fxme+vp6jhw5Qm1tLddc8zccO3aUL774goqKCjKZDE1NTVxzzdXceeedVFRUIoTA7w/g9/scbY8YMYKbbrqJzz//nPfff5+qqipUVeX06dNMmDCB+vp6Ro0a5dT6bJo8lUrxzW9+k3HjxvHKK6+wc+dOPB5PsfrcTjgcYcKEiTQ2NnLq1Cnq6+v7ncfosnAQ95llCCnwBwJUV1dx8OBHCCGora2lpaWFaDTK7Nmzue6661AUBa/XTThcTiAQcMw/l8vhdruZOXMmlmWxfft2pyQ+ZcoUvvWtbzkF1GAwiI1LpmkSCoVIJpNomsY999zD2LFjefnllzh9+jS1tXVkMhn279/PgAEDnPyhv2Gzrut6gsIl6W4VYdfsRo4cxZQpU9iy+TV0XaOubiCDBw9B13WmTJnCt7/9bZLJJBUVFY4Af0H9QiW3cNwVgqJbb721pNVFJZ/P4/f7CQQCeDwe58iy6472dZy2tjZmzJhBJpPhD3/4A+Xl5Zw4cYLjx48jhGD69OmMGTOGXC5Hd+B+jmw5Xdf1Y8D43hSgqipSCJYtXUpdbS07d+4kmUySSCQIBAK88847jB07luuvvx4hRJfkx3YhTdOcml4wGHQSHBtrXC6XQ6WX1vxK7xfZQLtr1y62bdtGKBRyqs0jRozg6quvZs6cOf25jyQBRdf1Y4plWetUVZ0HWBKpKZxPVgghyBk50p2FhKS9vZ358+c7Z7gQgmg0yrp165z7Peeyul3IiW5S23P5gHOftT/ZbJZ58+Y5dwRtmm39+vWUl5cjpcTv9ztW1AMG2NfH/l0VQvyvntih0sW5XW4CgQCqqjJo0CAWLFhAS0uLc3evra2NtWvXdilinEt7le6kXUgtLaj2VO21I0JN01i7di2tra3O/YGWlhYWLFjAoEGDABwX6g38ildlFeAVVdf1t4UQ+wtXRc9vKytdtB1fq6rKbbfdxsMPP0wsFiteV/Pz5ptv8uqrr6JpmpMv9MX+dEePdxeP6LrOli1baGhocOoHsViM5cuXc/vttwMQDoedne/l5rgousenQIPdTvZfgX/vT8OELLk6q+s6O3bsYPny5U4Gl8lkWL16NSNGjLgoV+btOT47fJgFCxfi9XrJZDLkcjlWrFjBDTfcgGmaXeL8Po4+W8Z7FUXZYPcMKUKIP6mqOvlC+oXs/PzDD/8PS5YsQQhBIBCgpraO1WuexqO7LohT7InYzJkm9y9YwOmmJjKZNCB54oknGT9+woXeTrdl+wCYDJhqUWNWPp//IdABqKKfHJiu65imydix43juueeIlkfJGAbtn5/kd6tWFevz4quVrlSV3z+1itjxY2TNPKGyEM888xzjx084b+f70SOgCiGywA8URTG6a5u7RUrLKmmUPL9Frpt2Nbtlrj0Wk3f94Afyf0z+hvyPkSPl/37rzS4tcF+mb3DnO+/IVy+7XD46cYKcNWeOPNt6ptDTd2GteKUL+E6pzI4FSCk1RVFeB/U2IFnSYCT6Kko411GiUX69dh0Dvz6BI8kOrHTmvE7g3vj77q7pY+Q4lkpTPW4cv163jorKKgd/+rnrdhdcGrhTUZRNUkq92CzWY/foGCnln87tjeyrddYstrZmTUPs3f9hoXVWfvnWWVlsnd134CPRaeS6vKOnT7FVt0vrrJTyXSnlhKJser/6h6WUqmmac6WUH8j/vGO/lHKeLXR3fcNKT+3zdqu5lNIFTAdmCiGuUlU1JIRQej3eBFjyIvUOCYFl5/Kq2mO0VjwupRAiparqHuA14A1FUXK9tc//X39f9yDKLNo5AAAAAElFTkSuQmCC">
+    <style>
+        /* ======= RESET & BASE ======= */
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --bg-deep: #0a0e17;
+            --bg-card: #111827;
+            --bg-card-hover: #1a2235;
+            --border: #1e293b;
+            --accent: #3b82f6;
+            --accent-glow: rgba(59,130,246,0.25);
+            --accent-cyan: #06b6d4;
+            --accent-green: #22c55e;
+            --accent-amber: #f59e0b;
+            --accent-red: #ef4444;
+            --accent-purple: #a855f7;
+            --text: #f1f5f9;
+            --text-dim: #94a3b8;
+            --text-muted: #64748b;
+            --font: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            --mono: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', monospace;
+            --radius: 12px;
+            --radius-lg: 20px;
+        }
+        html { scroll-behavior: smooth; }
+        body {
+            font-family: var(--font);
+            background: var(--bg-deep);
+            color: var(--text);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+        a { color: var(--accent); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        img { max-width: 100%; height: auto; }
+
+        /* ======= HERO ======= */
+        .hero {
+            position: relative;
+            min-height: 92vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 90px 24px 60px;
+            overflow: hidden;
+        }
+        .hero::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background:
+                radial-gradient(ellipse 80% 60% at 50% 20%, rgba(59,130,246,0.15) 0%, transparent 70%),
+                radial-gradient(ellipse 50% 40% at 20% 80%, rgba(6,182,212,0.10) 0%, transparent 60%),
+                radial-gradient(ellipse 50% 40% at 80% 80%, rgba(245,158,11,0.08) 0%, transparent 60%);
+            pointer-events: none;
+        }
+        .hero-content { position: relative; max-width: 940px; z-index: 1; }
+        .hero-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(245,158,11,0.12);
+            border: 1px solid rgba(245,158,11,0.35);
+            color: var(--accent-amber);
+            font-size: 13px;
+            font-weight: 700;
+            padding: 7px 18px;
+            border-radius: 999px;
+            margin-bottom: 24px;
+            letter-spacing: 0.5px;
+        }
+        .hero h1 {
+            font-size: clamp(2.3rem, 5.2vw, 4rem);
+            font-weight: 800;
+            letter-spacing: -0.025em;
+            line-height: 1.15;
+            margin-bottom: 22px;
+        }
+        .hero h1 .gradient-text {
+            background: linear-gradient(135deg, #38bdf8, #00d4aa, #fb923c);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .hero-sub {
+            font-size: clamp(1.05rem, 2.1vw, 1.25rem);
+            color: var(--text-dim);
+            max-width: 720px;
+            margin: 0 auto 36px;
+            line-height: 1.7;
+        }
+        .hero-cta-row {
+            display: flex;
+            gap: 16px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        .btn-hero {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            padding: 14px 32px;
+            border-radius: 10px;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-hero-primary {
+            background: var(--accent);
+            color: white;
+            box-shadow: 0 0 30px var(--accent-glow);
+        }
+        .btn-hero-primary:hover { background: #2563eb; transform: translateY(-2px); box-shadow: 0 0 40px var(--accent-glow); }
+        .btn-hero-warning {
+            background: linear-gradient(135deg, #f59e0b, #d97706);
+            color: #0b0f19;
+            font-weight: 700;
+            box-shadow: 0 0 25px rgba(245,158,11,0.25);
+        }
+        .btn-hero-warning:hover { transform: translateY(-2px); box-shadow: 0 0 35px rgba(245,158,11,0.4); }
+        .btn-hero-outline {
+            background: transparent;
+            color: var(--text-dim);
+            border: 1px solid var(--border);
+        }
+        .btn-hero-outline:hover { border-color: var(--accent); color: var(--text); }
+        .hero-note {
+            margin-top: 20px;
+            font-size: 13px;
+            color: var(--text-muted);
+        }
+
+        /* ======= FLOATING STATS ======= */
+        .stats-bar {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+            gap: 16px;
+            max-width: 1100px;
+            margin: -30px auto 0;
+            padding: 0 24px;
+            position: relative;
+            z-index: 2;
+        }
+        .stat-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 24px;
+            text-align: center;
+        }
+        .stat-num {
+            font-size: 1.85rem;
+            font-weight: 800;
+            line-height: 1.2;
+        }
+        .stat-label { font-size: 13px; color: var(--text-dim); margin-top: 4px; }
+
+        /* ======= SECTIONS ======= */
+        section { padding: 90px 24px; }
+        .section-inner { max-width: 1100px; margin: 0 auto; }
+        .section-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: var(--accent);
+            margin-bottom: 12px;
+        }
+        .section-title {
+            font-size: clamp(1.6rem, 3vw, 2.4rem);
+            font-weight: 700;
+            margin-bottom: 16px;
+            letter-spacing: -0.01em;
+        }
+        .section-desc {
+            font-size: 1.05rem;
+            color: var(--text-dim);
+            max-width: 720px;
+            line-height: 1.7;
+            margin-bottom: 44px;
+        }
+        .section-alt { background: #0d1220; }
+
+        /* ======= PREFLIGHT UPDATE SPOTLIGHT ======= */
+        .spotlight-card {
+            background: linear-gradient(145deg, #131b2e 0%, #0d1322 100%);
+            border: 1px solid rgba(245, 158, 11, 0.35);
+            border-radius: var(--radius-lg);
+            padding: 44px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4), 0 0 30px rgba(245, 158, 11, 0.08);
+            margin-bottom: 40px;
+        }
+        @media (max-width: 768px) { .spotlight-card { padding: 24px; } }
+        
+        .spotlight-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            flex-wrap: wrap;
+            gap: 16px;
+            margin-bottom: 30px;
+        }
+        .spotlight-badge {
+            background: rgba(245,158,11,0.15);
+            border: 1px solid rgba(245,158,11,0.4);
+            color: #fbbf24;
+            font-size: 12px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            padding: 6px 14px;
+            border-radius: 6px;
+        }
+
+        .dilemma-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+            margin-bottom: 36px;
+        }
+        @media (max-width: 768px) { .dilemma-grid { grid-template-columns: 1fr; } }
+
+        .dilemma-box {
+            padding: 24px;
+            border-radius: var(--radius);
+            border: 1px solid var(--border);
+        }
+        .dilemma-box.problem {
+            background: rgba(239, 68, 68, 0.05);
+            border-color: rgba(239, 68, 68, 0.25);
+        }
+        .dilemma-box.solution {
+            background: rgba(34, 197, 94, 0.06);
+            border-color: rgba(34, 197, 94, 0.3);
+        }
+        .dilemma-box .tag {
+            font-size: 11px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 10px;
+            display: inline-block;
+        }
+        .dilemma-box.problem .tag { color: var(--accent-red); }
+        .dilemma-box.solution .tag { color: var(--accent-green); }
+        .dilemma-box h4 { font-size: 1.15rem; font-weight: 700; margin-bottom: 10px; }
+        .dilemma-box p { font-size: 0.92rem; color: var(--text-dim); line-height: 1.6; }
+
+        /* Pipeline Steps Row */
+        .pipeline-container {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 28px;
+            margin-bottom: 30px;
+        }
+        .pipeline-title {
+            font-size: 1rem;
+            font-weight: 700;
+            color: var(--text);
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .pipe-steps-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+            gap: 16px;
+        }
+        .pipe-step-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 18px;
+            position: relative;
+        }
+        .pipe-step-num {
+            width: 28px;
+            height: 28px;
+            border-radius: 6px;
+            background: rgba(59,130,246,0.15);
+            color: var(--accent);
+            font-weight: 800;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 12px;
+        }
+        .pipe-step-card h5 { font-size: 0.95rem; font-weight: 700; margin-bottom: 6px; }
+        .pipe-step-card p { font-size: 0.82rem; color: var(--text-dim); line-height: 1.5; }
+        .pipe-step-card code { font-family: var(--mono); color: #38bdf8; font-size: 0.78rem; }
+
+        /* Hardware selection pills */
+        .hw-callout {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 16px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 18px 24px;
+        }
+        .hw-pills { display: flex; gap: 12px; flex-wrap: wrap; }
+        .hw-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            font-weight: 700;
+            padding: 6px 14px;
+            border-radius: 6px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+        }
+        .hw-pill.black { border-color: rgba(255,255,255,0.25); color: #e2e8f0; }
+        .hw-pill.green { border-color: rgba(34,197,94,0.4); color: #4ade80; }
+        .hw-desc { font-size: 0.88rem; color: var(--text-dim); }
+
+        /* ======= FEATURE GRID ======= */
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 20px;
+        }
+        .feature-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 28px;
+            transition: border-color 0.2s, transform 0.2s;
+        }
+        .feature-card:hover { border-color: rgba(59,130,246,0.4); transform: translateY(-2px); }
+        .feature-icon {
+            width: 44px;
+            height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 22px;
+            border-radius: 10px;
+            margin-bottom: 16px;
+        }
+        .feature-icon.blue { background: rgba(59,130,246,0.12); }
+        .feature-icon.cyan { background: rgba(6,182,212,0.12); }
+        .feature-icon.green { background: rgba(34,197,94,0.12); }
+        .feature-icon.amber { background: rgba(245,158,11,0.12); }
+        .feature-icon.purple { background: rgba(168,85,247,0.12); }
+        .feature-icon.red { background: rgba(239,68,68,0.12); }
+        .feature-card h3 { font-size: 1.1rem; font-weight: 700; margin-bottom: 8px; }
+        .feature-card p { font-size: 0.9rem; color: var(--text-dim); line-height: 1.6; }
+
+        /* ======= PRESET SHOWCASE ======= */
+        .preset-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 16px;
+        }
+        .preset-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 22px;
+            transition: border-color 0.2s;
+        }
+        .preset-card:hover { border-color: rgba(245,158,11,0.4); }
+        .preset-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 10px;
+        }
+        .preset-header .icon { font-size: 24px; }
+        .preset-header h4 { font-size: 0.95rem; font-weight: 700; }
+        .preset-card .desc { font-size: 0.82rem; color: var(--text-dim); line-height: 1.5; }
+        .preset-tag {
+            display: inline-block;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding: 3px 8px;
+            border-radius: 4px;
+            background: rgba(59,130,246,0.1);
+            color: var(--accent);
+            margin-bottom: 8px;
+        }
+
+        /* ======= HOW IT WORKS ======= */
+        .steps-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 24px;
+            counter-reset: step;
+        }
+        .step-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 28px;
+            position: relative;
+            counter-increment: step;
+        }
+        .step-card::before {
+            content: counter(step);
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            font-weight: 800;
+            color: var(--accent);
+            background: rgba(59,130,246,0.1);
+            border-radius: 8px;
+        }
+        .step-card h4 { font-size: 1rem; font-weight: 700; margin-bottom: 8px; }
+        .step-card p { font-size: 0.88rem; color: var(--text-dim); line-height: 1.6; }
+
+        /* ======= ARCHITECTURE ======= */
+        .arch-banner {
+            background: linear-gradient(135deg, rgba(59,130,246,0.08), rgba(6,182,212,0.06));
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 40px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 40px;
+            align-items: center;
+        }
+        @media (max-width: 768px) { .arch-banner { grid-template-columns: 1fr; } }
+        .arch-banner h3 { font-size: 1.5rem; font-weight: 700; margin-bottom: 12px; }
+        .arch-banner p { color: var(--text-dim); line-height: 1.7; margin-bottom: 16px; }
+        .arch-list { list-style: none; }
+        .arch-list li {
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            font-size: 0.9rem;
+            color: var(--text-dim);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .arch-list li .dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--accent);
+            flex-shrink: 0;
+        }
+        .code-block {
+            background: #0c1018;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 24px;
+            font-family: var(--mono);
+            font-size: 13px;
+            line-height: 1.8;
+            color: #a5f3fc;
+            overflow-x: auto;
+        }
+        .code-block .comment { color: #4b5563; }
+        .code-block .url { color: #86efac; }
+
+        /* ======= DOWNLOAD / CTA ======= */
+        .cta-section {
+            text-align: center;
+            padding: 100px 24px;
+            position: relative;
+        }
+        .cta-section::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(ellipse 70% 50% at 50% 50%, rgba(59,130,246,0.08) 0%, transparent 70%);
+            pointer-events: none;
+        }
+        .cta-inner { position: relative; z-index: 1; max-width: 700px; margin: 0 auto; }
+        .cta-inner h2 {
+            font-size: clamp(1.8rem, 3vw, 2.6rem);
+            font-weight: 800;
+            margin-bottom: 16px;
+        }
+        .cta-inner p { color: var(--text-dim); font-size: 1.1rem; margin-bottom: 36px; }
+        .coming-soon-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--accent-amber);
+            background: rgba(245,158,11,0.1);
+            border: 2px solid rgba(245,158,11,0.3);
+            padding: 16px 40px;
+            border-radius: 12px;
+            letter-spacing: 0.5px;
+        }
+
+        /* ======= FOOTER ======= */
+        footer {
+            border-top: 1px solid var(--border);
+            padding: 40px 24px;
+            text-align: center;
+            font-size: 13px;
+            color: var(--text-muted);
+        }
+        footer a { color: var(--text-dim); }
+        footer .links { display: flex; justify-content: center; gap: 24px; flex-wrap: wrap; margin-bottom: 12px; }
+
+        /* ======= NAV BAR ======= */
+        .top-nav {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 100;
+            background: rgba(10,14,23,0.85);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid rgba(30,41,59,0.6);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 32px;
+            height: 56px;
+        }
+        .top-nav .logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 800;
+            font-size: 15px;
+        }
+        .top-nav .logo .nav-logo-img {
+            width: 28px;
+            height: 28px;
+            border-radius: 6px;
+            object-fit: contain;
+            display: inline-block;
+        }
+        .top-nav .logo .icon { font-size: 22px; }
+        .top-nav .nav-links { display: flex; gap: 24px; }
+        .top-nav .nav-links a { color: var(--text-dim); font-size: 13px; font-weight: 500; transition: color 0.2s; }
+        .top-nav .nav-links a:hover { color: var(--text); text-decoration: none; }
+        .top-nav .nav-links a.highlight { color: var(--accent-amber); font-weight: 700; }
+        @media (max-width: 768px) {
+            .top-nav .nav-links { display: none; }
+            .stats-bar { grid-template-columns: 1fr 1fr; }
+            .hero { padding: 90px 16px 50px; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- ============ NAVIGATION ============ -->
+<nav class="top-nav">
+    <div class="logo">
+        <img src="data:image/png;base64,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dZFMJu2HPlhlVZNR0Ookvtz1iqLwy1/+kosvvphwOMzpp59OYWEhHR0dCCEYHBykpKQETdN45ZVX2LRpEytWrGDOnDnMmDEdsOjq2kNxsTScxX47ksccq7jxxhtvlbttopalpmkkEgnuuOMOFEXhuOOOwzAMQqEQkUiEtWvXous6CxYsYN26deTk5OByuejt7WVoaIj8/HxmzZqF3+9n+fLlvPTSS8yePZva2losy7LdJad+nSz1Nd6C1sx7MQwDy7LweDx8+OGHfOMb3+DFF1+kqamJpqYmIpEImzZtor+/3zb+uru7OfLII+no6GDLli1UVlYSCATw+XzMnDmDZDLJnj17OP3003G73XYAaaKxkFgshtLX1ycKCwsn5G45I1uXX345e/fupampiS1btpBIJEgmk4TDYbq6upg2bRp79uwhFosxY8YMurq6bKIKIaivr+ewww4jFouxbt06ent7ufLKK7nuuuvweDxEo1FcLleazj0YAZyxuL5OkZ+Tk4Npmtx777385je/we/3c/jhh5Ofn8+uXbvYsWOHHd8wTZOyslJ27NiOy+WmurqGnTt3cthhh+F2u22vYMqUKaxdu5aqqioeeugh2x0cLxNIWg8MDKD09/eLgoKCcTOAEIJkMonb7ebb3/42q1atYvHixWzatMmWCsFgkP7+fjo6OsjNzSU/P5+amhq6urrSIn7yXIWFhcyePRu/309raytr1qyhvr6eW265heOOOw7TNEkkEnaBSCYDZBpJmbt0tNJjJMZyftcwDFtV6brOu+++y49+9CM2b97MvHnzqK+vJ5lMsnnzZnp7e3G5XPvUQpaXl7Jnzx4GBoaIRiNMnTqVwsLCNLU6ffp0Vq5cyYIFC7j77rvTIokTYQDtpptuujUnJ2dcolRyvdvt5ve//z2PP/44xx57LM3NzTaHys8MDg7i8XiYNm2a/XCmadoveW1N04hGo3R1deFyuaiqqqKkpISWlhYeffRRdu/ezezZsyktLbVj7ZmGovzdyRwy3TyWl/yeVD/SqpeRTsuycLvduFwuOjo6+PGPf8ytt95KMpnkyCOPpLq6mr6+PtavX08oFELXdXvxZTDG683B4/GSm5tHXl6uHQfJz89P2+W9vb00NTXx6quvIoRg8eLFdjh9PBvXVgETkQCyimXFihVcdtllHH/88XR0dKSlcA3DIB6P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" alt="3DR Solo" class="nav-logo-img">
+        <span>3DR SOLO <strong>WEB UTILITY</strong></span>
+    </div>
+    <div class="nav-links">
+        <a href="#preflight" class="highlight">⚡ Preflight Update</a>
+        <a href="#features">Features</a>
+        <a href="#presets">Presets</a>
+        <a href="#how-it-works">Setup</a>
+        <a href="#architecture">Architecture</a>
+        <a href="#manual" style="color: var(--accent-amber); font-weight: 700;">📖 User Manuals</a>
+        <a href="#download">Downloads</a>
+    </div>
+</nav>
+
+<!-- ============ HERO ============ -->
+<section class="hero">
+    <div class="hero-content">
+        <div class="hero-badge">⚡ Automated Preflight Update — Compatible with all 3DR Solo Systems, any version</div>
+        <h1>
+            The Complete<br>
+            <span class="gradient-text">On-Board Management Console</span><br>
+            for Your 3DR Solo
+        </h1>
+        <p class="hero-sub">
+            Bypass defunct 3DR cloud servers forever. Perform the complete automated <strong>Preflight Update</strong>, flash latest ArduCopter stable version, calibrate sensors, tune flight parameters, and stream live HDMI video with real-time FPV <strong>On-Screen Display (OSD)</strong> — directly from any browser on any phone, tablet, or PC.
+        </p>
+        <div class="hero-cta-row">
+            <a href="Solo Web Utility Installer.exe" download="Solo Web Utility Installer.exe" class="btn-hero btn-hero-warning">💾 Windows Installer (.exe)</a>
+            <a href="Solo Web Utility Installer.apk" download="Solo Web Utility Installer.apk" class="btn-hero btn-hero-warning">📱 Android APK (.apk)</a>
+            <a href="#manual" class="btn-hero btn-hero-primary">📖 Read Manual Online</a>
+            <a href="3DR_Solo_User_Manual_Updated_2026.pdf" download="3DR_Solo_User_Manual_Updated_2026.pdf" class="btn-hero btn-hero-outline">📄 Solo Drone PDF</a>
+        </div>
+        <p class="hero-note">Resides permanently on the drone · Zero apps required · Works 100% offline via SoloLink Wi-Fi</p>
+    </div>
+</section>
+
+<!-- ============ STATS BAR ============ -->
+<div class="stats-bar">
+    <div class="stat-card">
+        <div class="stat-num" style="color: var(--accent-amber);">1-Click</div>
+        <div class="stat-label">Preflight Update</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-num" style="color: var(--accent-cyan);">Live FPV</div>
+        <div class="stat-label">HDMI Video + OSD</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-num" style="color: var(--accent-green);">Black &amp; Green</div>
+        <div class="stat-label">Cube Autopilots</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-num" style="color: var(--accent-purple);">1,000+</div>
+        <div class="stat-label">Live MAVLink Params</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-num" style="color: var(--accent);">100%</div>
+        <div class="stat-label">Offline Self-Contained</div>
+    </div>
+</div>
+
+<!-- ============ PREFLIGHT UPDATE & FIRMWARE HIGHLIGHT ============ -->
+<section id="preflight" class="section-alt">
+    <div class="section-inner">
+        <div class="section-label">⚡ The Definitive Modernization Solution</div>
+        <h2 class="section-title">Automated Preflight Update: Free Your Solo From the Loop</h2>
+        <p class="section-desc">
+            When 3D Robotics decommissioned their cloud update infrastructure, Solos around the world became trapped in the infamous "Preflight Update Required" prompt. The Solo Web Utility permanently solves this with an all-in-one, fully automated on-board firmware engine.
+        </p>
+
+        <div class="spotlight-card">
+            <div class="spotlight-header">
+                <div>
+                    <h3 style="font-size: 1.45rem; margin-bottom: 6px;">Rescue, Modernize &amp; Upgrade in One Step</h3>
+                    <p style="color: var(--text-dim); font-size: 0.95rem;">Upgrades the complete drone stack to modern firmware — compatible with all 3DR Solo Systems, any version, without legacy mobile apps or cloud servers.</p>
+                </div>
+            </div>
+
+            <!-- Solution Callout -->
+            <div style="margin-bottom: 24px;">
+                <div class="dilemma-box solution">
+                    <span class="tag">✅ The Solo Web Utility Solution</span>
+                    <h4>Complete 1-Click On-Board Update</h4>
+                    <p>All firmware images and update logic are stored permanently on the Solo's internal 6.5 GB storage partition. With a single click in your browser, the automated pipeline stages and flashes the Cube autopilot, Copter Linux OS, and Controller Linux OS, permanently clearing the Preflight lock.</p>
+                </div>
+            </div>
+
+            <!-- Hardware Support Callout -->
+            <div class="hw-callout">
+                <div>
+                    <h5 style="font-size: 0.95rem; margin-bottom: 4px;">Hardware Compatibility:</h5>
+                    <div class="hw-pills" style="margin-top: 6px;">
+                        <span class="hw-pill black">⬛ Stock Solo Cube (Black)</span>
+                        <span class="hw-pill green">🟩 Green Cube (latest ArduCopter stable version)</span>
+                    </div>
+                </div>
+                <div class="hw-desc" style="max-width: 440px;">
+                    1-Click toggle dynamically selects between <code>arducopter_solo.apj</code> and <code>arducopter_green.apj</code>. Both share the exact same battle-tested Linux system rootfs.
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ============ ALL FEATURES ============ -->
+<section id="features">
+    <div class="section-inner">
+        <div class="section-label">✦ Complete Capability Suite</div>
+        <h2 class="section-title">Everything You Need. In One Browser Tab.</h2>
+        <p class="section-desc">
+            Beyond firmware modernization, the Solo Web Utility provides a full flight deck and maintenance suite right from your browser.
+        </p>
+
+        <div class="feature-grid">
+            <div class="feature-card">
+                <div class="feature-icon amber">⚡</div>
+                <h3>Automated Firmware &amp; Preflight</h3>
+                <p>Complete drone stack deployment across Cube, Copter, and Controller. Compatible with all 3DR Solo Systems, any version. Includes Full Install or Cube-Only modes with live terminal output and an 8-minute reboot timer that survives page refreshes.</p>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon cyan">🎯</div>
+                <h3>Cockpit HUD &amp; Live HDMI Video with FPV OSD</h3>
+                <p>Real-time Primary Flight Display (PFD) artificial horizon, pitch ladder, roll arc, moving airspeed/altitude tape instruments, and ultra-low latency H.264 video streamed directly from the Solo's onboard HDMI capture via JMuxer. Includes toggleable real-time FPV On-Screen Display (OSD) overlay reporting GPS coordinates, satellites, HDOP, home distance/bearing, battery voltage, individual cell voltages (Cell 1–4), current draw, flight time, and signal RSSI.</p>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon green">⚙️</div>
+                <h3>Live Parameter Tuning &amp; Search</h3>
+                <p>Search and modify all 1,000+ ArduPilot parameters with real-time MAVLink read/write on UDP port 14560. Commits directly to the Pixhawk flight controller with instant ACK verification, plus .param file import and export.</p>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon blue">📐</div>
+                <h3>6-Axis Accelerometer Calibration</h3>
+                <p>Full interactive 6-position accelerometer and IMU calibration wizard. Guided visual orientation cards (Level → Left → Right → Nose Down → Nose Up → On Back) with real-time MAVLink telemetry feedback from the Pixhawk sensors.</p>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon purple">🧭</div>
+                <h3>Compass Calibration ("The Solo Dance")</h3>
+                <p>Dual-magnetometer compass calibration with guided 3-axis rotation cards, live per-compass progress bars, and real-time fitness scores. Automatically reboots the Pixhawk after 3 seconds upon completion to lock in magnetic offsets.</p>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon red">📶</div>
+                <h3>Wi-Fi &amp; Bi-Directional NAT Routing</h3>
+                <p>Connect the Controller to your home 2.4 GHz Wi-Fi while keeping the SoloLink AP active. Built-in IP forwarding and NAT masquerade enable your home computer to reach <code>10.1.1.10</code> directly without disconnecting from home internet.</p>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon blue">🎮</div>
+                <h3>Interactive Artoo Controller Setup</h3>
+                <p>Interactive SVG diagram of the 3DR Artoo Controller with clickable buttons. Customize Short Hold and Long Hold actions for A, B, Preset 1, Preset 2, and Camera buttons written directly to <code>/usr/bin/extSettings.conf</code> on the Solo.</p>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon green">🔒</div>
+                <h3>On-Board Security &amp; Password Management</h3>
+                <p>Protected web interface with SHA-256 salted password hashing and 24-hour session management. Built-in modal to change passwords directly in the browser, plus a command-line password reset tool.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ============ PRESETS ============ -->
+<section id="presets" class="section-alt">
+    <div class="section-inner">
+        <div class="section-label">⚡ 1-Click Configurations</div>
+        <h2 class="section-title">Tested Presets for Common Solo Mods</h2>
+        <p class="section-desc">
+            Apply battle-tested parameter configurations with a single click. Each preset writes directly to the Pixhawk flight controller via MAVLink with full ACK verification — no manual Mission Planner typing required.
+        </p>
+
+        <div class="preset-grid">
+            <div class="preset-card">
+                <div class="preset-tag">Navigation</div>
+                <div class="preset-header">
+                    <span class="icon">🧭</span>
+                    <h4>Here 1 / Here 2 GPS Compass</h4>
+                </div>
+                <p class="desc">Sets COMPASS_ORIENT = 0 for Here GPS units mounted upright facing forward.</p>
+            </div>
+            <div class="preset-card">
+                <div class="preset-tag">Navigation</div>
+                <div class="preset-header">
+                    <span class="icon">🧭</span>
+                    <h4>Stock Solo Leg Compass</h4>
+                </div>
+                <p class="desc">Restores factory COMPASS_ORIENT = 38 for the stock compass in the Solo leg.</p>
+            </div>
+            <div class="preset-card">
+                <div class="preset-tag">Airframe</div>
+                <div class="preset-header">
+                    <span class="icon">🛬</span>
+                    <h4>Retractable Landing Gear</h4>
+                </div>
+                <p class="desc">Configures Servo 7 output, RC7 toggle, and automatic deploy/retract in RTL and Land modes.</p>
+            </div>
+            <div class="preset-card">
+                <div class="preset-tag">Payload</div>
+                <div class="preset-header">
+                    <span class="icon">🎣</span>
+                    <h4>Bait Drop / Payload Release</h4>
+                </div>
+                <p class="desc">Gripper servo on Servo 8 with RC8 controller trigger. Grab at 1000µs, release at 2000µs.</p>
+            </div>
+            <div class="preset-card">
+                <div class="preset-tag">Flight Performance</div>
+                <div class="preset-header">
+                    <span class="icon">⚡</span>
+                    <h4>Sport Mode (High Velocity)</h4>
+                </div>
+                <p class="desc">15 m/s cruise, 12 m/s loiter, 35° lean angle, and faster climb/descent rates for agile flying.</p>
+            </div>
+            <div class="preset-card">
+                <div class="preset-tag">Flight Performance</div>
+                <div class="preset-header">
+                    <span class="icon">🎬</span>
+                    <h4>Cinematic Mode (Smooth)</h4>
+                </div>
+                <p class="desc">Ultra-smooth accelerations and gentle braking optimized for stabilized video and photography.</p>
+            </div>
+            <div class="preset-card">
+                <div class="preset-tag">Battery &amp; Power</div>
+                <div class="preset-header">
+                    <span class="icon">🔋</span>
+                    <h4>Stock 4S LiPo Battery</h4>
+                </div>
+                <p class="desc">Factory 4S LiPo failsafe thresholds — 14.0V Low RTL, 13.5V Critical RTL, SMBus monitoring.</p>
+            </div>
+            <div class="preset-card">
+                <div class="preset-tag">Battery &amp; Power</div>
+                <div class="preset-header">
+                    <span class="icon">⚡</span>
+                    <h4>4S Li-ion (Madhacker / High-Cap)</h4>
+                </div>
+                <p class="desc">Optimized for 18650/21700 Li-ion packs — lowered cutoffs (11.6V/11.3V) with Smart RTL.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ============ HOW IT WORKS ============ -->
+<section id="how-it-works">
+    <div class="section-inner">
+        <div class="section-label">🔧 Getting Started</div>
+        <h2 class="section-title">Up and Running in Minutes</h2>
+        <p class="section-desc">
+            A one-time Windows installer uploads the utility directly to your Solo. After that, it lives permanently on the drone — no reinstallation needed, even after power cycles.
+        </p>
+
+        <div class="steps-grid">
+            <div class="step-card">
+                <h4>Download the Installer</h4>
+                <p>Grab <code>Solo Web Utility Installer.exe</code> — a single standalone Windows executable. No Python, Git, or dependencies needed on your PC.</p>
+            </div>
+            <div class="step-card">
+                <h4>Connect to SoloLink Wi-Fi</h4>
+                <p>Power on your Solo and Controller, then connect your PC to the <strong>SoloLink</strong> Wi-Fi network as you normally would.</p>
+            </div>
+            <div class="step-card">
+                <h4>Run the Installer</h4>
+                <p>Double-click <code>Solo Web Utility Installer.exe</code>. It automatically connects via SSH, uploads all files, verifies syntax, and starts the web server on port 80.</p>
+            </div>
+            <div class="step-card">
+                <h4>Open Your Browser</h4>
+                <p>Navigate to <strong>http://10.1.1.10</strong> from any device connected to SoloLink. The utility is live and will persist across reboots permanently.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ============ ARCHITECTURE ============ -->
+<section id="architecture" class="section-alt">
+    <div class="section-inner">
+        <div class="section-label">🏗️ Technical Design</div>
+        <h2 class="section-title">Lives on Your Solo. Always Available.</h2>
+        <p class="section-desc">
+            The utility runs natively on the Solo Copter's onboard i.MX6 Linux companion computer — not on your phone or PC.
+            It's always available at <code>http://10.1.1.10</code> the instant you connect to SoloLink Wi-Fi.
+        </p>
+
+        <div class="arch-banner">
+            <div>
+                <h3>On-Board Architecture</h3>
+                <p>Written entirely in Python 2.7 for native compatibility with the Solo's embedded Linux environment. Zero external dependencies on the drone side.</p>
+                <ul class="arch-list">
+                    <li><span class="dot"></span>Runs directly on the Solo's i.MX6 companion computer</li>
+                    <li><span class="dot"></span>Persists across power cycles via <code>/etc/rc.local</code> auto-start</li>
+                    <li><span class="dot"></span>Installed on <code>/log/SoloWebUtility</code> (6.5 GB persistent ext4 storage)</li>
+                    <li><span class="dot"></span>Web server on port 80 — accessible from any browser</li>
+                    <li><span class="dot"></span>MAVLink telemetry via UDP port 14560 through <code>telem_forwarder</code></li>
+                    <li><span class="dot"></span>Direct Pixhawk parameter read/write with ACK verification</li>
+                    <li><span class="dot"></span>No internet connection required — fully self-contained</li>
+                    <li><span class="dot"></span>Works on any phone, tablet, laptop, or desktop with a browser</li>
+                    <li><span class="dot"></span>Compatible with all 3DR Solo Systems, any version</li>
+                </ul>
+            </div>
+            <div class="code-block">
+<span class="comment"># One-time install from Windows PC:</span>
+> deploy_to_solo.exe
+
+<span class="comment"># Connects to Solo via SSH (10.1.1.10)</span>
+<span class="comment"># Uploads web server + firmware files</span>
+<span class="comment"># Starts server on port 80</span>
+<span class="comment"># Configures auto-start on boot</span>
+
+<span class="comment"># Then from ANY device on SoloLink Wi-Fi:</span>
+Browser → <span class="url">http://10.1.1.10</span>
+
+<span class="comment"># That's it. Available forever.</span>
+<span class="comment"># Complete Preflight Update ready.</span>
+<span class="comment"># No apps. No cables. No GCS.</span>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ============ DOWNLOAD CTA ============ -->
+<section id="download" class="cta-section">
+    <div class="cta-inner" style="max-width: 980px;">
+        <div class="section-label" style="justify-content: center; margin-bottom: 8px;">💾 Direct Downloads</div>
+        <h2 style="font-size: clamp(2rem, 3.5vw, 2.8rem); font-weight: 800; margin-bottom: 12px;">Get the Solo Web Utility</h2>
+        <p style="color: var(--text-dim); font-size: 1.05rem; margin-bottom: 40px;">
+            Free, open-source, and 100% self-contained on-board drone software. Download the installer, Android helper app, or read the complete User Manual below.
+        </p>
+
+        <div class="download-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 24px; text-align: left; margin-bottom: 30px;">
+            <!-- Windows Installer Card -->
+            <div class="stat-card" style="background: var(--bg-card); border: 1px solid var(--accent-amber); padding: 32px; border-radius: var(--radius-lg); display: flex; flex-direction: column;">
+                <div style="font-size: 32px; margin-bottom: 12px;">🪟</div>
+                <h3 style="font-size: 1.25rem; font-weight: 700; margin-bottom: 8px;">Windows Installer</h3>
+                <p style="font-size: 0.88rem; color: var(--text-dim); margin-bottom: 24px; line-height: 1.6; flex: 1;">
+                    Single executable (<code>Solo Web Utility Installer.exe</code>). Automatically connects to Solo via SSH on SoloLink Wi-Fi, installs the web server, configures persistent boot startup, and launches the app.
+                </p>
+                <div>
+                    <a href="Solo Web Utility Installer.exe" download="Solo Web Utility Installer.exe" class="btn-hero btn-hero-warning" style="width: 100%; justify-content: center; font-size: 14px; padding: 12px 20px;">
+                        💾 Download Windows Installer (.exe) <span style="font-size: 11px; opacity: 0.8; font-weight: 400;">(~160 MB)</span>
+                    </a>
+                </div>
+            </div>
+
+            <!-- Android App Card -->
+            <div class="stat-card" style="background: var(--bg-card); border: 1px solid var(--accent-amber); padding: 32px; border-radius: var(--radius-lg); display: flex; flex-direction: column;">
+                <div style="font-size: 32px; margin-bottom: 12px;">📱</div>
+                <h3 style="font-size: 1.25rem; font-weight: 700; margin-bottom: 8px;">Sololink Viewer APK</h3>
+                <p style="font-size: 0.88rem; color: var(--text-dim); margin-bottom: 24px; line-height: 1.6; flex: 1;">
+                    Lightweight Android application (<code>Solo Web Utility Installer.apk</code>) providing direct web console view and seamless video handoff on Android devices connected to SoloLink Wi-Fi.
+                </p>
+                <div>
+                    <a href="Solo Web Utility Installer.apk" download="Solo Web Utility Installer.apk" class="btn-hero btn-hero-warning" style="width: 100%; justify-content: center; font-size: 14px; padding: 12px 20px;">
+                        📱 Download Android APK (.apk) <span style="font-size: 11px; opacity: 0.8; font-weight: 400;">(~154 MB)</span>
+                    </a>
+                </div>
+            </div>
+
+            <!-- 3DR Solo Quadcopter User Manual Card -->
+            <div class="stat-card" style="background: var(--bg-card); border: 1px solid var(--accent); padding: 32px; border-radius: var(--radius-lg); display: flex; flex-direction: column;">
+                <div style="font-size: 32px; margin-bottom: 12px;">🚁</div>
+                <h3 style="font-size: 1.25rem; font-weight: 700; margin-bottom: 8px;">3DR Solo Drone Manual</h3>
+                <p style="font-size: 0.88rem; color: var(--text-dim); margin-bottom: 24px; line-height: 1.6; flex: 1;">
+                    Official flight operations &amp; hardware manual for the 3DR Solo Quadcopter. Includes pre-flight safety, flight modes, smart shots, battery care, and hardware specs.
+                </p>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <a href="3DR_Solo_User_Manual_Updated_2026.pdf" download="3DR_Solo_User_Manual_Updated_2026.pdf" class="btn-hero btn-hero-primary" style="flex: 1; justify-content: center; font-size: 14px; padding: 12px 16px;">
+                        📄 PDF Manual
+                    </a>
+                    <a href="solo_drone_manual.html" target="_blank" class="btn-hero btn-hero-outline" style="justify-content: center; font-size: 14px; padding: 12px 16px;">
+                        🌐 Web Online
+                    </a>
+                </div>
+            </div>
+
+            <!-- Solo Web Utility Owner's Manual Card -->
+            <div class="stat-card" style="background: var(--bg-card); border: 1px solid var(--accent-cyan); padding: 32px; border-radius: var(--radius-lg); display: flex; flex-direction: column;">
+                <div style="font-size: 32px; margin-bottom: 12px;">💻</div>
+                <h3 style="font-size: 1.25rem; font-weight: 700; margin-bottom: 8px;">Solo Web Utility Manual</h3>
+                <p style="font-size: 0.88rem; color: var(--text-dim); margin-bottom: 24px; line-height: 1.6; flex: 1;">
+                    Complete 11-section documentation for the Solo Web Utility software tool covering system architecture, installation, Wi-Fi NAT router, Cockpit OSD HUD, calibrations, parameters, and controller setup.
+                </p>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <a href="Solo_Web_Utility_Owners_Manual.pdf" download="Solo_Web_Utility_Owners_Manual.pdf" class="btn-hero btn-hero-primary" style="flex: 1; justify-content: center; font-size: 14px; padding: 12px 16px;">
+                        📄 PDF Manual
+                    </a>
+                    <a href="manual.html" target="_blank" class="btn-hero btn-hero-outline" style="justify-content: center; font-size: 14px; padding: 12px 16px;">
+                        🌐 Web Online
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============ INTERACTIVE USER MANUAL VIEWER ============ -->
+        <div id="manual" style="margin-top: 50px; text-align: left; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 32px 28px; box-shadow: 0 10px 30px rgba(0,0,0,0.3);">
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; margin-bottom: 24px; border-bottom: 1px solid var(--border); padding-bottom: 20px;">
+                <div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span style="font-size: 28px;">📖</span>
+                        <h3 id="manualViewerTitle" style="font-size: 1.4rem; font-weight: 800; color: #fff; margin: 0;">3DR Solo Quadcopter — Official User Manual</h3>
+                    </div>
+                    <p id="manualViewerSubtitle" style="font-size: 0.88rem; color: var(--text-dim); margin: 6px 0 0 38px;">Community Updated 2026 Edition — Complete flight operations, safety guidelines, battery care, smart shots &amp; specs.</p>
+                </div>
+                <!-- Manual Switch Tabs -->
+                <div style="display: flex; gap: 8px; flex-wrap: wrap; background: var(--bg-deep); padding: 4px; border-radius: 10px; border: 1px solid var(--border);">
+                    <button id="btnManualDrone" onclick="switchManual('drone')" style="background: var(--accent); color: white; border: none; padding: 8px 16px; border-radius: 8px; font-weight: 700; font-size: 13px; cursor: pointer; transition: all 0.2s;">
+                        🚁 Solo Drone Manual
+                    </button>
+                    <button id="btnManualUtility" onclick="switchManual('utility')" style="background: transparent; color: var(--text-dim); border: none; padding: 8px 16px; border-radius: 8px; font-weight: 600; font-size: 13px; cursor: pointer; transition: all 0.2s;">
+                        💻 Web Utility Manual
+                    </button>
+                </div>
+            </div>
+
+            <!-- Action bar (Download PDF + Full screen) -->
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 16px;">
+                <div style="font-size: 13px; color: var(--text-muted); display: flex; align-items: center; gap: 6px;">
+                    <span style="display: inline-block; width: 8px; height: 8px; background: var(--accent-green); border-radius: 50%;"></span>
+                    <span>Interactive Online Reader — Instant loading on any phone, tablet, or PC without PDF plugins</span>
+                </div>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <a id="btnDownloadPdf" href="3DR_Solo_User_Manual_Updated_2026.pdf" download="3DR_Solo_User_Manual_Updated_2026.pdf" class="btn-hero btn-hero-warning" style="font-size: 13px; padding: 8px 18px; border-radius: 8px; text-decoration: none;">
+                        ⬇️ Download PDF Manual
+                    </a>
+                    <a id="btnOpenNewTab" href="solo_drone_manual.html" target="_blank" class="btn-hero btn-hero-outline" style="font-size: 13px; padding: 8px 18px; border-radius: 8px; text-decoration: none;">
+                        ↗️ Open Full Page in New Tab
+                    </a>
+                </div>
+            </div>
+
+            <!-- Embedded Online Reader (Loads instantly, zero blank screens) -->
+            <div style="position: relative; width: 100%; height: 750px; background: #0a0e17; border-radius: 12px; overflow: hidden; border: 1px solid var(--border);">
+                <iframe id="manualIframe" src="solo_drone_manual.html" title="Manual Reader" style="width: 100%; height: 100%; border: none; display: block;"></iframe>
+            </div>
+        </div>
+
+        <script>
+            function switchManual(type) {
+                var btnDrone = document.getElementById('btnManualDrone');
+                var btnUtility = document.getElementById('btnManualUtility');
+                var title = document.getElementById('manualViewerTitle');
+                var subtitle = document.getElementById('manualViewerSubtitle');
+                var iframe = document.getElementById('manualIframe');
+                var btnPdf = document.getElementById('btnDownloadPdf');
+                var btnTab = document.getElementById('btnOpenNewTab');
+
+                if (type === 'drone') {
+                    btnDrone.style.background = 'var(--accent)';
+                    btnDrone.style.color = 'white';
+                    btnDrone.style.fontWeight = '700';
+                    btnUtility.style.background = 'transparent';
+                    btnUtility.style.color = 'var(--text-dim)';
+                    btnUtility.style.fontWeight = '600';
+
+                    title.textContent = '3DR Solo Quadcopter — Official User Manual';
+                    subtitle.textContent = 'Community Updated 2026 Edition — Complete flight operations, safety guidelines, battery care, smart shots & specs.';
+                    iframe.src = 'solo_drone_manual.html';
+                    btnPdf.href = '3DR_Solo_User_Manual_Updated_2026.pdf';
+                    btnPdf.download = '3DR_Solo_User_Manual_Updated_2026.pdf';
+                    btnTab.href = 'solo_drone_manual.html';
+                } else {
+                    btnUtility.style.background = 'var(--accent-cyan)';
+                    btnUtility.style.color = '#0a0e17';
+                    btnUtility.style.fontWeight = '700';
+                    btnDrone.style.background = 'transparent';
+                    btnDrone.style.color = 'var(--text-dim)';
+                    btnDrone.style.fontWeight = '600';
+
+                    title.textContent = "Solo Web Utility — Official Owner's Manual";
+                    subtitle.textContent = 'Complete 11-section documentation for system architecture, installation, Wi-Fi NAT router, Cockpit OSD HUD, calibrations, parameters & controller mapping.';
+                    iframe.src = 'manual.html';
+                    btnPdf.href = 'Solo_Web_Utility_Owners_Manual.pdf';
+                    btnPdf.download = 'Solo_Web_Utility_Owners_Manual.pdf';
+                    btnTab.href = 'manual.html';
+                }
+            }
+        </script>
+
+        <p style="margin-top: 24px; font-size: 13px; color: var(--text-muted);">
+            Zero external dependencies on PC or drone · Permanent on-board storage · Works 100% offline via SoloLink Wi-Fi
+        </p>
+    </div>
+</section>
+
+<!-- ============ ECOSYSTEM & ACKNOWLEDGMENTS ============ -->
+<section class="section-alt" style="border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);">
+    <div class="section-inner" style="max-width: 900px; text-align: center;">
+        <div class="section-label" style="justify-content: center; margin-bottom: 8px;">🤝 Standing on the Shoulders of Giants</div>
+        <h2 class="section-title" style="margin-bottom: 16px;">Honoring the Solo Developer Legacy</h2>
+        <p class="section-desc" style="margin: 0 auto 32px; max-width: 780px;">
+            The 3DR Solo community owes immense gratitude to the visionary developers who kept the Solo ecosystem thriving over the years.
+        </p>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; text-align: left;">
+            <div class="stat-card" style="background: var(--bg-card); border: 1px solid rgba(59,130,246,0.25); padding: 28px; border-radius: var(--radius);">
+                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+                    <span style="font-size: 24px;">📱</span>
+                    <h4 style="font-size: 1.1rem; font-weight: 700;"><a href="https://solex-app.com/" target="_blank" rel="noopener">Solex</a></h4>
+                </div>
+                <p style="font-size: 0.9rem; color: var(--text-dim); line-height: 1.6;">
+                    <a href="https://solex-app.com/" target="_blank" rel="noopener">Solex</a> is a highly capable, full-featured, current app receiving updates for Android pilots, offering rich shot management, custom flight modes, and advanced ground control.
+                </p>
+            </div>
+
+            <div class="stat-card" style="background: var(--bg-card); border: 1px solid rgba(6,182,212,0.25); padding: 28px; border-radius: var(--radius);">
+                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+                    <span style="font-size: 24px;">✈️</span>
+                    <h4 style="font-size: 1.1rem; font-weight: 700;"><a href="https://sidepilot.net/" target="_blank" rel="noopener">SidePilot</a></h4>
+                </div>
+                <p style="font-size: 0.9rem; color: var(--text-dim); line-height: 1.6;">
+                    <a href="https://sidepilot.net/" target="_blank" rel="noopener">SidePilot</a> is a highly capable, full-featured, current app receiving updates for iOS aviators, providing flight planning, real-time telemetry, and seamless ArduPilot integration.
+                </p>
+            </div>
+        </div>
+
+        <p style="margin-top: 28px; font-size: 0.92rem; color: var(--text-dim); line-height: 1.7;">
+            The <strong>Solo Web Utility</strong> operates directly on the drone's Linux companion computer as an on-board maintenance console for automated firmware upgrades, parameter setup, and sensor calibration. It is designed to work in harmony alongside Solex, SidePilot, QGroundControl, and Mission Planner.
+        </p>
+    </div>
+</section>
+
+<!-- ============ FOOTER ============ -->
+<footer>
+    <div class="links">
+        <a href="https://github.com/OpenSolo/OpenSolo">OpenSolo GitHub</a>
+    </div>
+    <p>3DR Solo Web Utility · Built for the Open Solo Community</p>
+    <p style="margin-top: 4px;">3DR Solo is a product of 3D Robotics, Inc. This project is not affiliated with 3DR.</p>
+</footer>
+
+</body>
+</html>

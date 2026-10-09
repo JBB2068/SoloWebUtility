@@ -1,0 +1,109 @@
+================================================================================
+          3DR SOLO WEB UTILITY v1.0.57 - TESTER & DEPLOYMENT GUIDE
+================================================================================
+
+This package is completely standalone and portable.
+NO Python installation or extra software is required on your computer!
+All you need is a Windows PC connected to the Solo's Wi-Fi.
+
+--------------------------------------------------------------------------------
+1. PREREQUISITES
+--------------------------------------------------------------------------------
+- Any Windows PC (Windows 10, 11, etc.)
+- 3DR Solo Copter and Controller (both powered on)
+- PC connected to Solo Wi-Fi ("SoloLink_XXXXXX", default password: sololink)
+
+(No Python, no Git, and no other software needs to be installed!)
+
+--------------------------------------------------------------------------------
+2. HOW TO INSTALL (STANDALONE 1-CLICK DEPLOYMENT)
+--------------------------------------------------------------------------------
+1. Connect your PC's Wi-Fi to your Solo network:
+      SSID:     SoloLink_XXXXXX
+      Password: sololink
+
+2. Double-click:
+      deploy_to_solo.exe
+   (Or run deploy_to_solo.bat)
+
+3. The installer runs automatically:
+   - Connects to the Solo Copter over Wi-Fi (10.1.1.10)
+   - Uploads the web application and firmware to the persistent /log partition
+   - Starts the web server on port 80
+   - Sets up auto-start so the web server boots every time you turn on Solo
+
+4. When you see:
+      *** SOLO WEB UTILITY v1.0.57 INSTALLED & READY!
+   Press Enter to close the installer window.
+
+--------------------------------------------------------------------------------
+3. OPENING THE WEB UTILITY
+--------------------------------------------------------------------------------
+Open Google Chrome, Microsoft Edge, Firefox, or Safari, and navigate to:
+      http://10.1.1.10
+
+- Default Password: sololink
+- (Optional) You can change the password at any time via the key icon in the top bar.
+
+--------------------------------------------------------------------------------
+4. KEY FEATURES TO TEST
+--------------------------------------------------------------------------------
+
+[TAB 1] Firmware Update & Flashing (Open Solo 4 with latest ArduCopter stable version)
+  - Pixhawk Autopilot Flashing:
+      * Stock Black Cube (arducopter_solo.apj - latest ArduCopter stable version)
+      * Green Cube (arducopter_green.apj - latest ArduCopter stable version)
+  - Solo Copter Linux System Update (3dr-solo.tar.gz)
+  - Solo Controller System Update (3dr-controller.tar.gz)
+  - Automated Preflight Update sequence clearing the legacy 3DR cloud lock.
+  - Step 2: Copter & Controller Pairing procedure.
+  - Step 3: Full 6-Axis Accelerometer & IMU Calibration wizard.
+  - Step 4: Compass Calibration ("The Solo Dance") with live fitness gauges and auto-reboot.
+
+[TAB 2] Wi-Fi & Internet Management
+  - Connect Solo Controller to your Home 2.4 GHz Wi-Fi network.
+  - Keeps SoloLink AP running concurrently while routing Internet to the drone.
+  - Real-time connection status polling and Home IP display.
+  - Bi-Directional Packet Forwarding (NAT masquerading) to reach 10.1.1.10 from home LAN.
+  - One-click Reset to Factory SoloLink AP mode.
+
+[TAB 3] Parameters & Presets
+  - Search, view, and modify vehicle parameters via UDP MAVLink (port 14560).
+  - One-Click Presets:
+      * Here 1 / Here 2 GPS (COMPASS_ORIENT = 0)
+      * Stock Solo Leg Compass (COMPASS_ORIENT = 38)
+      * Retractable Landing Gear (SERVO7 & RC7)
+      * Bait Drop / Payload Release Gripper (SERVO8 & RC8)
+      * Sport Mode (High Velocity, 15 m/s)
+      * Cinematic Mode (Smooth, 5 m/s)
+      * Stock 4S LiPo Battery Parameters
+      * 4S Li-ion Battery Parameters (Madhacker / High-Cap)
+  - Export and Import custom parameter sets (.param).
+
+[TAB 4] Controller Setup (extSettings.conf)
+  - Interactive SVG diagram of the 3DR Artoo Controller with clickable buttons.
+  - Custom Short Hold & Long Hold button actions mapped to /usr/bin/extSettings.conf.
+  - 5 Quick-Apply Button Profiles (Default, Cinematography, Acro, Payload, Survey).
+  - Diff confirmation modal with automated backup.
+
+[TAB 5] Cockpit HUD & Live HDMI Video Feed
+  - Full-screen Primary Flight Display (PFD) artificial horizon and pitch ladder.
+  - Real-time moving tape instruments for airspeed and altitude.
+  - Live RTP H.264 video streamed directly from Solo's HDMI capture port via JMuxer.
+  - High-rate MAVLink telemetry (~270Hz) with 3D GPS satellite lock, HDOP, and cell voltages.
+  - 1-Click flight mode switching (Loiter, AltHold, PosHold, RTL, Land) and 2-step motor arming.
+
+--------------------------------------------------------------------------------
+5. TROUBLESHOOTING & TIPS
+--------------------------------------------------------------------------------
+- Cannot reach http://10.1.1.10?
+  Verify that your PC is still connected to the "SoloLink_XXXXXX" Wi-Fi.
+  If the Copter or Controller reboots, Windows may temporarily jump back to
+  your home Wi-Fi. Simply reconnect to SoloLink and refresh.
+
+- Old version showing in the browser?
+  Hard-refresh your browser cache by pressing Ctrl + F5 (or Ctrl + Shift + R).
+
+================================================================================
+                      Thank you for testing!
+================================================================================
