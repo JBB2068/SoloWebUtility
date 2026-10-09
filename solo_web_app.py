@@ -4,7 +4,6 @@
 🛸 3DR Solo Web Utility Server
 Self-contained, lightweight Python web server and REST API for 3DR Solo & Open Solo.
 Zero external dependencies - runs on Python 2.7 & Python 3.x standard library.
-Includes automatic Captive Portal browser auto-launch detection for iOS, Android, and Windows.
 """
 
 import os
@@ -752,8 +751,6 @@ def run_server(port=PORT):
     print("=" * 65)
     print("  * Web Interface: http://localhost:%d" % chosen_port)
     print("  * Solo Network:  http://10.1.1.10:%d" % chosen_port)
-    print("  * Controller:    http://10.1.1.1:%d" % chosen_port)
-    print("  * Captive Portal: Auto-open enabled on Wi-Fi connect")
     print("=" * 65)
 
     try:
