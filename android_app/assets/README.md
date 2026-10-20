@@ -19,12 +19,6 @@ A concise, self-contained on-board web server and management portal for the **3D
   3. SSH to 10.1.1.1 and stage controller update → Reboot Controller i.MX6.
 - **Live terminal** with real-time log streaming and reboot progress.
 
-### 🔗 Automatic Pairing (between firmware flash and calibrations)
-- Pairing widget appears directly on the Firmware tab **between** the flash result and the calibration reminders — exactly the correct workflow order.
-- Uses **`sololink_config --pair`** via SSH to the Controller (3DR dev method).
-- Falls back to `systemctl restart sololink` if `sololink_config` is unavailable.
-- Also available as a full dedicated Pairing tab.
-
 ### 📶 Wi-Fi & Internet (Tab 2)
 - **Connect to Home Wi-Fi:** Uses stock station mode, session-only with an arm interlock and live step diagnostics.
 - **Bi-Directional Routing:** 1-click NAT masquerade (`iptables`) so your home PC can reach `10.1.1.10` through your home LAN without switching networks.
