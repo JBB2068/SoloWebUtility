@@ -55,10 +55,7 @@ def should_ignore_dir(dir_name):
         return True
     return False
 
-TESTER_EXCLUDE_FILES = {
-    'arducoptercubegreen-solo-4.7.1.apj',
-    'arducoptercubesolo-4.7.1.apj',
-}
+TESTER_EXCLUDE_FILES = set()
 
 TESTER_EXCLUDE_PREFIXES = (
     'Open Solo 4.0.0 Clean Install',

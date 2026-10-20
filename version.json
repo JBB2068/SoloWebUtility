@@ -1,7 +1,7 @@
 {
-  "version": "1.0.71",
-  "iteration": 71,
-  "updated_at": 1791480161,
+  "version": "1.2.0",
+  "iteration": 72,
+  "updated_at": 1792176842,
   "changelog": [
     {
       "version": "1.0.67",
@@ -400,6 +400,12 @@
       "iteration": 71,
       "date": "2026-10-08 12:22:41",
       "description": "Packaged self-contained Android APK (sololink_viewer.apk) with all firmware images, application scripts, static assets, and documentation."
+    },
+    {
+      "version": "1.2.0",
+      "iteration": 72,
+      "date": "2026-10-16 13:54:02",
+      "description": "Firmware tab: revert to any of the last 3 ArduCopter builds or flash a custom .apj uploaded from the browser (older builds are archived to firmware/previous instead of deleted). Cube Only installs no longer start the 6-minute reboot countdown. Golden image ships ArduCopter 4.7.2 (4.7.1 kept for reverting). Controller home Wi-Fi uses the stock station mode, session-only with an arm interlock and step diagnostics."
     }
   ]
 }

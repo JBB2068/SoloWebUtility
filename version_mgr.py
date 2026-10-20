@@ -39,7 +39,7 @@ def get_version_info():
             "iteration": 1,
             "updated_at": int(time.time()),
             "changelog": [
-                {"version": INITIAL_VERSION, "date": time.strftime("%Y-%m-%d %H:%M:%S"), "description": "Initial Release of 3DR Solo Web Utility (Open Solo 4.7.1 & Flashing Manager)."}
+                {"version": INITIAL_VERSION, "date": time.strftime("%Y-%m-%d %H:%M:%S"), "description": "Initial Release of 3DR Solo Web Utility (Open Solo 4.7.2 & Flashing Manager)."}
             ]
         }
         save_version_info(info)

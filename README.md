@@ -96,8 +96,8 @@ SoloWebUtility/
 │   ├── pixhawk.py               # Pixhawk serial bootloader flasher
 │   └── uploader.py              # APJ uploader
 ├── firmware/
-│   ├── arducopter_solo.apj      # latest ArduCopter stable version — Stock Solo Cube (1.37 MB)
-│   ├── arducopter_green.apj     # latest ArduCopter stable version — Green Cube (1.42 MB)
+│   ├── arducopter_CubeSolo_*.apj  # latest ArduCopter stable version — Stock Solo Cube (1.37 MB)
+│   ├── arducopter_CubeGreen_*.apj # latest ArduCopter stable release — Green Cube (1.42 MB)
 │   ├── 3dr-solo.tar.gz          # Copter iMX6 Linux image (76 MB) — shared by both
 │   ├── 3dr-solo.tar.gz.md5
 │   ├── 3dr-controller.tar.gz    # Controller iMX6 Linux image (75 MB)

@@ -10,14 +10,14 @@ APJ builder routine to compile/fetch builds for CubeSolo and CubeGreen-solo with
   - Sport Mode enabled (MODE_SPORT)
   - Lua Scripting disabled (SCRIPTING and dependent scripting features removed)
 Applies the corresponding Cube parameter defaults via apj_tool, stages each build
-into storage (firmware/arducoptercubesolo-<version>.apj and arducoptercubegreen-solo-<version>.apj),
-updates the active APJ files (arducopter_solo.apj and arducopter_green.apj) to make
-them current, replaces previous versioned files, and informs the user that an update is ready.
+into storage as arducopter_CubeSolo_<version>.apj and arducopter_CubeGreen_<version>.apj,
+replaces previous versioned files, and informs the user that an update is ready.
 
 Compatible with Python 2.7 and Python 3.x standard library.
 """
 
 import os
+import compat
 import re
 import sys
 import json
@@ -67,6 +67,24 @@ BOARD_MAP = {
     "cubegreen": "CubeGreen-solo",
     "cubegreen-solo": "CubeGreen-solo"
 }
+
+import socket
+
+
+def check_internet_connection(host="8.8.8.8", port=53, timeout=1.2):
+    """
+    Quick low-timeout connection test to a public DNS provider (8.8.8.8:53).
+    Returns True if an external internet route is active, False otherwise.
+    Never hangs or stalls the application thread.
+    """
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        s.connect((host, port))
+        s.close()
+        return True
+    except Exception:
+        return False
 
 
 def _http_get_via_controller(url, timeout=25):
@@ -268,9 +286,9 @@ def get_local_firmware_version():
     # 2. Scan firmware directory for versioned APJ files
     if os.path.isdir(FIRMWARE_DIR):
         for fn in os.listdir(FIRMWARE_DIR):
-            if not fn.endswith(".apj"):
+            if not fn.lower().endswith(".apj"):
                 continue
-            m = re.match(r"^arducoptercube(?:green-solo|solo)-([\d\.]+)\.apj$", fn, re.IGNORECASE)
+            m = re.match(r"^arducopter[_\-]?cube(?:green[_\-]?solo|green|solo)[_\-]?([\d\.]+)\.apj$", fn, re.IGNORECASE)
             if m:
                 v_str = m.group(1)
                 candidates.append((parse_version_tuple(v_str), v_str))
@@ -500,17 +518,36 @@ def apply_param_defaults_to_apj(apj_path, param_file=None, cube_type="solo", log
 
 def clean_old_firmware_files(board_id, new_version):
     """
-    Remove previous versioned APJ files for this board from storage.
-    Example: removes arducoptercubesolo-4.7.1.apj when new_version is 4.7.2.
+    Remove previous versioned APJ files and any legacy unversioned APJ duplicates for this board.
+    Example: removes arducopter_CubeSolo_4.7.1.apj when new_version is 4.7.2,
+    and removes legacy arducopter_solo.apj / arducopter_green.apj.
     """
-    prefix = "arducoptercubegreen-solo-" if board_id == "CubeGreen-solo" else "arducoptercubesolo-"
-    kept_fn = "%s%s.apj" % (prefix, new_version)
+    prefixes = ["arducopter_CubeGreen_", "arducoptercubegreen-solo-"] if board_id == "CubeGreen-solo" else ["arducopter_CubeSolo_", "arducoptercubesolo-"]
+    kept_fn = ("arducopter_CubeGreen_%s.apj" if board_id == "CubeGreen-solo" else "arducopter_CubeSolo_%s.apj") % new_version
+    legacy_fn = "arducopter_green.apj" if board_id == "CubeGreen-solo" else "arducopter_solo.apj"
     removed = []
 
-    if os.path.isdir(FIRMWARE_DIR):
-        for fn in os.listdir(FIRMWARE_DIR):
-            if fn.startswith(prefix) and fn.endswith(".apj") and fn != kept_fn:
-                old_path = os.path.join(FIRMWARE_DIR, fn)
+    check_dirs = [FIRMWARE_DIR]
+    if "/log/firmware" not in check_dirs and os.path.isdir("/log/firmware"):
+        check_dirs.append("/log/firmware")
+
+    for d in check_dirs:
+        if not os.path.isdir(d):
+            continue
+        # Clean legacy unversioned duplicate if present
+        leg_p = os.path.join(d, legacy_fn)
+        if os.path.isfile(leg_p):
+            try:
+                os.remove(leg_p)
+                removed.append(legacy_fn)
+            except Exception:
+                pass
+
+        for fn in os.listdir(d):
+            if not fn.lower().endswith(".apj") or fn == kept_fn:
+                continue
+            if any(fn.startswith(p) for p in prefixes):
+                old_path = os.path.join(d, fn)
                 try:
                     os.remove(old_path)
                     removed.append(fn)
@@ -522,8 +559,7 @@ def clean_old_firmware_files(board_id, new_version):
 def build_and_stage_cube(board_id, ver_info, progress_callback=None, log_fn=None):
     """
     Execute full custom build, download, parameter embedding, and staging for a single Cube board.
-    Updates storage (arducoptercube<board>-<ver>.apj), makes it the active one (arducopter_solo.apj / arducopter_green.apj),
-    and removes the previous versioned file.
+    Saves directly to arducopter_Cube<board>_<ver>.apj in /log/firmware/ and removes previous versioned files.
     Returns dict of build results.
     """
     def _log(msg, level="INFO"):
@@ -537,16 +573,13 @@ def build_and_stage_cube(board_id, ver_info, progress_callback=None, log_fn=None
     version_id = ver_info["id"]
 
     if board_id == "CubeGreen-solo":
-        versioned_name = "arducoptercubegreen-solo-%s.apj" % version_name
-        active_name = "arducopter_green.apj"
+        versioned_name = "arducopter_CubeGreen_%s.apj" % version_name
         cube_type_key = "green"
     else:
-        versioned_name = "arducoptercubesolo-%s.apj" % version_name
-        active_name = "arducopter_solo.apj"
+        versioned_name = "arducopter_CubeSolo_%s.apj" % version_name
         cube_type_key = "solo"
 
     versioned_path = os.path.join(FIRMWARE_DIR, versioned_name)
-    active_path = os.path.join(FIRMWARE_DIR, active_name)
 
     _log("[*] Fetching configurable board features for %s (%s)..." % (cube_name, board_id), "INFO")
     features = get_board_features(version_id, board_id)
@@ -572,22 +605,26 @@ def build_and_stage_cube(board_id, ver_info, progress_callback=None, log_fn=None
     poll_build(build_id, progress_callback=_on_poll, max_wait=1200)
     _log("[OK] Build %s compiled successfully on server!" % build_id, "SUCCESS")
 
-    _log("[*] Downloading artifact package and extracting arducopter.apj...", "INFO")
+    _log("[*] Downloading artifact package and extracting %s..." % versioned_name, "INFO")
     download_artifact_apj(build_id, versioned_path)
     file_sz = os.path.getsize(versioned_path)
     _log("[OK] Successfully saved: %s (%d bytes)" % (versioned_name, file_sz), "SUCCESS")
 
-    # Embed matching .param defaults
+    # Embed matching .param defaults directly into the versioned APJ
     apply_param_defaults_to_apj(versioned_path, cube_type=cube_type_key, log_fn=_log)
+    _log("[OK] Parameter defaults embedded in: %s" % versioned_name, "SUCCESS")
 
-    # Make it the current one: replace active APJ
-    shutil.copyfile(versioned_path, active_path)
-    _log("[OK] Made active APJ for %s: %s" % (cube_name, active_name), "SUCCESS")
-
-    # Replace previous versioned file(s) in storage
+    # Replace previous versioned file(s) and legacy unversioned duplicates in storage
     removed = clean_old_firmware_files(board_id, version_name)
     if removed:
         _log("[*] Cleaned up previous version files: %s" % ", ".join(removed), "INFO")
+
+    # Mandatory build hook: if running in dev environment with base firmware present, ensure baked
+    try:
+        import bake_into_firmware
+        bake_into_firmware.ensure_firmware_baked(app_base_dir=BASE_DIR, log_func=_log)
+    except Exception as be:
+        _log("[!] Auto-bake notice: %s" % str(be), "INFO")
 
     return {
         "board": board_id,
@@ -596,106 +633,14 @@ def build_and_stage_cube(board_id, ver_info, progress_callback=None, log_fn=None
         "version_id": version_id,
         "build_id": build_id,
         "versioned_file": versioned_name,
-        "active_file": active_name,
+        "active_file": versioned_name,
         "file_size": file_sz,
         "built_at": time.strftime("%Y-%m-%d %H:%M:%S")
     }
 
 
 def update_setup_files(new_version, solo_apj_name=None, green_apj_name=None, log_fn=None):
-    """
-    Replace APJ files inside clean install setup packages (zips) in FIRMWARE_DIR
-    and rename them to match the new version.
-    """
-    def _log(msg, level="INFO"):
-        if log_fn:
-            log_fn(msg, level)
-        else:
-            print("[%s] %s" % (level, msg))
-
-    solo_apj_path = os.path.join(FIRMWARE_DIR, solo_apj_name) if solo_apj_name else os.path.join(FIRMWARE_DIR, "arducopter_solo.apj")
-    green_apj_path = os.path.join(FIRMWARE_DIR, green_apj_name) if green_apj_name else os.path.join(FIRMWARE_DIR, "arducopter_green.apj")
-
-    if not os.path.exists(solo_apj_path):
-        solo_apj_path = os.path.join(FIRMWARE_DIR, "arducopter_solo.apj")
-    if not os.path.exists(green_apj_path):
-        green_apj_path = os.path.join(FIRMWARE_DIR, "arducopter_green.apj")
-
-    if not os.path.exists(solo_apj_path) or not os.path.exists(green_apj_path):
-        _log("[!] Active APJ files not found for setup file update (%s, %s)." % (solo_apj_path, green_apj_path), "WARNING")
-        return False
-
-    import zipfile
-    _log("[*] Updating setup packages with new APJ binaries (v%s)..." % new_version, "INFO")
-
-    target_solo_zip = "Open Solo 4.0.0 Clean Install (Copter-%s).zip" % new_version
-    target_green_zip = "Open Solo 4.0.0 Clean Install GREEN CUBE (Copter-%s).zip" % new_version
-
-    packages = [
-        ("solo", target_solo_zip, solo_apj_path),
-        ("green", target_green_zip, green_apj_path)
-    ]
-
-    for ptype, target_name, apj_source in packages:
-        matched_zip = None
-        if os.path.isdir(FIRMWARE_DIR):
-            for fn in os.listdir(FIRMWARE_DIR):
-                if not fn.endswith(".zip"):
-                    continue
-                fn_lower = fn.lower()
-                if ptype == "green" and "green cube" in fn_lower and "clean install" in fn_lower:
-                    matched_zip = os.path.join(FIRMWARE_DIR, fn)
-                    break
-                elif ptype == "solo" and "green cube" not in fn_lower and "clean install" in fn_lower:
-                    matched_zip = os.path.join(FIRMWARE_DIR, fn)
-                    break
-
-        if not matched_zip or not os.path.exists(matched_zip):
-            _log("[!] Clean install package for %s not found in %s" % (ptype, FIRMWARE_DIR), "WARNING")
-            continue
-
-        _log("  [*] Updating %s setup package: %s..." % (ptype, os.path.basename(matched_zip)), "INFO")
-        with open(apj_source, "rb") as f:
-            new_apj_bytes = f.read()
-
-        target_path = os.path.join(FIRMWARE_DIR, target_name)
-        temp_target_path = os.path.join(FIRMWARE_DIR, "temp_" + target_name)
-
-        try:
-            with zipfile.ZipFile(matched_zip, 'r') as zin:
-                with zipfile.ZipFile(temp_target_path, 'w', compression=zipfile.ZIP_DEFLATED) as zout:
-                    replaced = False
-                    for item in zin.infolist():
-                        if item.filename == "install/tmp/updates/arducopter.apj":
-                            zout.writestr(item, new_apj_bytes)
-                            replaced = True
-                        else:
-                            zout.writestr(item, zin.read(item.filename))
-                    if not replaced:
-                        zout.writestr("install/tmp/updates/arducopter.apj", new_apj_bytes)
-
-            if os.path.exists(matched_zip) and os.path.abspath(matched_zip) != os.path.abspath(target_path):
-                try:
-                    os.remove(matched_zip)
-                except Exception:
-                    pass
-
-            if os.path.exists(target_path):
-                try:
-                    os.remove(target_path)
-                except Exception:
-                    pass
-
-            shutil.move(temp_target_path, target_path)
-            _log("[OK] Updated setup package: %s (%d bytes)" % (target_name, os.path.getsize(target_path)), "SUCCESS")
-        except Exception as e:
-            if os.path.exists(temp_target_path):
-                try:
-                    os.remove(temp_target_path)
-                except Exception:
-                    pass
-            _log("[!] Failed updating setup zip for %s: %s" % (ptype, str(e)), "ERROR")
-
+    """Clean install zips have been replaced with pre-staged uncompressed files."""
     return True
 
 
@@ -727,7 +672,7 @@ def update_version_references(new_version, old_version=None, log_fn=None):
         if not os.path.exists(fpath):
             continue
         try:
-            with open(fpath, "r", encoding="utf-8") as f:
+            with compat.open_text(fpath, "r") as f:
                 content = f.read()
 
             new_content = content
@@ -740,7 +685,7 @@ def update_version_references(new_version, old_version=None, log_fn=None):
                 new_content = re.sub(r'Copter-\d+\.\d+\.\d+', 'Copter-%s' % new_version, new_content)
 
             if new_content != content:
-                with open(fpath, "w", encoding="utf-8") as f:
+                with compat.open_text(fpath, "w") as f:
                     f.write(new_content)
                 _log("  [OK] Updated version in %s" % os.path.basename(fpath), "INFO")
         except Exception as e:
@@ -750,7 +695,7 @@ def update_version_references(new_version, old_version=None, log_fn=None):
     try:
         vjson_path = os.path.join(BASE_DIR, "version.json")
         if os.path.exists(vjson_path):
-            with open(vjson_path, "r", encoding="utf-8") as f:
+            with compat.open_text(vjson_path, "r") as f:
                 vdata = json.load(f)
             last_desc = vdata.get("changelog", [{}])[-1].get("description", "")
             if ("ArduCopter %s" % new_version) not in last_desc:
@@ -763,7 +708,7 @@ def update_version_references(new_version, old_version=None, log_fn=None):
                     "date": time.strftime("%Y-%m-%d %H:%M:%S"),
                     "description": "Updated ArduCopter firmware to stable release %s using APJ Builder system (APJ space enabled, Sport mode enabled, Lua scripting removed)." % new_version
                 })
-                with open(vjson_path, "w", encoding="utf-8") as f:
+                with compat.open_text(vjson_path, "w") as f:
                     json.dump(vdata, f, indent=2)
                 _log("  [OK] Recorded firmware update in version.json (iteration %d)" % cur_iter, "SUCCESS")
     except Exception as e:
@@ -823,6 +768,16 @@ class FirmwareUpdateEngine(object):
         Returns dict with status and version info.
         """
         self._refresh_local_version()
+        if not check_internet_connection():
+            return {
+                "success": False,
+                "status": "NO_INTERNET_CONNECTION",
+                "error": "NO_INTERNET_CONNECTION",
+                "message": "NO_INTERNET_CONNECTION",
+                "local_version": self.local_version,
+                "online_version": self.online_version,
+                "update_available": False
+            }
         try:
             online_info = get_latest_stable_version()
             online_ver = online_info["name"]
@@ -831,6 +786,7 @@ class FirmwareUpdateEngine(object):
                 self.update_available = is_version_newer(online_ver, self.local_version)
             return {
                 "success": True,
+                "status": "success",
                 "local_version": self.local_version,
                 "online_version": online_ver,
                 "update_available": self.update_available,
@@ -839,6 +795,7 @@ class FirmwareUpdateEngine(object):
         except Exception as e:
             return {
                 "success": False,
+                "status": "error",
                 "local_version": self.local_version,
                 "online_version": self.online_version,
                 "update_available": False,
@@ -881,6 +838,15 @@ class FirmwareUpdateEngine(object):
                 self.progress = 10
                 self.stage = "Querying latest stable ArduCopter"
                 self.message = "Querying latest stable ArduCopter version..."
+
+            if not check_internet_connection():
+                with self._lock:
+                    self.status = "NO_INTERNET_CONNECTION"
+                    self.message = "NO_INTERNET_CONNECTION"
+                    self.stage = "No Internet Connection"
+                    self.is_running = False
+                self.log("[!] Public internet route test (8.8.8.8) failed: NO_INTERNET_CONNECTION", "WARNING")
+                return
 
             self.log("[*] Contacting %s/api/v1/vehicles/copter/versions..." % BUILDER_BASE_URL, "INFO")
             online_info = get_latest_stable_version()
@@ -944,22 +910,24 @@ class FirmwareUpdateEngine(object):
 
             green_res = build_and_stage_cube("CubeGreen-solo", online_info, progress_callback=_prog_green, log_fn=self.log)
 
-            # Stage 3: Update setup packages (zips) and version references across system
+            # Stage 3: Update version references across system
             with self._lock:
-                self.stage = "Updating setup files and system version"
-                self.progress = 92
-                self.message = "Updating clean install packages and version references..."
+                self.stage = "Updating system version references"
+                self.progress = 95
+                self.message = "Updating system version references..."
 
-            self.log("\n[3/3] Updating setup packages and version references...", "STAGE")
-            try:
-                update_setup_files(online_ver, solo_res.get("versioned_file"), green_res.get("versioned_file"), log_fn=self.log)
-            except Exception as se:
-                self.log("[!] Setup package update notice: %s" % str(se), "WARNING")
-
+            self.log("\n[3/3] Updating system version references...", "STAGE")
             try:
                 update_version_references(online_ver, old_version=local_ver, log_fn=self.log)
             except Exception as ve:
                 self.log("[!] Version reference update notice: %s" % str(ve), "WARNING")
+
+            # Auto-bake updated references and APJs into firmware archive if on development host
+            try:
+                import bake_into_firmware
+                bake_into_firmware.ensure_firmware_baked(app_base_dir=BASE_DIR, log_func=self.log)
+            except Exception as be:
+                self.log("[!] Auto-bake notice: %s" % str(be), "INFO")
 
             # Update custom_build_info.json
             build_db = load_build_info()
@@ -981,8 +949,8 @@ class FirmwareUpdateEngine(object):
 
             self.log("\n" + "=" * 60, "HEADER")
             self.log("🎉 UPDATE READY! ArduCopter v%s is staged and ready for deployment." % online_ver, "SUCCESS")
-            self.log("CubeSolo active file: arducopter_solo.apj (v%s)" % online_ver, "INFO")
-            self.log("Green Cube active file: arducopter_green.apj (v%s)" % online_ver, "INFO")
+            self.log("CubeSolo active file: arducopter_CubeSolo_%s.apj" % online_ver, "INFO")
+            self.log("Green Cube active file: arducopter_CubeGreen_%s.apj" % online_ver, "INFO")
             self.log("=" * 60, "HEADER")
 
         except Exception as e:

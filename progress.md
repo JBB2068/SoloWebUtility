@@ -1,6 +1,6 @@
 # 3DR Solo Web Utility — Project Progress & Architecture Summary
 
-**Version:** 1.0.71  
+**Version:** 1.2.0  
 **Date:** 2026-10-06  
 
 ---
@@ -43,7 +43,7 @@
 ## 3. 🚀 Next Steps
 
 1. **User Testing:**
-   - Run `deploy_to_solo.exe` while connected to SoloLink Wi-Fi to install v1.0.71 onto the drone and controller.
+   - Run `deploy_to_solo.exe` while connected to SoloLink Wi-Fi to install v1.2.0 onto the drone and controller.
 2. **Verify Check for Updates & Custom Build:**
    - Click **Check for Updates** or **Force Rebuild APJs** in the Firmware Update tab.
    - Confirm real-time server build progress logs (`[*] Server build progress: X% (BUILDING)`) appear in the modal terminal without premature 360s timeouts.

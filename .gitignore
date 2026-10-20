@@ -2,6 +2,9 @@
 __pycache__/
 *.py[cod]
 *$py.class
+*.dll
+*.so
+*.dylib
 
 # Large distribution binaries and installer packages
 *.exe
@@ -19,6 +22,13 @@ android_app/build_temp/
 res_compiled/
 build_temp/
 *.spec
+!release/*.spec
+
+# Firmware staging & local tool binaries
+firmware_files/
+bin/squashfs/
+cache_staging/
+tmp_updates/
 
 # Backups and temporary working files
 *_backup/
@@ -44,3 +54,4 @@ venv/
 .vscode/
 .DS_Store
 Thumbs.db
+

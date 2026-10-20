@@ -15,6 +15,16 @@ import signal
 import shutil
 import mimetypes
 
+# /log/solowebutility.log is this process's stdout (inittab / deploy redirect).
+# Python 2 block-buffers a redirected stdout, so log lines sat in memory for
+# hours and never reached the file. Make both streams unbuffered.
+try:
+    if sys.version_info[0] < 3:
+        sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', 0)
+        sys.stderr = os.fdopen(sys.stderr.fileno(), 'w', 0)
+except Exception:
+    pass
+
 # Compatible BaseHTTP / urllib imports for Python 2 & 3
 if sys.version_info[0] >= 3:
     from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -51,6 +61,7 @@ import version_mgr
 import controller_mgr
 import cockpit_mgr
 import arducopter_builder
+import pair_mgr
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
@@ -79,16 +90,8 @@ CAPTIVE_PORTAL_PATHS = [
 
 def get_system_status():
     """Gather Solo system, version, and network status."""
-    ctrl_online = False
+    ctrl_online = pair_mgr.is_controller_linked(timeout=0.6)
     solo_online = True
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(1.5)
-        s.connect(("10.1.1.1", 22))
-        s.close()
-        ctrl_online = True
-    except Exception:
-        pass
 
     # Disk Space Check
     disk_free_mb = 0
@@ -98,20 +101,8 @@ def get_system_status():
     except Exception:
         pass
 
-    # Version check
-    pix_version = "ArduCopter %s" % arducopter_builder.get_local_firmware_version()
-    if os.path.exists("/PIX_VERSION"):
-        try:
-            with open("/PIX_VERSION", "r") as f:
-                valid_lines = [l.strip() for l in f if l.strip() and l.strip().lower() != "unknown"]
-                if valid_lines:
-                    first_val = valid_lines[0]
-                    if first_val.lower().startswith("arducopter"):
-                        pix_version = first_val
-                    else:
-                        pix_version = "ArduCopter %s" % first_val
-        except Exception:
-            pass
+    # Version check: what the Cube is actually running (not the newest stored .apj)
+    pix_version = cockpit_mgr.get_cube_version()
 
     ver_info = version_mgr.get_version_info()
     armed = False
@@ -123,6 +114,8 @@ def get_system_status():
     return {
         "copter_online": solo_online,
         "controller_online": ctrl_online,
+        "paired": ctrl_online,
+        "status_text": "Paired & Connected" if ctrl_online else "Not Connected",
         "pixhawk_version": pix_version,
         "utility_version": ver_info.get("version", "1.0.1"),
         "iteration": ver_info.get("iteration", 1),
@@ -278,6 +271,14 @@ class SoloApiHandler(BaseHTTPRequestHandler):
             self._send_json(get_system_status())
             return
 
+        if path == '/api/pair/status':
+            self._send_json(pair_mgr.pair_engine.get_state())
+            return
+
+        if path == '/api/pair/check':
+            self._send_json(pair_mgr.pair_engine.check_paired_status())
+            return
+
         if path == '/api/version':
             self._send_json(version_mgr.get_version_info())
             return
@@ -341,6 +342,17 @@ class SoloApiHandler(BaseHTTPRequestHandler):
             self._send_json(flash_mgr.flash_engine.get_state())
             return
 
+        # Firmware choices for the flash page: latest, up to 3 previous, custom uploads
+        if path == '/api/flash/firmware':
+            cube_type = (query.get('cube_type') or ['solo'])[0]
+            try:
+                data = flash_mgr.list_firmware_choices(cube_type)
+                data["success"] = True
+                self._send_json(data)
+            except Exception as e:
+                self._send_error("Could not list firmware files: %s" % e, 500)
+            return
+
         # Calibration State & Logs
         if path == '/api/calib/status':
             self._send_json(calib_mgr.calib_engine.get_state())
@@ -370,6 +382,10 @@ class SoloApiHandler(BaseHTTPRequestHandler):
             self._send_json({
                 "presets": presets.get_all_presets()
             })
+            return
+
+        if path in ('/api/params/fetch-status', '/api/parameters/fetch-status'):
+            self._send_json(param_mgr.fetch_progress.get_status())
             return
 
         if path == '/api/params/export':
@@ -411,6 +427,18 @@ class SoloApiHandler(BaseHTTPRequestHandler):
                 }, cookie='solo_session=%s; Path=/; Max-Age=86400' % token)
             else:
                 self._send_error("Invalid password.", 401)
+            return
+
+        if path == '/api/pair/start':
+            ssid = body.get('ssid', '')
+            pwd = body.get('password', '')
+            ok, msg = pair_mgr.pair_engine.start_pairing(ssid, pwd)
+            if ok:
+                self._send_json({"success": True, "message": msg})
+            else:
+                self._send_error(msg, 400)
+            return
+
         # Cockpit Action (Mode Change / Disarm / Arm)
         
         if path == '/api/video/restart':
@@ -458,11 +486,27 @@ class SoloApiHandler(BaseHTTPRequestHandler):
                 pass
             cube_type = body.get('cube_type', 'solo')
             install_mode = body.get('install_mode', 'full')
-            ok, msg = flash_mgr.flash_engine.start_flash(cube_type, install_mode)
+            firmware_path = body.get('firmware') or None   # None = latest version
+            ok, msg = flash_mgr.flash_engine.start_flash(cube_type, install_mode, firmware_path)
             if ok:
                 self._send_json({"success": True, "message": msg})
             else:
                 self._send_error(msg, 400)
+            return
+
+        if path == '/api/flash/upload-apj':
+            if flash_mgr.flash_engine.is_flashing:
+                self._send_error("Flashing in progress; upload the file after it finishes.", 409)
+                return
+            try:
+                choice = flash_mgr.save_custom_apj(body.get('filename', ''), body.get('content') or '')
+                print("[flash] custom firmware uploaded: %s (board_id %s)" % (choice.get('file'), choice.get('board_id')))
+                self._send_json({"success": True, "firmware": choice,
+                                 "message": "Uploaded %s" % choice.get('file')})
+            except ValueError as e:
+                self._send_error("Not a usable firmware file: %s" % e, 400)
+            except Exception as e:
+                self._send_error("Upload failed: %s" % e, 500)
             return
 
         if path == '/api/flash/reset':
@@ -569,13 +613,14 @@ class SoloApiHandler(BaseHTTPRequestHandler):
         if path == '/api/wifi/connect':
             try:
                 if cockpit_mgr.is_vehicle_armed():
+                    wifi_mgr._log("connect refused: telemetry reports the vehicle ARMED")
                     self._send_error("SAFETY INTERLOCK: Connecting to home Wi-Fi is prohibited while vehicle is ARMED!", 403)
                     return
             except Exception:
                 pass
             ssid = body.get('ssid', '').strip()
             pwd = body.get('password', '').strip()
-            ok, msg = wifi_mgr.connect_home_wifi(ssid, pwd)
+            ok, msg = wifi_mgr.connect_home_wifi(ssid, pwd, body.get('security'))
             if ok:
                 self._send_json({"success": True, "message": msg})
             else:
@@ -721,22 +766,27 @@ class SoloApiHandler(BaseHTTPRequestHandler):
 def run_server(port=PORT):
     chosen_port = port
     server = None
+    bind_host = '0.0.0.0'
+    max_retries = 60
+    retry_delay = 2
     
-    # Strictly bind to requested port (default 80)
-    for attempt in range(8):
+    # Strictly bind to '0.0.0.0' (never explicitly 10.1.1.10) with retry loop for boot timing
+    for attempt in range(max_retries):
         try:
-            server = ThreadedHTTPServer(('0.0.0.0', chosen_port), SoloApiHandler)
+            server = ThreadedHTTPServer((bind_host, chosen_port), SoloApiHandler)
             break
-        except Exception as e:
-            print("[!] Port %d busy (%s), retrying in 1s (%d/8)..." % (chosen_port, str(e), attempt + 1))
+        except (socket.error, Exception) as e:
+            print("[!] Port %d busy or network not ready (%s), retrying in %ds (%d/%d)..." % (
+                chosen_port, str(e), retry_delay, attempt + 1, max_retries
+            ))
             try:
                 os.system("fuser -k %d/tcp 2>/dev/null || true" % chosen_port)
             except Exception:
                 pass
-            time.sleep(1)
+            time.sleep(retry_delay)
 
     if not server:
-        print("[CRITICAL] Could not bind to port %d after retries." % chosen_port)
+        print("[CRITICAL] Could not bind to port %d after %d retries." % (chosen_port, max_retries))
         sys.exit(1)
 
     # Start background telemetry and video services
@@ -744,6 +794,12 @@ def run_server(port=PORT):
         cockpit_mgr.start_services()
     except Exception as e:
         print("[!] Warning: Could not start cockpit services: %s" % e)
+
+    # Safety: drop the Controller's home Wi-Fi link as soon as the vehicle arms
+    try:
+        wifi_mgr.start_arm_interlock(cockpit_mgr.is_vehicle_armed)
+    except Exception as e:
+        print("[!] Warning: Could not start Wi-Fi arm interlock: %s" % e)
 
     cur_ver = version_mgr.get_version()
     print("=" * 65)

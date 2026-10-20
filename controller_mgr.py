@@ -17,11 +17,7 @@ import time
 import socket
 import datetime
 
-try:
-    import paramiko
-    HAS_PARAMIKO = True
-except ImportError:
-    HAS_PARAMIKO = False
+
 
 SOLO_IP = "10.1.1.10"
 SOLO_PORT = 22
@@ -206,8 +202,8 @@ DEFINITION_DATA = {
 
 
 def is_running_on_solo():
-    """True if executing natively on the Solo copter."""
-    return os.path.exists(REMOTE_CONF_PATH) and os.path.isfile(REMOTE_CONF_PATH)
+    """Always True: this app runs exclusively on the Solo copter."""
+    return True
 
 
 def check_ssh_reachability(host=SOLO_IP, port=SOLO_PORT, timeout=1.5):
@@ -272,7 +268,7 @@ def fetch_config():
     is_live = False
 
     # 1. Native on Solo Copter
-    if is_running_on_solo():
+    if os.path.exists(REMOTE_CONF_PATH):
         try:
             with open(REMOTE_CONF_PATH, "r") as f:
                 raw_content = f.read()
@@ -280,22 +276,7 @@ def fetch_config():
         except Exception as e:
             sys.stderr.write("Local read error: %s\n" % str(e))
 
-    # 2. Remote from PC via SSH
-    elif HAS_PARAMIKO and check_ssh_reachability(SOLO_IP, SOLO_PORT):
-        try:
-            client = paramiko.SSHClient()
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            client.connect(SOLO_IP, port=SOLO_PORT, username=SOLO_USER, password=SOLO_PASS, timeout=4)
-            stdin, stdout, stderr = client.exec_command("cat %s 2>/dev/null" % REMOTE_CONF_PATH)
-            remote_txt = stdout.read().decode("utf-8", errors="replace")
-            client.close()
-            if remote_txt.strip():
-                raw_content = remote_txt
-                is_live = True
-        except Exception as e:
-            sys.stderr.write("SSH read error: %s\n" % str(e))
-
-    # 3. Fallback to local cache or stock template
+    # 2. Fallback to local cache or stock template
     if not raw_content:
         local_cache = os.path.join(BASE_DIR, "extSettings.local.conf")
         if os.path.exists(local_cache):
@@ -306,8 +287,8 @@ def fetch_config():
 
     parsed = parse_ext_settings(raw_content)
     parsed["is_live"] = is_live
-    parsed["is_native"] = is_running_on_solo()
-    parsed["solo_connected"] = is_running_on_solo() or check_ssh_reachability(SOLO_IP, SOLO_PORT)
+    parsed["is_native"] = True
+    parsed["solo_connected"] = True
     return parsed
 
 
@@ -369,71 +350,22 @@ def save_config(raw_text=None, mappings=None, time_offset="None"):
     except Exception:
         pass
 
-    # Case A: Running natively on Solo copter
-    if is_running_on_solo():
-        try:
-            # Backups
+    try:
+        if os.path.exists(REMOTE_CONF_PATH):
             os.system("cp %s %s 2>/dev/null" % (REMOTE_CONF_PATH, REMOTE_BACKUP_PATH))
             os.system("cp %s %s.%s 2>/dev/null" % (REMOTE_CONF_PATH, REMOTE_CONF_PATH, timestamp))
-            tmp_path = "/tmp/extSettings.conf.tmp"
-            with open(tmp_path, "w") as f:
-                f.write(content_to_save)
-            os.system("mv %s %s && chmod 755 %s && sync" % (tmp_path, REMOTE_CONF_PATH, REMOTE_CONF_PATH))
-            return {
-                "success": True,
-                "remote_saved": True,
-                "is_native": True,
-                "message": "Updated /usr/bin/extSettings.conf locally on Solo. Takes effect immediately!"
-            }
-        except Exception as e:
-            return {"success": False, "error": "Native file write error: %s" % str(e)}
-
-    # Case B: Running on PC via SSH to Solo copter
-    if HAS_PARAMIKO and check_ssh_reachability(SOLO_IP, SOLO_PORT):
-        try:
-            client = paramiko.SSHClient()
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            client.connect(SOLO_IP, port=SOLO_PORT, username=SOLO_USER, password=SOLO_PASS, timeout=4)
-
-            # Backup
-            bak_cmd = "cp %s %s 2>/dev/null; cp %s %s.%s 2>/dev/null" % (
-                REMOTE_CONF_PATH, REMOTE_BACKUP_PATH,
-                REMOTE_CONF_PATH, REMOTE_CONF_PATH, timestamp
-            )
-            client.exec_command(bak_cmd)
-
-            sftp = client.open_sftp()
-            temp_path = "/tmp/extSettings.conf.tmp"
-            with sftp.open(temp_path, "w") as rf:
-                rf.write(content_to_save)
-            sftp.close()
-
-            move_cmd = "mv /tmp/extSettings.conf.tmp %s && chmod 755 %s && sync" % (
-                REMOTE_CONF_PATH, REMOTE_CONF_PATH
-            )
-            stdin, stdout, stderr = client.exec_command(move_cmd)
-            exit_code = stdout.channel.recv_exit_status()
-            client.close()
-
-            if exit_code == 0:
-                return {
-                    "success": True,
-                    "remote_saved": True,
-                    "is_native": False,
-                    "message": "Updated /usr/bin/extSettings.conf on Solo (10.1.1.10). Takes effect immediately!"
-                }
-            else:
-                return {"success": False, "error": "Remote move failed with exit code %d" % exit_code}
-        except Exception as e:
-            return {"success": False, "error": "SSH write error: %s" % str(e)}
-
-    # Case C: Solo offline, saved locally
-    return {
-        "success": True,
-        "remote_saved": False,
-        "is_native": False,
-        "message": "Saved to local cache (Solo copter is offline)."
-    }
+        tmp_path = "/tmp/extSettings.conf.tmp"
+        with open(tmp_path, "w") as f:
+            f.write(content_to_save)
+        os.system("mv %s %s && chmod 755 %s && sync" % (tmp_path, REMOTE_CONF_PATH, REMOTE_CONF_PATH))
+        return {
+            "success": True,
+            "remote_saved": True,
+            "is_native": True,
+            "message": "Updated /usr/bin/extSettings.conf locally on Solo. Takes effect immediately!"
+        }
+    except Exception as e:
+        return {"success": False, "error": "Native file write error: %s" % str(e)}
 
 
 def reset_to_default():

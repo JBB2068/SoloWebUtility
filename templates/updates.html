@@ -1,0 +1,860 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3DR Solo Firmware &amp; Pairing Hub</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        .guard-warning {
+            color: #ff6b6b;
+            font-size: 12px;
+            margin-top: 6px;
+            font-weight: 500;
+        }
+        .btn-disabled {
+            opacity: 0.45 !important;
+            cursor: not-allowed !important;
+            filter: grayscale(80%);
+            pointer-events: none;
+        }
+        .slide-panel {
+            transition: max-height 0.35s ease, opacity 0.35s ease;
+        }
+    </style>
+</head>
+<body class="dark-theme">
+    <header class="app-header">
+        <div class="header-left">
+            <span class="logo-icon">🛸</span>
+            <h1>3DR Solo — Firmware &amp; Pairing</h1>
+        </div>
+        <div class="header-right">
+            <span id="connBadge" class="conn-badge offline">Checking Link...</span>
+            <a href="/" class="btn-link" style="margin-left: 15px; color: var(--accent);">Back to Flight Deck</a>
+            <button class="btn btn-sm btn-danger" id="btnUninstallAppUpdates" title="Completely remove SoloWebUtility2 from drone" style="margin-left: 15px; padding: 4px 10px; font-size: 11px; background: rgba(239, 68, 68, 0.25); border: 1px solid #ef4444; color: #fca5a5; cursor: pointer; border-radius: 4px;">🗑️ Uninstall</button>
+        </div>
+    </header>
+
+    <main class="main-content">
+        <div class="content-container">
+
+            <!-- FIRMWARE UPDATE SECTION -->
+            <div class="card card-full" id="firmwareUpdateCard">
+                <div class="card-header">
+                    <h2>📦 Open Solo Clean Install &amp; Firmware Update Manager</h2>
+                    <span class="badge" id="flasherStatusBadge">Ready</span>
+                </div>
+                <p class="card-desc">
+                    Deploys the full Open Solo clean install bundle, Cube autopilot firmware, and controller iMX6 system update.
+                </p>
+
+                <div class="form-row" style="margin-bottom: 15px;">
+                    <div class="form-group">
+                        <label for="cubeTypeSelect">Target Cube Autopilot:</label>
+                        <select id="cubeTypeSelect" class="form-control">
+                            <option value="solo" selected>3DR Solo Cube (Black - Stock)</option>
+                            <option value="green">Proficnc Green Cube</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="installModeSelect">Installation Scope:</label>
+                        <select id="installModeSelect" class="form-control">
+                            <option value="full" selected>Full Install (Copter &amp; Controller)</option>
+                            <option value="cube_only">Cube Only (Autopilot Pixhawk)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="action-bar" style="margin-bottom: 15px;">
+                    <button class="btn btn-primary" id="btnStartFlash">🚀 Start Clean Installation</button>
+                    <button class="btn btn-secondary" id="btnCheckUpdate">🔄 Check for Updates</button>
+                    <button class="btn btn-outline" id="btnResetFlash">Reset State</button>
+                </div>
+
+                <!-- CONTROLLER WI-FI BRIDGE SETUP PANEL (Unhidden when timeout/no internet is detected) -->
+                <div id="controllerBridgePanel" class="slide-panel" style="display: none; margin-bottom: 20px; padding: 18px 20px; background: rgba(30, 58, 138, 0.28); border: 1px solid #3b82f6; border-radius: 8px;">
+                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;">
+                        <span style="font-size: 22px;">📶</span>
+                        <h3 style="margin: 0; font-size: 16px; color: #93c5fd; font-weight: 600;">Controller Wi-Fi Bridge Setup</h3>
+                    </div>
+                    <div style="font-size: 13px; font-weight: 600; color: #f59e0b; margin-bottom: 8px;">
+                        Internet Connection Required to Fetch Online Firmware Build Packages.
+                    </div>
+                    <p style="margin: 0 0 14px 0; font-size: 13px; color: var(--text-muted); line-height: 1.45;">
+                        The Copter and Controller are on the local SoloLink network with no upstream internet. Command the Artoo controller at gateway <code>10.1.1.1</code> to bridge to your home router or mobile hotspot via <code>sololink_config --set-wifi-sta</code>. Once connected, both the copter's iMX6 and your connected devices will immediately have concurrent internet routing.
+                    </p>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 12px;">
+                        <div class="form-group">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                                <label style="font-size: 12px; font-weight: 600; color: #cbd5e1;">Available 2.4 GHz Networks (wpa_cli sweep):</label>
+                                <button type="button" class="btn-link" id="btnRefreshWifiScan" style="font-size: 11px; color: #60a5fa; cursor: pointer; text-decoration: none;">🔄 Refresh</button>
+                            </div>
+                            <select class="form-control" id="wifiSelect" style="width: 100%;">
+                                <option value="">-- Sweeping controller wpa_cli channels... --</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label style="font-size: 12px; font-weight: 600; color: #cbd5e1; margin-bottom: 4px; display: block;">Hidden Network Name (Optional):</label>
+                            <input type="text" class="form-control" id="hiddenWifiSsid" placeholder="e.g. MyHomeNetwork" style="width: 100%;">
+                        </div>
+                    </div>
+
+                    <div class="form-group" style="margin-bottom: 16px;">
+                        <label style="font-size: 12px; font-weight: 600; color: #cbd5e1; margin-bottom: 4px; display: block;">Wi-Fi Password:</label>
+                        <div style="position: relative; display: flex; align-items: center;">
+                            <input type="password" class="form-control" id="wifiPassword" placeholder="Enter Wi-Fi password (leave blank if open)" style="width: 100%; padding-right: 40px;">
+                            <button type="button" id="btnToggleWifiPwd" style="position: absolute; right: 10px; background: none; border: none; cursor: pointer; font-size: 16px; color: #94a3b8;">👁️</button>
+                        </div>
+                    </div>
+
+                    <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;">
+                        <span id="wifiSwitchStatusMsg" style="font-size: 12px; color: #94a3b8;">Ready to bridge controller.</span>
+                        <button class="btn btn-primary" id="btnBridgeController" style="padding: 9px 20px; font-weight: 600;">
+                            🌐 Bridge Controller
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Progress Bar -->
+                <div class="progress-container" id="flashProgressContainer" style="margin-bottom: 15px;">
+                    <div class="progress-bar-bg">
+                        <div class="progress-bar-fill" id="flashProgressBar" style="width: 0%;"></div>
+                    </div>
+                    <div class="progress-status">
+                        <span id="flashProgressStage">Idle</span>
+                        <span id="flashProgressPercent">0%</span>
+                    </div>
+                </div>
+
+                <!-- 8-Minute Reboot Countdown & Installation Guard Box -->
+                <div class="reboot-timer-card" id="rebootTimerBox" style="display: none; margin-bottom: 15px; padding: 18px 20px; background: rgba(0, 0, 0, 0.4); border: 1px solid var(--border); border-radius: 8px; text-align: center;">
+                    <div id="rebootWarningAlert" style="background: rgba(239, 68, 68, 0.2); border: 1px solid #ef4444; color: #fca5a5; padding: 12px 16px; border-radius: 6px; margin-bottom: 14px; font-weight: 600; font-size: 13px;">
+                        ⚠️ DO NOT POWER OFF THE DRONE OR CONTROLLER. Firmware installation is executing internally.
+                    </div>
+                    <h3 style="margin-top: 0; margin-bottom: 6px; font-size: 16px;">🔄 Rebooting &amp; Applying Firmware</h3>
+                    <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">Wait for Copter and Controller to reinitialize (~8 min).</p>
+                    <div class="countdown-clock" id="rebootCountdown" style="font-size: 36px; font-family: monospace; font-weight: bold; color: var(--accent); margin-bottom: 10px;">08:00</div>
+                    <div class="progress-bar-bg" style="height: 10px; background: rgba(255, 255, 255, 0.1); border-radius: 5px; overflow: hidden; margin-bottom: 10px;">
+                        <div class="progress-bar-fill" id="rebootProgressBar" style="width: 0%; height: 100%; background: #ef4444; transition: width 1s linear;"></div>
+                    </div>
+                    <p style="font-size: 11px; margin: 0; color: var(--text-muted);">
+                        After reboot completes, <strong>pair</strong> Copter and Controller, then perform calibrations. The SoloLink Wi-Fi network must also be connected to continue.
+                    </p>
+                </div>
+
+                <!-- Live Terminal Viewport -->
+                <div class="terminal-box">
+                    <div class="terminal-header">
+                        <span>LIVE STREAM VIEWPORT</span>
+                        <button class="btn-link" id="btnClearLogs">Clear</button>
+                    </div>
+                    <div class="terminal-body" id="flashTerminal" style="height: 220px; overflow-y: auto;">
+                        <div class="log-line INFO">[System] Firmware &amp; Pairing Hub ready. SoloLink Wi-Fi connection required for live staging.</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- STEP 2: PAIRING SECTION WITH ACTIVE WI-FI GUARD -->
+            <div class="card card-full" id="step2PairCard" style="margin-top: 25px;">
+                <div class="card-header">
+                    <h2>🔗 Step 2 — Pair Copter &amp; Controller</h2>
+                    <span class="badge" id="pairStatusBadge">Checking Link...</span>
+                </div>
+                <div class="info-alert" style="background: rgba(255, 170, 0, 0.1); border-left: 4px solid #ffaa00; padding: 12px 16px; margin-bottom: 15px; border-radius: 4px;">
+                    <strong>⚠️ Required before calibration:</strong> After Copter and Controller have finished rebooting and applying their updates, hold the <strong>Pair button</strong> on the bottom of the Solo for 5 seconds to complete the pairing process before performing any calibrations will be possible. The SoloLink Wi-Fi network must also be connected to continue.
+                </div>
+
+                <div class="pairing-guard-box" style="padding: 15px; background: rgba(0,0,0,0.25); border-radius: 6px; border: 1px solid var(--border);">
+                    <h4>Automated Developer Pairing</h4>
+                    <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">
+                        Initiates the 3DR sololink_config pair handshake routine via Controller gateway and UDP pairing broadcast.
+                    </p>
+
+                    <div id="wifiGuardNotice" class="guard-warning" style="display: none; margin-bottom: 10px;">
+                        ⚠️ Wi-Fi Connection Required: The SoloLink Wi-Fi network must also be connected to continue.
+                    </div>
+
+                    <button class="btn btn-success btn-disabled" id="btnPairController" disabled>
+                        🔗 Pair Copter &amp; Controller
+                    </button>
+                    <span id="pairLockMsg" style="margin-left: 10px; font-size: 12px; color: var(--text-muted);">
+                        (Connecting to SoloLink Wi-Fi...)
+                    </span>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <script>
+        let copterOnline = false;
+        let previousCopterOnline = null;
+        let isFlashingOrRebooting = false;
+        let lastLogCount = 0;
+
+        function playHardwareAliveTone() {
+            try {
+                const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                if (!AudioCtx) return;
+                const ctx = new AudioCtx();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = "sine";
+                osc.frequency.setValueAtTime(587.33, ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.15);
+                gain.gain.setValueAtTime(0.25, ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start();
+                osc.stop(ctx.currentTime + 0.6);
+            } catch (e) {
+                console.log("Audio notification error:", e);
+            }
+        }
+
+        function flashScreenBorderGreen() {
+            document.body.classList.remove("flash-alive-border");
+            void document.body.offsetWidth;
+            document.body.classList.add("flash-alive-border");
+            setTimeout(function () {
+                document.body.classList.remove("flash-alive-border");
+            }, 5000);
+        }
+
+        function scrollToPairingInstructions() {
+            const card = document.getElementById("step2PairCard");
+            if (card) {
+                card.scrollIntoView({ behavior: "smooth", block: "start" });
+            }
+        }
+
+        function showTimerSuccessBox() {
+            const box = document.getElementById("rebootTimerBox");
+            if (!box) return;
+            box.style.display = "block";
+            Array.from(box.children).forEach(function (c) {
+                if (c.id !== "rebootSuccessAlert") c.style.display = "none";
+            });
+            let s = document.getElementById("rebootSuccessAlert");
+            if (!s) {
+                s = document.createElement("div");
+                s.id = "rebootSuccessAlert";
+                s.style.cssText = "background: rgba(16,185,129,0.25); border: 2px solid #10b981; color: #6ee7b7; padding: 18px 20px; border-radius: 8px; font-size: 18px; font-weight: 700; text-align: center;";
+                box.appendChild(s);
+            }
+            s.textContent = "🎉 Success! Copter link restored. Continue to Step 2: Pairing and Calibration.";
+            s.style.display = "block";
+        }
+
+        function resetTimerSuccessBox() {
+            const box = document.getElementById("rebootTimerBox");
+            if (!box) return;
+            Array.from(box.children).forEach(function (c) {
+                c.style.display = (c.id === "rebootSuccessAlert") ? "none" : "";
+            });
+        }
+
+        let rebootCountdownInterval = null;
+        let rebootPingInterval = null;
+        let flashPollInterval = null;
+        let timerStarted = false;
+        let countdownStartTime = 0;
+
+        function startRebootCountdown(seconds = 360) {
+            if (timerStarted) {
+                return;
+            }
+            timerStarted = true;
+            isFlashingOrRebooting = true;
+            previousCopterOnline = false;
+            copterOnline = false;
+            countdownStartTime = Date.now();
+            resetTimerSuccessBox();
+            const timerBox = document.getElementById("rebootTimerBox");
+            if (timerBox) {
+                timerBox.style.display = "block";
+            }
+
+            const warningAlert = document.getElementById("rebootWarningAlert");
+            if (warningAlert) {
+                warningAlert.style.background = "rgba(239, 68, 68, 0.2)";
+                warningAlert.style.borderColor = "#ef4444";
+                warningAlert.style.color = "#fca5a5";
+                warningAlert.textContent = "⚠️ DO NOT POWER OFF THE DRONE OR CONTROLLER. Firmware installation is executing internally.";
+            }
+
+            const total = seconds;
+            let remaining = total;
+            try {
+                localStorage.setItem("solo_reboot_until", Date.now() + (total * 1000));
+                localStorage.setItem("solo_reboot_start", countdownStartTime);
+            } catch (e) {}
+
+            if (rebootCountdownInterval) {
+                clearInterval(rebootCountdownInterval);
+            }
+            if (rebootPingInterval) {
+                clearInterval(rebootPingInterval);
+            }
+
+            const clock = document.getElementById("rebootCountdown");
+            const rebootBar = document.getElementById("rebootProgressBar");
+
+            rebootCountdownInterval = setInterval(function () {
+                const m = Math.floor(remaining / 60);
+                const s = remaining % 60;
+                if (clock) {
+                    clock.textContent = (m < 10 ? "0" : "") + m + ":" + (s < 10 ? "0" : "") + s;
+                    clock.style.color = "var(--accent)";
+                }
+                if (rebootBar) {
+                    const pct = Math.min(100, Math.round(((total - remaining) / total) * 100));
+                    rebootBar.style.width = pct + "%";
+                    rebootBar.style.background = "#ef4444";
+                }
+                if (--remaining < 0) {
+                    clearInterval(rebootCountdownInterval);
+                    rebootCountdownInterval = null;
+                    try { localStorage.removeItem("solo_reboot_until"); localStorage.removeItem("solo_reboot_start"); } catch (e) {}
+                    logToViewport("Reboot window elapsed. If copter has not re-connected, check physical power.", "INFO");
+                }
+            }, 1000);
+
+            // Active uncached status polling: wait initial 45 seconds, then poll every 3 seconds with AbortController 2500ms timeout
+            rebootPingInterval = setInterval(async function () {
+                const elapsed = Date.now() - countdownStartTime;
+                if (elapsed < 45000) {
+                    return; // Initial 45-second reboot delay
+                }
+                const controller = (typeof AbortController !== "undefined") ? new AbortController() : null;
+                const timeoutId = controller ? setTimeout(function () {
+                    try { controller.abort(); } catch (e) {}
+                }, 2500) : null;
+
+                try {
+                    const res = await fetch("/api/status?t=" + Date.now(), {
+                        cache: "no-store",
+                        signal: controller ? controller.signal : undefined
+                    });
+                    if (timeoutId) { clearTimeout(timeoutId); }
+                    if (res.ok) {
+                        const data = await res.json();
+                        // As soon as it receives a valid HTTP 200 response:
+                        if (rebootPingInterval) {
+                            clearInterval(rebootPingInterval);
+                            rebootPingInterval = null;
+                        }
+                        if (rebootCountdownInterval) {
+                            clearInterval(rebootCountdownInterval);
+                            rebootCountdownInterval = null;
+                        }
+                        timerStarted = false;
+                        isFlashingOrRebooting = false;
+                        try { localStorage.removeItem("solo_reboot_until"); localStorage.removeItem("solo_reboot_start"); } catch (e) {}
+                        onCopterHardwareAlive();
+                    }
+                } catch (e) {
+                    if (timeoutId) { clearTimeout(timeoutId); }
+                }
+            }, 3000);
+        }
+
+        function onCopterHardwareAlive() {
+            // Instantly halt/cancel the 8-minute countdown timer
+            if (rebootCountdownInterval) {
+                clearInterval(rebootCountdownInterval);
+                rebootCountdownInterval = null;
+            }
+            timerStarted = false;
+            try { localStorage.removeItem("solo_reboot_until"); } catch (e) {}
+
+            // Dynamically change red warning alert box to green and replace text
+            const warningAlert = document.getElementById("rebootWarningAlert");
+            if (warningAlert) {
+                warningAlert.style.transition = "all 0.4s ease";
+                warningAlert.style.background = "rgba(16, 185, 129, 0.25)";
+                warningAlert.style.borderColor = "#10b981";
+                warningAlert.style.color = "#6ee7b7";
+                warningAlert.textContent = "Update Complete! Software pairing mode is currently active. Hold A+B on your Artoo Controller to finalize link.";
+            }
+
+            const rebootBar = document.getElementById("rebootProgressBar");
+            if (rebootBar) {
+                rebootBar.style.width = "100%";
+                rebootBar.style.background = "#10b981";
+            }
+
+            // Replace the countdown digits with a prominent green success alert
+            showTimerSuccessBox();
+
+            playHardwareAliveTone();
+            flashScreenBorderGreen();
+            scrollToPairingInstructions();
+            logToViewport("[Wi-Fi] Copter is alive! Update process complete. Proceed to Step 2: Pairing Instructions.", "SUCCESS");
+        }
+
+        function logToViewport(msg, level = "INFO") {
+            const terminal = document.getElementById("flashTerminal");
+            if (!terminal) return;
+            const line = document.createElement("div");
+            line.className = "log-line " + level;
+            line.textContent = "[" + new Date().toLocaleTimeString() + "] " + msg;
+            terminal.appendChild(line);
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+
+        // Toggle password visibility
+        const btnTogglePwd = document.getElementById("btnToggleWifiPwd");
+        if (btnTogglePwd) {
+            btnTogglePwd.addEventListener("click", function () {
+                const inp = document.getElementById("wifiPassword");
+                if (inp.type === "password") {
+                    inp.type = "text";
+                    btnTogglePwd.textContent = "🙈";
+                } else {
+                    inp.type = "password";
+                    btnTogglePwd.textContent = "👁️";
+                }
+            });
+        }
+
+        // Wi-Fi Dropdown Population via /api/wifi/scan (Background SSH wpa_cli on Controller)
+        async function populateWifiDropdown() {
+            const select = document.getElementById("wifiSelect");
+            if (!select) return;
+            select.innerHTML = '<option value="">-- Sweeping controller wpa_cli channels... --</option>';
+            try {
+                const res = await fetch("/api/wifi/scan");
+                const data = await res.json();
+                select.innerHTML = "";
+
+                let networks = [];
+                if (Array.isArray(data)) {
+                    networks = data;
+                } else if (data && data.networks) {
+                    networks = data.networks.map(n => typeof n === 'string' ? n : (n.ssid || ''));
+                }
+
+                if (networks.length === 0) {
+                    const opt = document.createElement("option");
+                    opt.value = "";
+                    opt.textContent = "-- No broadcast networks detected (Click Refresh) --";
+                    select.appendChild(opt);
+                } else {
+                    const optPlaceholder = document.createElement("option");
+                    optPlaceholder.value = "";
+                    optPlaceholder.textContent = "-- Select detected network (" + networks.length + " found) --";
+                    select.appendChild(optPlaceholder);
+
+                    networks.forEach(ssid => {
+                        if (!ssid) return;
+                        const opt = document.createElement("option");
+                        opt.value = ssid;
+                        opt.textContent = "📶 " + ssid;
+                        select.appendChild(opt);
+                    });
+                }
+            } catch (e) {
+                select.innerHTML = '<option value="">-- Failed to sweep controller Wi-Fi (Click Refresh) --</option>';
+            }
+        }
+
+        document.getElementById("btnRefreshWifiScan").addEventListener("click", populateWifiDropdown);
+
+        function unhideControllerBridgePanel() {
+            const panel = document.getElementById("controllerBridgePanel");
+            if (!panel) return;
+            panel.style.display = "block";
+            panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        }
+
+        // Check for updates execution
+        async function handleCheckForUpdates() {
+            logToViewport("Checking ArduPilot Custom Firmware Builder (custom.ardupilot.org)...", "INFO");
+            try {
+                const res = await fetch("/api/firmware/check");
+                const data = await res.json();
+
+                if (data.status === "NO_INTERNET_CONNECTION" || data.error === "NO_INTERNET_CONNECTION" || data.message === "NO_INTERNET_CONNECTION") {
+                    logToViewport("Network timeout to custom.ardupilot.org (public internet route unreachable).", "WARNING");
+                    logToViewport("Internet Connection Required to Fetch Online Firmware Build Packages.", "INFO");
+                    unhideControllerBridgePanel();
+                    return;
+                }
+
+                if (data.update_available) {
+                    logToViewport("🎉 Update available! Latest stable online: " + data.online_version + " (Current local: " + data.local_version + ")", "SUCCESS");
+                } else if (data.success) {
+                    logToViewport("✅ Firmware is up to date: ArduCopter " + data.local_version, "SUCCESS");
+                } else {
+                    logToViewport("Firmware version status: " + (data.message || "Completed"), "INFO");
+                }
+            } catch (err) {
+                logToViewport("Network timeout to custom.ardupilot.org: " + err.message, "WARNING");
+                unhideControllerBridgePanel();
+            }
+        }
+
+        document.getElementById("btnCheckUpdate").addEventListener("click", handleCheckForUpdates);
+
+        // Native Controller Client Bridging Routine
+        document.getElementById("btnBridgeController").addEventListener("click", async function () {
+            const btn = document.getElementById("btnBridgeController");
+            const statusMsg = document.getElementById("wifiSwitchStatusMsg");
+            const select = document.getElementById("wifiSelect");
+            const hiddenInput = document.getElementById("hiddenWifiSsid");
+            const pwdInput = document.getElementById("wifiPassword");
+
+            const targetSsid = (hiddenInput.value.trim() || select.value.trim());
+            if (!targetSsid) {
+                alert("Please select a Wi-Fi network from the dropdown or type a hidden network name.");
+                return;
+            }
+
+            const password = pwdInput.value;
+
+            btn.disabled = true;
+            btn.textContent = "⏳ Bridging Controller...";
+            statusMsg.textContent = "Commanding Artoo (10.1.1.1) to bridge to " + targetSsid + "...";
+            statusMsg.style.color = "#60a5fa";
+
+            logToViewport("Sending native bridge command: sololink_config --set-wifi-sta '" + targetSsid + "'...", "INFO");
+
+            try {
+                // POST to drone-native bridge endpoint
+                const connRes = await fetch("/api/wifi/bridge", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ ssid: targetSsid, password: password })
+                });
+                const connData = await connRes.json();
+                if (!connRes.ok || connData.error) {
+                    throw new Error(connData.message || "Bridge configuration failed.");
+                }
+
+                logToViewport("Controller bridged to " + targetSsid + " successfully. Waiting 6s for WAN route...", "SUCCESS");
+                statusMsg.textContent = "WAN route active. Contacting custom.ardupilot.org...";
+                btn.textContent = "⏳ Contacting ArduPilot Builder...";
+
+                await new Promise(r => setTimeout(r, 6000));
+
+                // Contact custom.ardupilot.org now that bridge is active
+                const checkRes = await fetch("/api/firmware/check");
+                const checkData = await checkRes.json();
+
+                if (checkData.status === "NO_INTERNET_CONNECTION") {
+                    logToViewport("Still no internet connection through " + targetSsid + ". Check router credentials.", "ERROR");
+                    statusMsg.textContent = "Internet check failed on " + targetSsid + ".";
+                    statusMsg.style.color = "#ff6b6b";
+                    btn.disabled = false;
+                    btn.textContent = "🌐 Bridge Controller";
+                    return;
+                }
+
+                logToViewport("Online version verified: ArduCopter " + (checkData.online_version || "current") + ".", "SUCCESS");
+                statusMsg.textContent = "Bridge active & firmware packages reachable!";
+                statusMsg.style.color = "#4cd964";
+
+                // Automatically trigger build update download
+                const updateRes = await fetch("/api/firmware/update", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ force: false })
+                });
+                const updateData = await updateRes.json();
+                logToViewport("Builder Engine: " + (updateData.message || "Firmware retrieval completed."), "SUCCESS");
+
+            } catch (err) {
+                logToViewport("Bridge error: " + err.message, "ERROR");
+                statusMsg.textContent = "Error: " + err.message;
+                statusMsg.style.color = "#ff6b6b";
+            } finally {
+                btn.disabled = false;
+                btn.textContent = "🌐 Bridge Controller";
+            }
+        });
+
+        // Real-time network & pairing guard check loop
+        async function checkNetworkStatus() {
+            try {
+                const res = await fetch("/api/status");
+                if (res.ok) {
+                    const data = await res.json();
+                    copterOnline = (data && data.copter_online === true);
+                    const controllerOnline = !!(data && (data.controller_online === true || data.paired === true));
+                    if (copterOnline && (isFlashingOrRebooting || timerStarted || rebootCountdownInterval !== null)) {
+                        if (rebootCountdownInterval) {
+                            clearInterval(rebootCountdownInterval);
+                            rebootCountdownInterval = null;
+                        }
+                        timerStarted = false;
+                        isFlashingOrRebooting = false;
+                        try { localStorage.removeItem("solo_reboot_until"); } catch (e) {}
+                        onCopterHardwareAlive();
+                    }
+                    previousCopterOnline = copterOnline;
+                    updateGuardUI(copterOnline, controllerOnline);
+                } else {
+                    previousCopterOnline = false;
+                    updateGuardUI(false, false);
+                }
+            } catch (e) {
+                previousCopterOnline = false;
+                updateGuardUI(false, false);
+            }
+        }
+
+        function updateGuardUI(isOnline, isControllerOnline) {
+            const btnPair = document.getElementById("btnPairController");
+            const guardNotice = document.getElementById("wifiGuardNotice");
+            const lockMsg = document.getElementById("pairLockMsg");
+            const badge = document.getElementById("connBadge");
+            const pairBadge = document.getElementById("pairStatusBadge");
+
+            if (isOnline) {
+                badge.className = "conn-badge online";
+                badge.textContent = "Connected (10.1.1.10)";
+                if (isControllerOnline) {
+                    pairBadge.className = "badge success";
+                    pairBadge.textContent = "Paired & Connected";
+                } else {
+                    pairBadge.className = "badge warning";
+                    pairBadge.textContent = "Not Connected";
+                }
+
+                btnPair.classList.remove("btn-disabled");
+                btnPair.removeAttribute("disabled");
+                guardNotice.style.display = "none";
+                lockMsg.textContent = "(SoloLink Active - Ready to Pair)";
+                lockMsg.style.color = "#4cd964";
+            } else {
+                badge.className = "conn-badge offline";
+                badge.textContent = "Link Lost";
+                pairBadge.className = "badge";
+                pairBadge.textContent = "Offline";
+
+                btnPair.classList.add("btn-disabled");
+                btnPair.setAttribute("disabled", "true");
+                guardNotice.style.display = "block";
+                guardNotice.textContent = "⚠️ Wi-Fi Connection Required: The SoloLink Wi-Fi network must also be connected to continue.";
+                lockMsg.textContent = "(SoloLink Wi-Fi Disconnected)";
+                lockMsg.style.color = "#ff6b6b";
+            }
+        }
+
+        // Pairing trigger with guard wrapper
+        document.getElementById("btnPairController").addEventListener("click", async function (e) {
+            if (!copterOnline) {
+                e.preventDefault();
+                logToViewport("Wi-Fi Connection Required: The SoloLink Wi-Fi network must also be connected to continue.", "WARNING");
+                alert("Wi-Fi Connection Required: The SoloLink Wi-Fi network must also be connected to continue.");
+                return;
+            }
+
+            logToViewport("Initiating pairing request...", "INFO");
+            try {
+                const res = await fetch("/api/pair/start", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({})
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    logToViewport("Pairing command sent successfully: " + (data.message || "Pairing initiated"), "SUCCESS");
+                } else {
+                    logToViewport("Pairing refused: " + (data.message || "Wi-Fi Connection Required"), "ERROR");
+                }
+            } catch (err) {
+                logToViewport("Pairing request failed: " + err.message, "ERROR");
+            }
+        });
+
+        // Start background flash polling
+        function startFlashPolling() {
+            if (flashPollInterval) { clearInterval(flashPollInterval); }
+            let lastProgress = 0;
+            let consecutiveErrors = 0;
+            let countdownTriggered = false;
+
+            flashPollInterval = setInterval(async function () {
+                try {
+                    const res = await fetch("/api/flash/status");
+                    if (!res.ok) throw new Error("Status endpoint error");
+                    const state = await res.json();
+                    consecutiveErrors = 0;
+                    lastProgress = state.progress || lastProgress;
+
+                    const bar = document.getElementById("flashProgressBar");
+                    const pct = document.getElementById("flashProgressPercent");
+                    const stg = document.getElementById("flashProgressStage");
+                    const badge = document.getElementById("flasherStatusBadge");
+
+                    if (bar) bar.style.width = (state.progress || 0) + "%";
+                    if (pct) pct.textContent = (state.progress || 0) + "%";
+                    if (stg) stg.textContent = state.stage || state.current_stage || "In Progress";
+                    if (badge) {
+                        badge.textContent = (state.status || "RUNNING").toUpperCase();
+                        badge.className = "badge" + (state.status === "error" ? " danger" : " success");
+                    }
+
+                    if (state.logs && state.logs.length > lastLogCount) {
+                        for (let i = lastLogCount; i < state.logs.length; i++) {
+                            const l = state.logs[i];
+                            logToViewport(l.message, l.level || "INFO");
+                        }
+                        lastLogCount = state.logs.length;
+                    }
+
+                    if (!state.is_flashing && state.status !== "running") {
+                        clearInterval(flashPollInterval);
+                        flashPollInterval = null;
+                        document.getElementById("btnStartFlash").disabled = false;
+                        if (state.status === "success" && !countdownTriggered) {
+                            countdownTriggered = true;
+                            logToViewport("🎉 Installation staged! Starting 6-minute reboot countdown...", "SUCCESS");
+                            startRebootCountdown(360);
+                        } else if (state.status === "error") {
+                            logToViewport("Installation error — check logs.", "ERROR");
+                            isFlashingOrRebooting = false;
+                        }
+                    }
+                } catch (err) {
+                    consecutiveErrors++;
+                    if (lastProgress >= 75 && consecutiveErrors >= 2 && !countdownTriggered) {
+                        countdownTriggered = true;
+                        clearInterval(flashPollInterval);
+                        flashPollInterval = null;
+                        document.getElementById("btnStartFlash").disabled = false;
+
+                        const bar = document.getElementById("flashProgressBar");
+                        const pct = document.getElementById("flashProgressPercent");
+                        const stg = document.getElementById("flashProgressStage");
+                        if (bar) bar.style.width = "100%";
+                        if (pct) pct.textContent = "100%";
+                        if (stg) stg.textContent = "Hardware Rebooting — Applying Updates (~6 min)";
+
+                        logToViewport("🎉 Hardware reboot initiated! Both Copter and Controller are applying Open Solo updates.", "SUCCESS");
+                        logToViewport("6-Minute Countdown started. Pair and calibrate after reboot finishes.", "INFO");
+                        startRebootCountdown(360);
+                    }
+                }
+            }, 1500);
+        }
+
+        // Flash Start
+        document.getElementById("btnStartFlash").addEventListener("click", async function () {
+            isFlashingOrRebooting = true;
+            const cubeType = document.getElementById("cubeTypeSelect").value;
+            const installMode = document.getElementById("installModeSelect").value;
+            logToViewport("Starting installation (Cube: " + cubeType + ", Mode: " + installMode + ")...", "INFO");
+
+            try {
+                document.getElementById("btnStartFlash").disabled = true;
+                const res = await fetch("/api/flash/start", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ cube_type: cubeType, install_mode: installMode })
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    logToViewport("Flashing pipeline running: " + data.message, "SUCCESS");
+                    startFlashPolling();
+                } else {
+                    document.getElementById("btnStartFlash").disabled = false;
+                    logToViewport("Flashing failed to start: " + (data.message || "Error"), "ERROR");
+                    isFlashingOrRebooting = false;
+                }
+            } catch (e) {
+                document.getElementById("btnStartFlash").disabled = false;
+                logToViewport("Flash request error: " + e.message, "ERROR");
+                isFlashingOrRebooting = false;
+            }
+        });
+
+        // Reset Flash
+        const btnResetFlash = document.getElementById("btnResetFlash");
+        if (btnResetFlash) {
+            btnResetFlash.addEventListener("click", async function () {
+                try {
+                    await fetch("/api/flash/reset", { method: "POST" });
+                    logToViewport("Flasher state reset.", "INFO");
+                    const bar = document.getElementById("flashProgressBar");
+                    const pct = document.getElementById("flashProgressPercent");
+                    const stg = document.getElementById("flashProgressStage");
+                    const badge = document.getElementById("flasherStatusBadge");
+                    if (bar) bar.style.width = "0%";
+                    if (pct) pct.textContent = "0%";
+                    if (stg) stg.textContent = "Idle";
+                    if (badge) {
+                        badge.textContent = "Ready";
+                        badge.className = "badge";
+                    }
+                    timerStarted = false;
+                    if (rebootCountdownInterval) {
+                        clearInterval(rebootCountdownInterval);
+                        rebootCountdownInterval = null;
+                    }
+                    const timerBox = document.getElementById("rebootTimerBox");
+                    if (timerBox) timerBox.style.display = "none";
+                    isFlashingOrRebooting = false;
+                    document.getElementById("btnStartFlash").disabled = false;
+                } catch (e) {}
+            });
+        }
+
+        // Clear terminal
+        document.getElementById("btnClearLogs").addEventListener("click", function () {
+            document.getElementById("flashTerminal").innerHTML = "";
+        });
+
+        // Initial setup on page load
+        populateWifiDropdown();
+        setInterval(checkNetworkStatus, 1000);
+        checkNetworkStatus();
+
+        // Restore countdown if active from earlier navigation
+        const savedRebootUntil = localStorage.getItem("solo_reboot_until");
+        if (savedRebootUntil) {
+            const remSec = Math.round((parseInt(savedRebootUntil, 10) - Date.now()) / 1000);
+            if (remSec > 0) {
+                startRebootCountdown(remSec);
+            } else {
+                localStorage.removeItem("solo_reboot_until");
+            }
+        }
+
+        // Uninstall handler
+        const btnUninstallUpdates = document.getElementById("btnUninstallAppUpdates");
+        if (btnUninstallUpdates) {
+            btnUninstallUpdates.addEventListener("click", function () {
+                const confirmed = window.confirm(
+                    "Are you sure you want to completely uninstall SoloWebUtility2 from the drone?\n\n" +
+                    "This will:\n" +
+                    "• Remove the auto-start entry from /etc/rc.local\n" +
+                    "• Delete /usr/bin/SoloWebUtility2 and /log/SoloWebUtility2\n" +
+                    "• Stop the web server process\n\n" +
+                    "Click OK to proceed with uninstallation."
+                );
+                if (!confirmed) return;
+
+                btnUninstallUpdates.disabled = true;
+                btnUninstallUpdates.textContent = "Uninstalling...";
+
+                fetch("/api/uninstall", { method: "POST" })
+                    .then(function (res) {
+                        document.body.innerHTML = '<div style="display:flex;justify-content:center;align-items:center;height:100vh;background:#0b101b;color:#fca5a5;font-family:sans-serif;text-align:center;"><div><h1>🗑️ SoloWebUtility2 Uninstalled</h1><p style="color:#cbd5e1;margin-top:10px;">The application files and /etc/rc.local startup entry have been completely removed from the drone.</p><p style="color:#94a3b8;margin-top:5px;">The server process has shut down. You may now close this tab.</p></div></div>';
+                    })
+                    .catch(function (err) {
+                        alert("Uninstall error: " + err.message);
+                        btnUninstallUpdates.disabled = false;
+                        btnUninstallUpdates.textContent = "🗑️ Uninstall";
+                    });
+            });
+        }
+    </script>
+</body>
+</html>

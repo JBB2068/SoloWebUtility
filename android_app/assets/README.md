@@ -2,7 +2,7 @@
 
 A concise, self-contained on-board web server and management portal for the **3DR Solo** drone running **Open Solo 4.0.0 / latest ArduCopter stable version**.
 
-> **Version 1.0.1** — Runs on Solo Copter iMX6 (Python 2.7/3.x, zero external deps). Zero framework dependencies in the browser (vanilla JS/CSS/HTML).
+> **Version 1.0.71** — Runs on Solo Copter iMX6 (Python 2.7/3.x, zero external deps). Zero framework dependencies in the browser (vanilla JS/CSS/HTML).
 
 ---
 
@@ -52,11 +52,8 @@ A concise, self-contained on-board web server and management portal for the **3D
 - In-browser password change modal (🔒 icon in header).
 - CLI utility: `python change_password.py` or `python change_password.py --reset`
 
-### 🌐 Captive Portal
-- Automatically opens the web browser when a client device (iOS, Android, Windows, macOS) joins the SoloLink Wi-Fi, by intercepting OS captive portal probe requests.
-
 ### 🏷️ Versioning
-- Starts at **1.0.1**, increments by 0.0.1 each iteration.
+- Increments by 0.0.1 each iteration (currently at **1.0.71**).
 - Version visible in header, footer, and REST API.
 
 ---
@@ -99,8 +96,8 @@ SoloWebUtility/
 │   ├── pixhawk.py               # Pixhawk serial bootloader flasher
 │   └── uploader.py              # APJ uploader
 ├── firmware/
-│   ├── arducopter_solo.apj      # latest ArduCopter stable version — Stock Solo Cube (1.37 MB)
-│   ├── arducopter_green.apj     # latest ArduCopter stable version — Green Cube (1.42 MB)
+│   ├── arducopter_CubeSolo_*.apj  # latest ArduCopter stable version — Stock Solo Cube (1.37 MB)
+│   ├── arducopter_CubeGreen_*.apj # latest ArduCopter stable release — Green Cube (1.42 MB)
 │   ├── 3dr-solo.tar.gz          # Copter iMX6 Linux image (76 MB) — shared by both
 │   ├── 3dr-solo.tar.gz.md5
 │   ├── 3dr-controller.tar.gz    # Controller iMX6 Linux image (75 MB)
@@ -117,8 +114,8 @@ SoloWebUtility/
 ├── wifi_mgr.py                  # Wi-Fi mgmt (sololink_config --set-wifi-sta)
 ├── param_mgr.py                 # Parameter editor + MAVLink live fetch
 ├── presets.py                   # Parameter presets
-├── version_mgr.py               # Version tracker (1.0.1 + 0.0.1)
-├── solo_web_app.py              # HTTP server + REST API + captive portal
+├── version_mgr.py               # Version tracker and release management
+├── solo_web_app.py              # HTTP server + REST API
 ├── install_to_solo.py           # Remote installer to 10.1.1.10
 ├── deploy_to_solo.bat           # Windows 1-click deployer
 └── run_local_server.bat         # Windows local test launcher

@@ -1,0 +1,5 @@
+*.exe
+*.apk
+*.apk.idsig
+*.zip
+*.tar.gz

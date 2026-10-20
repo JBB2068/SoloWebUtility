@@ -17,7 +17,7 @@ import threading
 CONTROLLER_IP = "10.1.1.1"
 SOLO_IP = "10.1.1.10"
 SSH_USER = "root"
-SSH_OPTS = "-o StrictHostKeyChecking=no -o ConnectTimeout=10"
+SSH_OPTS = "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o GlobalKnownHostsFile=/dev/null -o ConnectTimeout=10"
 
 
 def _ssh(cmd, host=CONTROLLER_IP):
@@ -28,6 +28,36 @@ def _ssh(cmd, host=CONTROLLER_IP):
     if sys.version_info[0] >= 3:
         out = out.decode("utf-8", "ignore")
     return p.returncode, out
+
+
+def is_controller_linked(timeout=1.0):
+    """
+    Check if Controller (10.1.1.1) is reachable from the Copter (10.1.1.10).
+    Uses non-blocking TCP socket probe on port 22 with fallback to fast ping.
+    """
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        s.connect((CONTROLLER_IP, 22))
+        s.close()
+        return True
+    except Exception:
+        pass
+
+    try:
+        if sys.platform.startswith("win"):
+            cmd = ["ping", "-n", "1", "-w", str(int(timeout * 1000)), CONTROLLER_IP]
+        else:
+            cmd = ["ping", "-c", "1", "-W", str(int(max(1, round(timeout)))), CONTROLLER_IP]
+        devnull = open(os.devnull, "wb")
+        rc = subprocess.call(cmd, stdout=devnull, stderr=devnull)
+        devnull.close()
+        if rc == 0:
+            return True
+    except Exception:
+        pass
+
+    return False
 
 
 def _port_open(ip, port, timeout=0.8):
@@ -46,9 +76,12 @@ class PairManager(object):
         self.is_pairing = False
         self.status = "ready"   # ready | pairing | paired | error
         self.progress = 0
-        self.message = "Ready to pair."
+        self.message = "Ready to pair. The SoloLink Wi-Fi network must also be connected to continue."
         self.log_buffer = []
         self.lock = threading.Lock()
+
+    def is_controller_linked(self, timeout=1.0):
+        return is_controller_linked(timeout=timeout)
 
     def log(self, msg, level="INFO"):
         ts = time.strftime("%H:%M:%S")
@@ -60,24 +93,28 @@ class PairManager(object):
         print("[%s] [PAIR] %s" % (ts, msg))
 
     def get_state(self):
+        ctrl_online = is_controller_linked(timeout=0.6)
         with self.lock:
             return {
                 "is_pairing": self.is_pairing,
                 "status": self.status,
                 "progress": self.progress,
                 "message": self.message,
-                "logs": list(self.log_buffer)
+                "logs": list(self.log_buffer),
+                "paired": ctrl_online,
+                "controller_online": ctrl_online,
+                "status_text": "Paired & Connected" if ctrl_online else "Not Connected"
             }
 
     def check_paired_status(self):
-        ctrl_online = _port_open(CONTROLLER_IP, 22)
-        mav_online = _port_open(CONTROLLER_IP, 14550, timeout=0.5)
+        ctrl_online = is_controller_linked(timeout=1.0)
+        mav_online = _port_open(CONTROLLER_IP, 14550, timeout=0.3) if ctrl_online else False
         paired = ctrl_online
         return {
             "paired": paired,
             "controller_online": ctrl_online,
             "mavlink_online": mav_online,
-            "status_text": "Paired & Connected" if paired else "Not Paired / Offline"
+            "status_text": "Paired & Connected" if paired else "Not Connected"
         }
 
     def start_pairing(self, controller_ssid="", controller_pwd=""):
@@ -105,7 +142,7 @@ class PairManager(object):
             # Step 1: Verify Controller is online
             self.progress = 10
             self.message = "Checking Controller link (10.1.1.1)..."
-            ctrl_up = _port_open(CONTROLLER_IP, 22)
+            ctrl_up = is_controller_linked(timeout=1.5)
             if not ctrl_up:
                 self.log("[!] Controller SSH unreachable. Ensure Controller is powered on and on SoloLink Wi-Fi.", "WARNING")
             else:
@@ -130,7 +167,10 @@ class PairManager(object):
             self.progress = 50
             self.message = "Triggering pairing on Copter (10.1.1.10)..."
             self.log("[*] Invoking sololink_config --pair-copter on Copter...", "INFO")
-            _ssh("sololink_config --pair-copter 2>/dev/null || true", host=SOLO_IP)
+            try:
+                subprocess.call("sololink_config --pair-copter 2>/dev/null || true", shell=True)
+            except Exception:
+                pass
 
             # Step 4: UDP broadcast pairing handshake (SoloLink subnet)
             self.progress = 65
@@ -162,7 +202,7 @@ class PairManager(object):
             self.log("[*] Pinging Controller...", "INFO")
             paired_ok = False
             for attempt in range(1, 5):
-                if _port_open(CONTROLLER_IP, 22, timeout=2.0):
+                if is_controller_linked(timeout=2.0):
                     paired_ok = True
                     break
                 self.log("    Attempt %d/4 — no response yet..." % attempt, "INFO")
@@ -178,9 +218,9 @@ class PairManager(object):
                 self.log("=" * 55, "HEADER")
             else:
                 self.status = "paired"
-                self.message = "Pairing commands sent. If not linked, hold Pair button on Controller 3 sec."
+                self.message = "Pairing commands sent. If not linked, hold Pair button on Controller 3 sec. The SoloLink Wi-Fi network must also be connected to continue."
                 self.log("[!] Link not confirmed via ping. Pairing signals were sent.", "WARNING")
-                self.log("[!] If still not paired: hold Pair button under Controller left shoulder for 3 seconds.", "WARNING")
+                self.log("[!] If still not paired: hold Pair button under Controller left shoulder for 3 seconds. The SoloLink Wi-Fi network must also be connected to continue.", "WARNING")
 
         except Exception as e:
             self.status = "error"

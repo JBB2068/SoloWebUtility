@@ -45,12 +45,12 @@ else:
 
 
 def get_local_path(loc_rel):
+    p2 = os.path.join(EXE_DIR, loc_rel)
+    if os.path.exists(p2) and p2 != os.path.join(LOCAL_DIR, loc_rel):
+        return p2
     p1 = os.path.join(LOCAL_DIR, loc_rel)
     if os.path.exists(p1):
         return p1
-    p2 = os.path.join(EXE_DIR, loc_rel)
-    if os.path.exists(p2):
-        return p2
     return p1
 
 
@@ -102,7 +102,7 @@ def ssh_exec(client, cmd):
         return -1, str(e)
 
 
-def safe_sftp_put(sftp, local_path, remote_path, resume=True, chunk_size=32768):
+def safe_sftp_put(sftp, local_path, remote_path, resume=True, chunk_size=32768, force=False):
     """
     Robust SFTP upload using synchronous writes (unpipelined).
     Prevents overflowing the embedded OpenSSH daemon buffer on Solo.
@@ -110,14 +110,20 @@ def safe_sftp_put(sftp, local_path, remote_path, resume=True, chunk_size=32768):
     """
     file_size = os.path.getsize(local_path)
     remote_size = 0
-    try:
-        rstat = sftp.stat(remote_path)
-        remote_size = rstat.st_size
-        if remote_size == file_size:
-            print("    [ALREADY UPLOADED] Matches local size (%s). Skipping." % format_size(file_size))
-            return True
-    except Exception:
-        remote_size = 0
+    if not force:
+        try:
+            rstat = sftp.stat(remote_path)
+            remote_size = rstat.st_size
+            if remote_size == file_size:
+                print("    [ALREADY UPLOADED] Matches local size (%s). Skipping." % format_size(file_size))
+                return True
+        except Exception:
+            remote_size = 0
+    else:
+        try:
+            sftp.remove(remote_path)
+        except Exception:
+            pass
 
     mode = "wb"
     start_offset = 0
@@ -478,16 +484,35 @@ def main():
     # =========================================================================
     # PHASE 3: Upload Firmware Packages to /log/firmware
     # =========================================================================
-    firmware_files = [
-        ("firmware/arducopter_solo.apj",      "%s/arducopter_solo.apj" % LOG_FW_DIR),
-        ("firmware/arducopter_green.apj",     "%s/arducopter_green.apj" % LOG_FW_DIR),
-        ("firmware/3dr-solo.tar.gz",          "%s/3dr-solo.tar.gz" % LOG_FW_DIR),
-        ("firmware/3dr-solo.tar.gz.md5",      "%s/3dr-solo.tar.gz.md5" % LOG_FW_DIR),
-        ("firmware/3dr-controller.tar.gz",    "%s/3dr-controller.tar.gz" % LOG_FW_DIR),
-        ("firmware/3dr-controller.tar.gz.md5","%s/3dr-controller.tar.gz.md5" % LOG_FW_DIR),
-        ("firmware/Solo.param",               "%s/Solo.param" % LOG_FW_DIR),
-        ("firmware/SoloGreen.param",          "%s/SoloGreen.param" % LOG_FW_DIR),
-    ]
+    try:
+        import bake_into_firmware
+        bake_into_firmware.ensure_firmware_baked(
+            firmware_dir=get_local_path("firmware"),
+            app_base_dir=LOCAL_DIR,
+            log_func=print
+        )
+    except Exception as e:
+        print("  [!] Notice: firmware auto-bake skipped/failed: %s" % str(e))
+
+    local_fw = get_local_path("firmware")
+    firmware_files = []
+    if os.path.isdir(local_fw):
+        for fn in sorted(os.listdir(local_fw)):
+            if fn.endswith((".apj", ".tar.gz", ".tar.gz.md5", ".md5", ".param", ".json")):
+                if fn in ("arducopter_solo.apj", "arducopter_green.apj"):
+                    continue
+                firmware_files.append(("firmware/%s" % fn, "%s/%s" % (LOG_FW_DIR, fn)))
+    if not firmware_files:
+        firmware_files = [
+            ("firmware/arducopter_CubeSolo_4.7.1.apj",  "%s/arducopter_CubeSolo_4.7.1.apj" % LOG_FW_DIR),
+            ("firmware/arducopter_CubeGreen_4.7.1.apj", "%s/arducopter_CubeGreen_4.7.1.apj" % LOG_FW_DIR),
+            ("firmware/3dr-solo.tar.gz",               "%s/3dr-solo.tar.gz" % LOG_FW_DIR),
+            ("firmware/3dr-solo.tar.gz.md5",           "%s/3dr-solo.tar.gz.md5" % LOG_FW_DIR),
+            ("firmware/3dr-controller.tar.gz",         "%s/3dr-controller.tar.gz" % LOG_FW_DIR),
+            ("firmware/3dr-controller.tar.gz.md5",     "%s/3dr-controller.tar.gz.md5" % LOG_FW_DIR),
+            ("firmware/Solo.param",                    "%s/Solo.param" % LOG_FW_DIR),
+            ("firmware/SoloGreen.param",               "%s/SoloGreen.param" % LOG_FW_DIR),
+        ]
 
     print("\n[*] Phase 3: Uploading Firmware Files to /log/firmware...")
     for idx, (loc_rel, rem_path) in enumerate(firmware_files, 1):

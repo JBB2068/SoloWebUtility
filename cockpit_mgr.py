@@ -12,6 +12,7 @@ Provides:
 import os
 import sys
 import math
+import re
 import time
 import socket
 import select
@@ -70,6 +71,30 @@ GPS_FIX_TYPES = {
 }
 
 
+HEARTBEAT_CRC_EXTRA = 50
+AUTOPILOT_VERSION_MSGID = 148
+AUTOPILOT_VERSION_CRC_EXTRA = 178
+# Messages whose content we act on are only accepted with a valid CRC
+CHECKED_CRC_EXTRA = {0: HEARTBEAT_CRC_EXTRA, AUTOPILOT_VERSION_MSGID: AUTOPILOT_VERSION_CRC_EXTRA}
+_ARDUCOPTER_BANNER = re.compile(r"ArduCopter V(\d+\.\d+(?:\.\d+)?)")
+
+
+def _frame_crc_ok(data, start, end, crc_extra):
+    """data[start:end] = frame without the magic byte and without the CRC;
+    the two CRC bytes follow at data[end:end+2]."""
+    if end + 2 > len(data):
+        return False
+    body = bytearray(data[start:end])
+    body.append(crc_extra)
+    got = bytearray(data[end:end + 2])
+    return calc_x25_crc(body) == (got[0] | (got[1] << 8))
+
+
+def _heartbeat_crc_ok(data, start, end):
+    """HEARTBEAT frame check (CRC_EXTRA 50)."""
+    return _frame_crc_ok(data, start, end, HEARTBEAT_CRC_EXTRA)
+
+
 def calc_x25_crc(buf):
     """Compute X.25 / CRC16-MCRF4XX checksum for MAVLink packets."""
     crc = 0xffff
@@ -94,6 +119,8 @@ class TelemetryState(object):
         
         # Vehicle status
         self.armed = False
+        # ArduCopter version reported live by the Cube (AUTOPILOT_VERSION / boot banner)
+        self.cube_version = None
         self.flight_mode = "LOITER"
         self.custom_mode = 5
         self.system_status = 3
@@ -324,6 +351,7 @@ class LiveMAVLinkClient(threading.Thread):
         self.seq = 0
         self.last_heartbeat_sent = 0.0
         self.last_stream_req_sent = 0.0
+        self.last_version_req_sent = 0.0
         self.last_rate_time = time.time()
         self.pkt_counter = 0
 
@@ -386,6 +414,12 @@ class LiveMAVLinkClient(threading.Thread):
         pkt = self.build_mavlink_v1_packet(76, payload, 152)
         self.send_packet(pkt)
 
+    def request_autopilot_version(self):
+        """MAV_CMD_REQUEST_AUTOPILOT_CAPABILITIES (520) -> the Cube answers with AUTOPILOT_VERSION."""
+        payload = struct.pack('<fffffffHBBB', 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 520, 1, 1, 0)
+        pkt = self.build_mavlink_v1_packet(76, payload, 152)
+        self.send_packet(pkt)
+
     def send_set_mode_command(self, custom_mode):
         """Send SET_MODE (msg ID 11, CRC extra 89)."""
         payload = struct.pack('<IBB', int(custom_mode), 1, 1)
@@ -395,6 +429,16 @@ class LiveMAVLinkClient(threading.Thread):
     def run(self):
         self.running = True
         while self.running:
+            if getattr(self, 'paused', False):
+                # Telemetry hold released (e.g. during native calibration)
+                if self.sock is not None:
+                    try:
+                        self.sock.close()
+                    except Exception:
+                        pass
+                    self.sock = None
+                time.sleep(0.1)
+                continue
             s = self.get_socket()
             if not s:
                 time.sleep(1.0)
@@ -411,6 +455,11 @@ class LiveMAVLinkClient(threading.Thread):
             if now - self.last_stream_req_sent >= 5.0:
                 self.request_data_streams()
                 self.last_stream_req_sent = now
+
+            # Ask the Cube which ArduCopter it runs: every 5 s until known, then every 60 s
+            if now - self.last_version_req_sent >= (60.0 if self.state.cube_version else 5.0):
+                self.request_autopilot_version()
+                self.last_version_req_sent = now
 
             # Packet rate calculation
             if now - self.last_rate_time >= 1.0:
@@ -430,6 +479,8 @@ class LiveMAVLinkClient(threading.Thread):
                 if now - self.state.last_packet_time > 3.0:
                     with self.state.lock:
                         self.state.mavlink_connected = False
+                        # the Cube may be rebooting into different firmware: ask again
+                        self.state.cube_version = None
                 continue
 
             try:
@@ -458,6 +509,11 @@ class LiveMAVLinkClient(threading.Thread):
                 total_len = 6 + plen + 2
                 if idx + total_len > datalen:
                     break
+                # The stream is scanned for 0xFE, so random bytes can look like a
+                # frame. Never let an unchecked "HEARTBEAT" change the armed state.
+                if msgid in CHECKED_CRC_EXTRA and not _frame_crc_ok(data, idx + 1, idx + 6 + plen, CHECKED_CRC_EXTRA[msgid]):
+                    idx += 1
+                    continue
                 payload = data[idx+6:idx+6+plen]
                 self.decode_payload(msgid, payload, sysid, compid)
                 idx += total_len
@@ -478,6 +534,9 @@ class LiveMAVLinkClient(threading.Thread):
                 total_len = 10 + plen + 2 + sig_len
                 if idx + total_len > datalen:
                     break
+                if msgid in CHECKED_CRC_EXTRA and not _frame_crc_ok(data, idx + 1, idx + 10 + plen, CHECKED_CRC_EXTRA[msgid]):
+                    idx += 1
+                    continue
                 payload = data[idx+10:idx+10+plen]
                 self.decode_payload(msgid, payload, sysid, compid)
                 idx += total_len
@@ -500,7 +559,8 @@ class LiveMAVLinkClient(threading.Thread):
                 # HEARTBEAT (0)
                 if msgid == 0 and len(payload) >= 9:
                     custom_mode, mtype, autopilot, base_mode, sys_status = struct.unpack('<IBBBB', payload[:8])
-                    if (autopilot == 3 or mtype in (1, 2, 3, 4, 12, 13, 14, 15)) and sysid not in (254, 255):
+                    if (autopilot == 3 or mtype in (1, 2, 3, 4, 12, 13, 14, 15)) and sysid not in (254, 255) \
+                            and compid == 1 and mtype not in (6, 26, 27):
                         new_mode = ARDUCOPTER_MODES.get(custom_mode, "MODE %d" % custom_mode)
                         if self.state.flight_mode != new_mode:
                             self.state.add_message("Mode: %s" % new_mode, 6)
@@ -509,14 +569,16 @@ class LiveMAVLinkClient(threading.Thread):
                         
                         is_armed = bool(base_mode & 128)
                         if self.state.armed != is_armed:
+                            try:
+                                sys.stdout.write("[%s] [telemetry] %s from sysid=%d compid=%d type=%d autopilot=%d base_mode=0x%02x\n" % (
+                                    time.strftime("%H:%M:%S"), "ARMED" if is_armed else "DISARMED",
+                                    sysid, compid, mtype, autopilot, base_mode))
+                                sys.stdout.flush()
+                            except Exception:
+                                pass
                             self.state.add_message("MOTORS ARMED" if is_armed else "MOTORS DISARMED", 4 if is_armed else 6)
                             self.state.armed = is_armed
-                            if is_armed:
-                                try:
-                                    import wifi_mgr
-                                    threading.Thread(target=wifi_mgr.disconnect_on_armed).start()
-                                except Exception:
-                                    pass
+                            # home Wi-Fi is dropped by wifi_mgr.start_arm_interlock()
                         
                         self.state.system_status = sys_status
 
@@ -594,6 +656,8 @@ class LiveMAVLinkClient(threading.Thread):
                 # COMMAND_ACK (77)
                 elif msgid == 77 and len(payload) >= 3:
                     cmd, result = struct.unpack('<HB', payload[:3])
+                    if cmd == 520:
+                        return   # our own background version request; not shown in the HUD log
                     res_map = {0: "ACCEPTED", 1: "TEMPORARILY_REJECTED", 2: "DENIED", 3: "UNSUPPORTED", 4: "FAILED", 5: "IN_PROGRESS", 6: "CANCELLED"}
                     cmd_map = {400: "ARM/DISARM", 176: "DO_SET_MODE", 20: "NAV_TAKEOFF", 21: "NAV_LAND", 22: "NAV_RTL"}
                     cname = cmd_map.get(cmd, "CMD_%d" % cmd)
@@ -606,6 +670,19 @@ class LiveMAVLinkClient(threading.Thread):
                     raw_text = payload[1:min(len(payload), 51)].decode('ascii', errors='ignore').rstrip('\x00').strip()
                     if raw_text:
                         self.state.add_message(raw_text, sev)
+                        m = _ARDUCOPTER_BANNER.search(raw_text)
+                        if m and compid == 1:
+                            self.state.cube_version = m.group(1)
+                            _remember_cube_version(m.group(1))
+
+                # AUTOPILOT_VERSION (148): flight_sw_version = major<<24 | minor<<16 | patch<<8 | type
+                elif msgid == AUTOPILOT_VERSION_MSGID and compid == 1:
+                    payload = payload + b"\x00" * max(0, 20 - len(payload))   # MAVLink 2 trims trailing zeros
+                    fsw = struct.unpack('<I', payload[16:20])[0]
+                    major, minor, patch = (fsw >> 24) & 0xff, (fsw >> 16) & 0xff, (fsw >> 8) & 0xff
+                    if major:
+                        self.state.cube_version = "%d.%d.%d" % (major, minor, patch)
+                        _remember_cube_version(self.state.cube_version)
 
                 # RC_CHANNELS_RAW (35)
                 elif msgid == 35 and len(payload) >= 22:
@@ -900,6 +977,78 @@ def get_video_status():
     return video_manager.get_status()
 
 
+# Last version the Cube itself reported over MAVLink. An EMPTY file means "the Cube was
+# just flashed; its version is not known until it reports again".
+CUBE_VERSION_RECORD = "/log/solowebutility_cube_version"
+PIX_VERSION_FILE = "/PIX_VERSION"   # written by Open Solo's pixhawk.py at boot only
+_VERSION_NUM = re.compile(r"(\d+\.\d+(?:\.\d+)?)")
+
+
+def _remember_cube_version(version):
+    """Persist the live version (only written when it changes)."""
+    try:
+        old = None
+        if os.path.exists(CUBE_VERSION_RECORD):
+            with open(CUBE_VERSION_RECORD, "r") as f:
+                old = f.read().strip()
+        if old != version:
+            with open(CUBE_VERSION_RECORD, "w") as f:
+                f.write(version + "\n")
+    except Exception:
+        pass
+
+
+def invalidate_cube_version():
+    """Call right before the Cube is flashed: forget every known version until the Cube reports."""
+    try:
+        with telemetry.lock:
+            telemetry.cube_version = None
+    except Exception:
+        pass
+    try:
+        with open(CUBE_VERSION_RECORD, "w") as f:
+            f.write("")
+    except Exception:
+        pass
+
+
+def _mtime(path):
+    try:
+        return os.path.getmtime(path)
+    except Exception:
+        return None
+
+
+def get_cube_version():
+    """'ArduCopter x.y.z' as installed on the Cube, or "" while it is not known.
+    1. Live MAVLink answer from the Cube.
+    2. Otherwise the NEWER of: the last live answer (our record) and /PIX_VERSION (Open Solo,
+       written at boot). An empty record (Cube just flashed) means unknown, so a /PIX_VERSION
+       from before the flash is never shown."""
+    try:
+        with telemetry.lock:
+            live = telemetry.cube_version
+        if live:
+            return "ArduCopter %s" % live
+    except Exception:
+        pass
+    rec_t, pix_t = _mtime(CUBE_VERSION_RECORD), _mtime(PIX_VERSION_FILE)
+    try:
+        if rec_t is not None and (pix_t is None or rec_t >= pix_t):
+            with open(CUBE_VERSION_RECORD, "r") as f:
+                m = _VERSION_NUM.search(f.read())
+            return ("ArduCopter %s" % m.group(1)) if m else ""
+        if pix_t is not None:
+            with open(PIX_VERSION_FILE, "r") as f:
+                for line in f:
+                    m = _VERSION_NUM.search(line)
+                    if m and line.strip().lower() != "unknown":
+                        return "ArduCopter %s" % m.group(1)
+    except Exception:
+        pass
+    return ""
+
+
 def is_vehicle_armed():
     """Return True if the vehicle is currently armed (thread-safe)."""
     try:
@@ -955,11 +1104,6 @@ def handle_action(action, custom_mode=None):
         # ARMING ONLY PERMITTED ON DIRECT USER DISPATCH
         mav_client.send_arm_command(True)
         telemetry.add_message("Dispatched: ARM MOTORS", 4)
-        try:
-            import wifi_mgr
-            threading.Thread(target=wifi_mgr.disconnect_on_armed).start()
-        except Exception:
-            pass
         return {"status": "ok", "message": "Arm command dispatched"}
 
     return {"status": "error", "message": "Unknown action"}

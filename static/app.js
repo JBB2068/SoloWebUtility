@@ -14,6 +14,20 @@
     var modifiedParams = {};
     var flashPollInterval = null;
     var rebootCountdownInterval = null;
+    var rebootPingInterval = null;
+    var countdownStartTime = 0;
+    var timerStarted = false;
+    var isUpdateRunning = false;
+// Network-signal lock: copter_online readings are ignored until the installation countdown is running.
+let installationInProgress = false;
+var offlineSinceMs = null;               // when the copter was first seen continuously offline
+var REQUIRED_OFFLINE_MS = 15000;         // copter must be offline >= 15s before a 'true' can cancel the timer
+function setUploadProgressVisible(visible) {
+    var bar = document.getElementById('flashProgressBar');
+    var wrap = bar && bar.parentElement;
+    if (wrap) { wrap.style.visibility = visible ? 'visible' : 'hidden'; }
+}
+    var previousCopterOnline = null;
 
     // =========================================================================
     // DOM helpers
@@ -120,6 +134,11 @@
     var netStatusInternet  = el('netStatusInternet');
     var netStatusFwd       = el('netStatusFwd');
     var netStatusCtrl      = el('netStatusCtrl');
+    var netStatusCopterNet = el('netStatusCopterNet');
+    var wifiSecurityHint   = el('wifiSecurityHint');
+    var wifiProblem        = el('wifiProblem');
+    var wifiSteps          = el('wifiSteps');
+    var wifiSetupLog       = el('wifiSetupLog');
     var btnRefreshWifiStatus = el('btnRefreshWifiStatus');
 
     // Parameter elements
@@ -278,7 +297,7 @@
             }).catch(function(){});
     }
 
-    btnOpenVersionModal.addEventListener('click', function () {
+    if (btnOpenVersionModal) btnOpenVersionModal.addEventListener('click', function () {
         loadVersionInfo();
         versionModal.style.display = 'flex';
     });
@@ -310,14 +329,18 @@
             if (tgt) { tgt.classList.add('active'); }
 
             if (targetId === 'tab-wifi') {
+                // No automatic scan: every scan takes the Controller's only radio off
+                // SoloLink's channel for a moment (the copter beeps). Scan on request only.
                 refreshWifiStatus();
-                scanWifiNetworks(wifiSelect, btnScanWifi, wifiSsid);
             }
             else if (targetId === 'tab-params' && allParams.length === 0) {
                 loadPresets();
                 loadParams();
-            } else if (targetId === 'tab-flash' && isVehicleArmed) {
-                showToast('⚠️ SAFETY LOCKOUT: Firmware updates are disabled while the vehicle is ARMED.', true);
+            } else if (targetId === 'tab-flash') {
+                loadFirmwareChoices();
+                if (isVehicleArmed) {
+                    showToast('⚠️ SAFETY LOCKOUT: Firmware updates are disabled while the vehicle is ARMED.', true);
+                }
             }
         });
     });
@@ -343,30 +366,146 @@
         var cubeType    = document.querySelector('input[name="cubeType"]:checked').value;
         var installMode = document.querySelector('input[name="installMode"]:checked').value;
 
+        var fwSel = el('fwVersionSelect');
+        var fwChoice = (fwSel && fwSel.value && fwSel.value !== '__upload__') ? fwSel.value : '';
+        var fwLabel = fwChoice ? fwSel.options[fwSel.selectedIndex].text : 'Latest version';
+        var fwKind = fwChoice ? (fwSel.options[fwSel.selectedIndex].getAttribute('data-kind') || '') : 'latest';
         var confirmMsg = 'Start firmware installation?\n\n'
             + '• Cube: ' + (cubeType === 'green' ? 'Green Cube' : 'Stock Solo Cube (Black)') + '\n'
+            + '• Firmware: ' + fwLabel + '\n'
             + '• Scope: ' + (installMode === 'full' ? 'Full Install (Cube + Copter + Controller)' : 'Cube Only') + '\n\n'
+            + ((fwKind === 'previous' || fwKind === 'custom') && installMode === 'full'
+                ? 'Tip: to only change the ArduCopter version, "Cube Only" is enough.\n\n' : '')
+            + (fwKind === 'custom'
+                ? 'Custom file: make sure it was built for this Cube. The flasher refuses a file for a different board.\n\n' : '')
             + 'Ensure Solo and Controller have stable battery power before proceeding.';
         if (!confirm(confirmMsg)) { return; }
 
         btnStartFlash.disabled = true;
         btnStartFlash.textContent = '⏳ INSTALLATION IN PROGRESS...';
+        isUpdateRunning = true;
+        installationInProgress = false;
+        offlineSinceMs = null;
+        setUploadProgressVisible(true);
 
-        apiRequest('/api/flash/start', 'POST', { cube_type: cubeType, install_mode: installMode })
+        var startBody = { cube_type: cubeType, install_mode: installMode };
+        if (fwChoice) { startBody.firmware = fwChoice; }
+        apiRequest('/api/flash/start', 'POST', startBody)
             .then(function () {
                 showToast('🚀 Firmware deployment initiated!');
-                startFlashPolling();
+                startFlashPolling(installMode);
             }).catch(function (err) {
+                isUpdateRunning = false;
                 showToast('Error starting flash: ' + err.message, true);
                 btnStartFlash.disabled = false;
                 btnStartFlash.textContent = '🚀 START AUTOMATED INSTALLATION';
             });
     });
 
+    // -------------------------------------------------------------------------
+    // Firmware version choice: latest / up to 3 previous versions / custom .apj
+    // -------------------------------------------------------------------------
+    var fwVersionSelect = el('fwVersionSelect');
+    var fwCustomFile    = el('fwCustomFile');
+    var fwVersionInfo   = el('fwVersionInfo');
+    var FW_UPLOAD_MAX   = 4 * 1024 * 1024;
+
+    function fwSizeText(n) { return n ? (Math.round(n / 1024) + ' KB') : ''; }
+
+    function loadFirmwareChoices(selectPath) {
+        if (!fwVersionSelect || !authToken) { return; }
+        var checked = document.querySelector('input[name="cubeType"]:checked');
+        var cubeType = checked ? checked.value : 'solo';
+        apiRequest('/api/flash/firmware?cube_type=' + encodeURIComponent(cubeType))
+            .then(function (d) {
+                var keep = selectPath || fwVersionSelect.value;
+                var html = '';
+                if (d.latest) {
+                    html += '<option value="" data-kind="latest">Latest: ArduCopter ' + esc(d.latest.version)
+                        + ' (' + esc(d.latest.file) + ')</option>';
+                } else {
+                    html += '<option value="" data-kind="latest">Latest version (none found yet)</option>';
+                }
+                (d.previous || []).forEach(function (c) {
+                    html += '<option value="' + esc(c.path) + '" data-kind="previous">Revert to ArduCopter '
+                        + esc(c.version) + ' (' + esc(c.file) + ')</option>';
+                });
+                (d.custom || []).forEach(function (c) {
+                    html += '<option value="' + esc(c.path) + '" data-kind="custom">Custom: ' + esc(c.file)
+                        + (c.board_id !== null && c.board_id !== undefined ? ' (board ' + esc(String(c.board_id)) + ')' : '')
+                        + '</option>';
+                });
+                html += '<option value="__upload__" data-kind="upload">Upload custom .apj from this device…</option>';
+                fwVersionSelect.innerHTML = html;
+                fwVersionSelect.value = keep || '';
+                if (fwVersionSelect.selectedIndex < 0) { fwVersionSelect.value = ''; }
+                if (fwVersionInfo) {
+                    var n = (d.previous || []).length;
+                    fwVersionInfo.textContent = (n ? n + ' previous version' + (n > 1 ? 's' : '') + ' kept for reverting. '
+                        : 'No previous versions saved yet (they are kept automatically when a newer build is downloaded). ')
+                        + 'You can also upload your own .apj file.';
+                }
+            })
+            .catch(function () {
+                // Older server without this endpoint: keep the single "Latest" option.
+            });
+    }
+
+    if (fwVersionSelect) {
+        fwVersionSelect.addEventListener('change', function () {
+            if (fwVersionSelect.value === '__upload__') {
+                fwVersionSelect.value = '';
+                if (fwCustomFile) { fwCustomFile.value = ''; fwCustomFile.click(); }
+            }
+        });
+    }
+
+    if (fwCustomFile) {
+        fwCustomFile.addEventListener('change', function () {
+            var f = fwCustomFile.files && fwCustomFile.files[0];
+            if (!f) { return; }
+            if (!/\.apj$/i.test(f.name)) { showToast('Please choose an ArduPilot .apj file.', true); return; }
+            if (f.size > FW_UPLOAD_MAX) { showToast('That file is too large for an .apj (' + fwSizeText(f.size) + ').', true); return; }
+            var reader = new FileReader();
+            reader.onerror = function () { showToast('Could not read ' + f.name, true); };
+            reader.onload = function () {
+                var text = reader.result;
+                try {
+                    var j = JSON.parse(text);
+                    if (!j || !j.image || j.board_id === undefined) { throw new Error('missing image/board_id'); }
+                } catch (e) {
+                    showToast('Not an ArduPilot .apj file: ' + f.name, true);
+                    return;
+                }
+                if (fwVersionInfo) { fwVersionInfo.textContent = 'Uploading ' + f.name + ' (' + fwSizeText(f.size) + ')…'; }
+                apiRequest('/api/flash/upload-apj', 'POST', { filename: f.name, content: text })
+                    .then(function (r) {
+                        showToast('✅ Uploaded ' + (r.firmware ? r.firmware.file : f.name) + ' — selected for install.');
+                        loadFirmwareChoices(r.firmware ? r.firmware.path : '');
+                    })
+                    .catch(function (err) {
+                        showToast('Upload failed: ' + err.message, true);
+                        loadFirmwareChoices();
+                    });
+            };
+            reader.readAsText(f);
+        });
+    }
+
+    document.querySelectorAll('input[name="cubeType"]').forEach(function (r) {
+        r.addEventListener('change', function () { loadFirmwareChoices(''); });
+    });
+
     btnResetFlash.addEventListener('click', function () {
-        try { localStorage.removeItem('solo_reboot_until'); } catch (e) {}
-        if (rebootCountdownInterval) { clearInterval(rebootCountdownInterval); }
+        isUpdateRunning = false;
+        timerStarted = false;
+        installationInProgress = false;
+        offlineSinceMs = null;
+        setUploadProgressVisible(true);
+        if (rebootCountdownInterval) { clearInterval(rebootCountdownInterval); rebootCountdownInterval = null; }
         rebootTimerBox.style.display = 'none';
+        var phReset = el('rebootStandbyPlaceholder');
+        if (phReset) { phReset.style.display = 'flex'; }
         apiRequest('/api/flash/reset', 'POST').then(function () {
             showToast('Flash state reset.');
             flashTerminal.innerHTML = '<div class="log-line INFO">[System] Reset. Ready for new installation.</div>';
@@ -380,8 +519,11 @@
         }).catch(function(){});
     });
 
-    function startFlashPolling() {
+    function startFlashPolling(installMode) {
         if (flashPollInterval) { clearInterval(flashPollInterval); }
+        // Cube Only: only the autopilot reboots (about 30 s); the copter and controller
+        // keep running, so the 6-minute Open Solo update countdown does not apply.
+        var cubeOnly = (installMode === 'cube_only');
         var lastProgress = 0;
         var consecutiveErrors = 0;
         var countdownTriggered = false;
@@ -396,10 +538,16 @@
                         clearInterval(flashPollInterval);
                         btnStartFlash.disabled = false;
                         btnStartFlash.textContent = '🚀 START AUTOMATED INSTALLATION';
-                        if (state.status === 'success' && !countdownTriggered) {
+                        if (state.status === 'success' && cubeOnly) {
+                            countdownTriggered = true;
+                            isUpdateRunning = false;
+                            pipelineStatusBadge.textContent = 'COMPLETE';
+                            stepCube.className = 'step-item done';
+                            showToast('🎉 Cube flashed! The autopilot reboots by itself in about 30 seconds — no copter restart needed.');
+                        } else if (state.status === 'success' && !countdownTriggered) {
                             countdownTriggered = true;
                             showToast('🎉 Installation staged! Rebooting hardware...');
-                            startRebootCountdown(480);
+                            startRebootCountdown(360);
                         } else if (state.status === 'error') {
                             showToast('Installation error — check terminal logs.', true);
                         }
@@ -408,7 +556,7 @@
                     consecutiveErrors++;
                     // If connection drops while progress was at or above 75% (during Controller transfer or staging),
                     // the Controller/Copter has rebooted and severed the Wi-Fi AP. Transition cleanly to 100% and countdown!
-                    if (lastProgress >= 75 && consecutiveErrors >= 2 && !countdownTriggered) {
+                    if (!cubeOnly && lastProgress >= 75 && consecutiveErrors >= 2 && !countdownTriggered) {
                         countdownTriggered = true;
                         clearInterval(flashPollInterval);
                         btnStartFlash.disabled = false;
@@ -417,7 +565,7 @@
                         // Set UI to 100% complete
                         flashProgressBar.style.width = '100%';
                         flashPercentLabel.textContent = '100%';
-                        flashStageLabel.textContent = 'Hardware Rebooting — Applying Updates (~8 min)';
+                        flashStageLabel.textContent = 'Hardware Rebooting — Applying Updates (~6 min)';
                         pipelineStatusBadge.textContent = 'REBOOTING';
                         pipelineStatusBadge.className = 'badge badge-accent';
 
@@ -428,11 +576,11 @@
 
                         var timeStr = new Date().toTimeString().split(' ')[0];
                         flashTerminal.innerHTML += '<div class="log-line SUCCESS">[' + timeStr + '] 🎉 Hardware reboot initiated! Both Copter and Controller are applying Open Solo updates.</div>' +
-                                                   '<div class="log-line INFO">[' + timeStr + '] 8-Minute Countdown started. Pair and calibrate after reboot finishes.</div>';
+                                                   '<div class="log-line INFO">[' + timeStr + '] 6-Minute Countdown started. Pair and calibrate after reboot finishes. The SoloLink Wi-Fi network must also be connected to continue.</div>';
                         flashTerminal.scrollTop = flashTerminal.scrollHeight;
 
-                        showToast('🎉 Hardware rebooted! Open Solo update is applying (8 min timer started)...');
-                        startRebootCountdown(480);
+                        showToast('🎉 Hardware rebooted! Open Solo update is applying (6 min timer started)...');
+                        startRebootCountdown(360);
                     }
                 });
         }, 1500);
@@ -459,24 +607,230 @@
         }
     }
 
-    function startRebootCountdown(seconds) {
-        rebootTimerBox.style.display = 'block';
-        var remaining = seconds;
+    function playHardwareAliveTone() {
         try {
-            localStorage.setItem('solo_reboot_until', Date.now() + (seconds * 1000));
+            var AudioCtx = window.AudioContext || window.webkitAudioContext;
+            if (!AudioCtx) return;
+            var ctx = new AudioCtx();
+            var osc = ctx.createOscillator();
+            var gain = ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(587.33, ctx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.15);
+            gain.gain.setValueAtTime(0.25, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start();
+            osc.stop(ctx.currentTime + 0.6);
+        } catch (e) {
+            console.log('Audio playback prevented or unsupported:', e);
+        }
+    }
+
+    function flashScreenBorderGreen() {
+        document.body.classList.remove('flash-alive-border');
+        void document.body.offsetWidth;
+        document.body.classList.add('flash-alive-border');
+        setTimeout(function () {
+            document.body.classList.remove('flash-alive-border');
+        }, 5000);
+    }
+
+    function scrollToPairingInstructions() {
+        var card = el('step2PairCard') || el('pairingCard') || document.querySelector('.pairing-guard-box') || el('btnPairController');
+        if (card) {
+            card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+    }
+
+    function showTimerSuccessBox() {
+        var box = el('rebootTimerBox');
+        if (!box) { return; }
+        var ph = el('rebootStandbyPlaceholder');
+        if (ph) { ph.style.display = 'none'; }
+        box.style.display = 'flex';
+        Array.prototype.forEach.call(box.children, function (c) {
+            if (c.id !== 'rebootSuccessAlert') { c.style.display = 'none'; }
+        });
+        var s = el('rebootSuccessAlert');
+        if (!s) {
+            s = document.createElement('div');
+            s.id = 'rebootSuccessAlert';
+            s.style.cssText = 'background: rgba(16,185,129,0.25); border: 2px solid #10b981; color: #6ee7b7; padding: 10px 14px; border-radius: 8px; font-size: 13px; font-weight: 700; text-align: center; width: 100%; box-sizing: border-box;';
+            box.appendChild(s);
+        }
+        s.textContent = '🎉 Success! Copter link restored. Continue to Step 2: Pairing and Calibration.';
+        s.style.display = 'block';
+    }
+
+    function resetTimerSuccessBox() {
+        var box = el('rebootTimerBox');
+        if (!box) { return; }
+        Array.prototype.forEach.call(box.children, function (c) {
+            c.style.display = (c.id === 'rebootSuccessAlert') ? 'none' : '';
+        });
+    }
+
+    function onCopterHardwareAlive() {
+        if (rebootPingInterval) {
+            clearInterval(rebootPingInterval);
+            rebootPingInterval = null;
+        }
+        // Explicitly clear the 6-minute countdown clock interval
+        if (rebootCountdownInterval) {
+            clearInterval(rebootCountdownInterval);
+            rebootCountdownInterval = null;
+        }
+        timerStarted = false;
+        try { localStorage.removeItem('solo_reboot_until'); localStorage.removeItem('solo_reboot_start'); } catch (e) {}
+
+        var warningAlert = el('rebootWarningAlert');
+        if (warningAlert) {
+            warningAlert.style.transition = 'all 0.4s ease';
+            warningAlert.style.background = 'rgba(16, 185, 129, 0.25)';
+            warningAlert.style.borderColor = '#10b981';
+            warningAlert.style.color = '#6ee7b7';
+            warningAlert.textContent = 'Update Complete! Software pairing mode is currently active. Hold A+B on your Artoo Controller to finalize link.';
+        }
+
+        var rebootBar = el('rebootProgressBar');
+        if (rebootBar) {
+            rebootBar.style.width = '100%';
+        }
+
+        // Replace the countdown digits with a prominent green success alert.
+        showTimerSuccessBox();
+
+        if (flashProgressBar) { flashProgressBar.style.width = '100%'; }
+        if (flashPercentLabel) { flashPercentLabel.textContent = '100%'; }
+        if (flashStageLabel) { flashStageLabel.textContent = 'Copter is alive! Update process complete.'; }
+        if (pipelineStatusBadge) {
+            pipelineStatusBadge.textContent = 'ONLINE & READY';
+            pipelineStatusBadge.className = 'badge badge-accent';
+        }
+        if (stepReboot) {
+            stepReboot.className = 'step-item done';
+        }
+
+        if (flashTerminal) {
+            var timeStr = new Date().toTimeString().split(' ')[0];
+            flashTerminal.innerHTML += '<div class="log-line SUCCESS">[' + timeStr + '] 🎉 [Wi-Fi] Copter is alive! Update process complete.</div>' +
+                                       '<div class="log-line INFO">[' + timeStr + '] Advancing automatically to Step 2: Pairing & Calibrations.</div>';
+            flashTerminal.scrollTop = flashTerminal.scrollHeight;
+        }
+
+        playHardwareAliveTone();
+        flashScreenBorderGreen();
+        scrollToPairingInstructions();
+
+        // Automatically proceed to calibrations view
+        var calibTarget = el('step3CalibCard') || document.querySelector('.pos-steps-grid') || el('step2PairCard');
+        if (calibTarget) {
+            calibTarget.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+        showToast('🎉 Copter is alive! Update process complete — proceed to Step 2: Pairing & Calibrations.');
+    }
+
+    function startRebootCountdown(seconds) {
+        if (timerStarted) {
+            // Single execution safety lock: block duplicate trigger or countdown reset
+            return;
+        }
+        timerStarted = true;
+        isUpdateRunning = true;
+        previousCopterOnline = false;
+        countdownStartTime = Date.now();
+        // Stage 1 upload complete + reboots issued: arm the network-signal gate
+        installationInProgress = true;
+        offlineSinceMs = null;
+        setUploadProgressVisible(false);
+        resetTimerSuccessBox();
+        var phCount = el('rebootStandbyPlaceholder');
+        if (phCount) { phCount.style.display = 'none'; }
+        rebootTimerBox.style.display = 'flex';
+
+        var warningAlert = el('rebootWarningAlert');
+        if (warningAlert) {
+            warningAlert.style.background = 'rgba(239, 68, 68, 0.2)';
+            warningAlert.style.borderColor = '#ef4444';
+            warningAlert.style.color = '#fca5a5';
+            warningAlert.textContent = '⚠️ DO NOT POWER OFF THE DRONE OR CONTROLLER. Firmware installation is executing internally.';
+        }
+
+        var total = seconds || 360;
+        var remaining = total;
+        try {
+            localStorage.setItem('solo_reboot_until', Date.now() + (total * 1000));
+            localStorage.setItem('solo_reboot_start', countdownStartTime);
         } catch (e) {}
         if (rebootCountdownInterval) { clearInterval(rebootCountdownInterval); }
+        if (rebootPingInterval) { clearInterval(rebootPingInterval); }
+
         rebootCountdownInterval = setInterval(function () {
             var m = Math.floor(remaining / 60);
             var s = remaining % 60;
-            rebootCountdown.textContent = (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+            if (rebootCountdown) {
+                rebootCountdown.textContent = (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+                rebootCountdown.style.color = 'var(--accent)';
+            }
+            var rebootBar = el('rebootProgressBar');
+            if (rebootBar) {
+                var pct = Math.min(100, Math.round(((total - remaining) / total) * 100));
+                rebootBar.style.width = pct + '%';
+                rebootBar.style.background = '#ef4444';
+            }
             if (--remaining < 0) {
                 clearInterval(rebootCountdownInterval);
-                try { localStorage.removeItem('solo_reboot_until'); } catch (e) {}
-                rebootTimerBox.style.display = 'none';
-                showToast('Hardware should be online. Pair, then calibrate.');
+                rebootCountdownInterval = null;
+                timerStarted = false;
+                try { localStorage.removeItem('solo_reboot_until'); localStorage.removeItem('solo_reboot_start'); } catch (e) {}
+                showToast('Hardware should be online. Pair, then calibrate. The SoloLink Wi-Fi network must also be connected to continue.');
             }
         }, 1000);
+
+        // Active uncached status polling: wait initial 45 seconds, then poll every 3 seconds with AbortController 2500ms timeout
+        rebootPingInterval = setInterval(function () {
+            var elapsed = Date.now() - countdownStartTime;
+            if (elapsed < 45000) {
+                return; // Initial 45-second reboot delay
+            }
+            var controller = null;
+            var signal = undefined;
+            var timeoutId = null;
+            if (typeof AbortController !== 'undefined') {
+                controller = new AbortController();
+                signal = controller.signal;
+                timeoutId = setTimeout(function () {
+                    try { controller.abort(); } catch (e) {}
+                }, 2500);
+            }
+            fetch('/api/status?t=' + Date.now(), { cache: 'no-store', signal: signal })
+                .then(function (res) {
+                    if (timeoutId) { clearTimeout(timeoutId); }
+                    if (res.ok) { return res.json(); }
+                    throw new Error('Offline');
+                })
+                .then(function (statusData) {
+                    // Valid HTTP 200 response received: immediately stop timer & transition
+                    if (rebootPingInterval) {
+                        clearInterval(rebootPingInterval);
+                        rebootPingInterval = null;
+                    }
+                    if (rebootCountdownInterval) {
+                        clearInterval(rebootCountdownInterval);
+                        rebootCountdownInterval = null;
+                    }
+                    timerStarted = false;
+                    isUpdateRunning = false;
+                    installationInProgress = false;
+                    try { localStorage.removeItem('solo_reboot_until'); localStorage.removeItem('solo_reboot_start'); } catch (e) {}
+                    onCopterHardwareAlive();
+                })
+                .catch(function () {
+                    if (timeoutId) { clearTimeout(timeoutId); }
+                });
+        }, 3000);
     }
 
     btnClearLogs.addEventListener('click', function () {
@@ -515,9 +869,9 @@
         var origText = scanBtnEl ? scanBtnEl.textContent : '';
         if (scanBtnEl) {
             scanBtnEl.disabled = true;
-            scanBtnEl.textContent = '⏳ Scanning airwaves (~3s)...';
+            scanBtnEl.textContent = '⏳ Scanning (~4s, SoloLink blips)...';
         }
-        selectEl.innerHTML = '<option value="">-- Sweeping 2.4 GHz channels (~3s)... --</option>';
+        selectEl.innerHTML = '<option value="">-- Sweeping 2.4 GHz channels (~4s)... --</option>';
 
         apiRequest('/api/wifi/scan')
             .then(function (data) {
@@ -525,7 +879,7 @@
                     scanBtnEl.disabled = false;
                     scanBtnEl.textContent = origText || '🔄 Scan Networks';
                 }
-                var networks = (data && data.networks) ? data.networks : [];
+                var networks = Array.isArray(data) ? data.map(function (s) { return typeof s === 'string' ? { ssid: s } : s; }) : ((data && data.networks) ? data.networks : []);
                 selectEl.innerHTML = '';
 
                 if (networks.length === 0) {
@@ -545,7 +899,12 @@
                         var sigText = (net.signal ? (net.signal + ' dBm') : (net.quality ? (net.quality + '%') : ''));
                         var secText = net.security || 'WPA2';
                         var chText = net.channel ? ('Ch ' + net.channel + ', ') : '';
-                        opt.textContent = '📶 ' + net.ssid + (sigText ? (' (' + chText + sigText + ', ' + secText + ')') : '');
+                        opt.setAttribute('data-security', net.security || '');
+                        opt.setAttribute('data-supported', net.supported === false ? '0' : '1');
+                        if (net.note) opt.setAttribute('data-note', net.note);
+                        opt.textContent = (net.supported === false ? '⚠️ ' : '📶 ') + net.ssid +
+                            (sigText ? (' (' + chText + sigText + ', ' + secText + ')') : '') +
+                            (net.supported === false ? ' — not supported' : '');
                         selectEl.appendChild(opt);
                     });
                 }
@@ -627,7 +986,6 @@
                 fwWifiStatusMsg.style.display = 'none';
             }
         }
-        scanWifiNetworks(fwWifiSelect, btnScanFwWifi, fwWifiSsid);
         if (fwWifiSsid) setTimeout(function () { fwWifiSsid.focus(); }, 100);
     }
 
@@ -647,22 +1005,21 @@
 
         apiRequest('/api/firmware/check')
             .then(function (data) {
-                if (!data.success && data.error) {
+                if (!data.success && (data.error || data.status === 'NO_INTERNET_CONNECTION')) {
                     fwModalStatusBadge.innerHTML = '<span style="color: #ef4444; font-weight:700;">CHECK FAILED</span>';
-                    fwModalMessage.innerHTML = '<strong>⚠️ Error checking updates:</strong> ' + esc(data.error);
-                    if (data.error.indexOf('urlopen') !== -1 || data.error.indexOf('Temporary failure') !== -1 || data.error.indexOf('unreachable') !== -1) {
-                        showFwWifiPrompt('Could not contact custom.ardupilot.org. Please connect to a Wi-Fi network with internet:');
+                    var errMsg = data.error || data.status || 'NO_INTERNET_CONNECTION';
+                    fwModalMessage.innerHTML = '<strong>⚠️ Error checking updates:</strong> ' + esc(errMsg);
+                    if (data.status === 'NO_INTERNET_CONNECTION' || errMsg === 'NO_INTERNET_CONNECTION' || errMsg.indexOf('urlopen') !== -1 || errMsg.indexOf('Temporary failure') !== -1 || errMsg.indexOf('unreachable') !== -1) {
+                        showFwWifiPrompt('Internet Connection Required to Fetch Online Firmware Build Packages.');
                     }
                     return;
                 }
 
-                var localVer = data.local_version || '4.7.1';
-                var onlineVer = data.online_version || '4.7.1';
+                var localVer = data.local_version || '4.7.2';
+                var onlineVer = data.online_version || '4.7.2';
                 fwModalCurrentVer.textContent = 'ArduCopter ' + localVer;
                 fwModalOnlineVer.textContent = 'ArduCopter ' + onlineVer;
-                if (headerCopterVer) {
-                    headerCopterVer.textContent = localVer;
-                }
+                // The header shows what the Cube runs (from /api/status), not the stored files.
 
                 if (data.update_available) {
                     fwModalStatusBadge.innerHTML = '<span style="color: #3b82f6; font-weight:700;">UPDATE AVAILABLE</span>';
@@ -723,7 +1080,7 @@
                 .then(function (res) {
                     showToast(res.message || 'Connecting to Home Wi-Fi... SoloLink will briefly cycle.');
                     var attempts = 0;
-                    var maxAttempts = 20; // 20 * 2000ms = 40 seconds
+                    var maxAttempts = 35; // 35 * 2000ms = 70 seconds
                     var wifiPoll = setInterval(function () {
                         attempts++;
 
@@ -737,6 +1094,14 @@
 
                         apiRequest('/api/wifi/status')
                             .then(function (status) {
+                                if (status.connection_state === 'failed' && status.failure) {
+                                    clearInterval(wifiPoll);
+                                    btnConnectFwWifi.disabled = false;
+                                    btnConnectFwWifi.textContent = 'Connect & Check Updates ➔';
+                                    if (btnCancelFwWifi) btnCancelFwWifi.disabled = false;
+                                    showFwWifiPrompt(status.failure);
+                                    return;
+                                }
                                 if (status.internet_connected || (status.ip_address && status.ip_address !== '10.1.1.1')) {
                                     clearInterval(wifiPoll);
                                     btnConnectFwWifi.disabled = false;
@@ -929,15 +1294,13 @@
                             if (fwActiveBadge) {
                                 fwActiveBadge.textContent = 'ArduCopter ' + st.local_version;
                             }
-                            if (headerCopterVer) {
-                                headerCopterVer.textContent = st.local_version;
-                            }
                             if (radioDescSolo) {
-                                radioDescSolo.textContent = 'arducopter_solo.apj — ArduCopter ' + st.local_version;
+                                radioDescSolo.textContent = 'arducopter_CubeSolo_' + st.local_version + '.apj — ArduCopter ' + st.local_version;
                             }
                             if (radioDescGreen) {
-                                radioDescGreen.textContent = 'arducopter_green.apj — ArduCopter ' + st.local_version;
+                                radioDescGreen.textContent = 'arducopter_CubeGreen_' + st.local_version + '.apj — ArduCopter ' + st.local_version;
                             }
+                            loadFirmwareChoices('');
                         } else if (st.status === 'error') {
                             showToast('Firmware update failed: ' + st.message, true);
                             fwModalStatusBadge.innerHTML = '<span style="color: #ef4444; font-weight:700;">BUILD ERROR</span>';
@@ -986,6 +1349,9 @@
     var btnClearCalibLogs      = el('btnClearCalibLogs');
     var calibPollInterval      = null;
 
+    // --- Compass result (offsets are autosaved by the autopilot; backend reports compass_saved) ---
+    var compassSavedOK    = false;   // backend confirmed offsets written
+
     var posNames = {
         1: "Accurately Level",
         2: "Left Side",
@@ -1016,6 +1382,9 @@
                     imuStatusBadge.className = 'badge badge-accent';
                 } else if (st === 'imu_sampling') {
                     imuStatusBadge.textContent = 'SAMPLING POS ' + posIndex + '/6';
+                    imuStatusBadge.className = 'badge badge-accent';
+                } else if (st === 'rebooting' || st === 'imu_rebooting') {
+                    imuStatusBadge.textContent = 'AUTO-REBOOTING';
                     imuStatusBadge.className = 'badge badge-accent';
                 } else if (st === 'imu_completed') {
                     imuStatusBadge.textContent = 'COMPLETED';
@@ -1083,13 +1452,13 @@
             }
 
             if (imuRebootBanner) {
-                imuRebootBanner.style.display = (st === 'imu_completed') ? 'flex' : 'none';
+                imuRebootBanner.style.display = 'none'; // autopilot now reboots automatically after IMU calibration
             }
 
             if (btnStartImuCalib) {
                 if (isRunning) {
                     btnStartImuCalib.disabled = true;
-                    btnStartImuCalib.textContent = '⏳ Calibrating Position ' + (posIndex || 1) + '/6...';
+                    btnStartImuCalib.textContent = (st === 'rebooting' || st === 'imu_rebooting') ? '✅ Calibrated - Auto-Rebooting Autopilot...' : '⏳ Calibrating Position ' + (posIndex || 1) + '/6...';
                     if (btnCancelImuCalib) btnCancelImuCalib.style.display = 'inline-block';
                 } else {
                     btnStartImuCalib.disabled = false;
@@ -1110,19 +1479,24 @@
                     btnRebootPixhawk.textContent = '🔄 Reboot Autopilot (Pixhawk)';
                 }
             }
-            if (imuStageLabel && isRunning) {
+            if (imuStageLabel && isRunning && st !== 'imu_rebooting') {
                 imuStageLabel.textContent = 'Autopilot rebooting... waiting for heartbeats';
             }
         }
 
         // --- STEP 4: Compass Calibration UI ---
         if (step === 'compass' || st.indexOf('compass') !== -1) {
+            // Offsets are saved by the autopilot (autosave) and confirmed by the backend.
+            compassSavedOK = !!state.compass_saved;
             if (compassProgressBar) compassProgressBar.style.width = p + '%';
             if (compassPercentLabel) compassPercentLabel.textContent = p + '%';
             if (compassStageLabel) compassStageLabel.textContent = state.message || (p >= 100 ? 'Calibration Complete' : 'Rotate vehicle in sphere...');
 
             if (compassStatusBadge) {
-                if (st === 'compass_running') {
+                if (compassSavedOK && st !== 'error') {
+                    compassStatusBadge.textContent = 'Compass Calibrated Successfully';
+                    compassStatusBadge.className = 'badge badge-success';
+                } else if (st === 'compass_running') {
                     compassStatusBadge.textContent = 'ROTATING';
                     compassStatusBadge.className = 'badge badge-accent';
                 } else if (st === 'compass_reboot_countdown') {
@@ -1174,11 +1548,25 @@
             }
 
             if (compassDoneBanner) {
-                compassDoneBanner.style.display = (st === 'compass_completed') ? 'flex' : 'none';
+                compassDoneBanner.style.display = (st === 'compass_completed' || compassSavedOK) ? 'flex' : 'none';
+            }
+
+            // Rotation guidance banner (shown for the whole compass run)
+            var gpsNotice = document.getElementById('compassGpsNotice');
+            if (!gpsNotice && calibTerminal && calibTerminal.parentNode) {
+                gpsNotice = document.createElement('div');
+                gpsNotice.id = 'compassGpsNotice';
+                gpsNotice.className = 'calib-callout-banner';
+                gpsNotice.style.cssText = 'display:none; margin-bottom:8px; padding:10px 12px; border-radius:6px; font-size:12px; background:rgba(234,179,8,0.12); border:1px solid #eab308;';
+                gpsNotice.textContent = '🧭 Keep rotating slowly through every orientation (nose up/down, both sides, upside down) away from metal. If a compass does not fit, the autopilot restarts it automatically - just keep rotating.';
+                calibTerminal.parentNode.insertBefore(gpsNotice, calibTerminal);
+            }
+            if (gpsNotice) {
+                gpsNotice.style.display = (isRunning && st === 'compass_running') ? 'block' : 'none';
             }
 
             if (btnStartCompassCalib) {
-                if (isRunning) {
+                if (isRunning && !compassSavedOK) {
                     btnStartCompassCalib.disabled = true;
                     if (st === 'compass_reboot_countdown') {
                         btnStartCompassCalib.textContent = '⏳ Auto-Rebooting Autopilot in 3s...';
@@ -1188,6 +1576,11 @@
                         btnStartCompassCalib.textContent = '🧭 Calibrating... Perform Dance';
                     }
                     if (btnCancelCompassCalib) btnCancelCompassCalib.style.display = 'inline-block';
+                } else if (isRunning && compassSavedOK) {
+                    // Offsets saved; autopilot is finishing its reboot in the background
+                    btnStartCompassCalib.disabled = true;
+                    btnStartCompassCalib.textContent = '✅ Compass Saved - Autopilot Restarting...';
+                    if (btnCancelCompassCalib) btnCancelCompassCalib.style.display = 'none';
                 } else {
                     btnStartCompassCalib.disabled = false;
                     btnStartCompassCalib.textContent = '▶ Start Compass Calibration';
@@ -1214,7 +1607,7 @@
                     if (!state.is_running) {
                         clearInterval(calibPollInterval);
                         if (state.status === 'imu_completed') {
-                            showToast('✅ IMU calibration complete! Please reboot the Solo manually.');
+                            showToast('✅ IMU calibration complete & autopilot rebooted! You may now calibrate the compass.');
                         } else if (state.status === 'reboot_completed') {
                             showToast('🔄 Autopilot reboot complete! You may now calibrate compass.');
                         } else if (state.status === 'compass_completed') {
@@ -1294,6 +1687,7 @@
     if (btnStartCompassCalib) {
         btnStartCompassCalib.addEventListener('click', function () {
             btnStartCompassCalib.disabled = true;
+            compassSavedOK = false;
             btnStartCompassCalib.textContent = '⏳ Starting Compass Cal...';
             if (btnCancelCompassCalib) btnCancelCompassCalib.style.display = 'inline-block';
             if (compassDoneBanner) compassDoneBanner.style.display = 'none';
@@ -1333,23 +1727,57 @@
     // =========================================================================
     // TAB 2: WI-FI & INTERNET
     // =========================================================================
+    var STEP_ICONS = { ok: '✅', failed: '❌', running: '⏳', pending: '○', skipped: '–' };
+    var STEP_COLORS = { ok: '#10b981', failed: '#ef4444', running: '#60a5fa', pending: '#64748b', skipped: '#64748b' };
+
+    function setStatusVal(node, on, onText, offText, offColor) {
+        if (!node) return;
+        node.textContent = on ? onText : offText;
+        node.style.color = on ? '#10b981' : (offColor || '#ef4444');
+    }
+
+    function renderWifiSteps(steps) {
+        if (!wifiSteps) return;
+        if (!steps || !steps.length) {
+            wifiSteps.innerHTML = '<li style="color: #94a3b8;">No connection attempt yet.</li>';
+            return;
+        }
+        var html = '';
+        steps.forEach(function (st) {
+            html += '<li style="color: ' + (STEP_COLORS[st.state] || '#94a3b8') + '; margin-bottom: 2px;">' +
+                (STEP_ICONS[st.state] || '○') + ' ' + esc(st.label) +
+                (st.detail ? ' <span style="color: #94a3b8;">— ' + esc(st.detail) + '</span>' : '') + '</li>';
+        });
+        wifiSteps.innerHTML = html;
+    }
+
+    function renderWifiProblem(status) {
+        if (!wifiProblem) return;
+        var text = status.failure || status.warning || '';
+        if (!text) { wifiProblem.style.display = 'none'; return; }
+        var isError = !!status.failure;
+        wifiProblem.style.display = 'block';
+        wifiProblem.style.background = isError ? 'rgba(239, 68, 68, 0.15)' : 'rgba(245, 158, 11, 0.15)';
+        wifiProblem.style.border = '1px solid ' + (isError ? '#ef4444' : '#f59e0b');
+        wifiProblem.style.color = isError ? '#fca5a5' : '#fde68a';
+        wifiProblem.textContent = (isError ? '❌ ' : '⚠️ ') + text;
+    }
+
     function renderWifiStatus(status) {
         if (!status) return;
         if (netStatusSsid) netStatusSsid.textContent = status.connected_ssid || 'SoloLink_AP';
         if (netStatusMode) netStatusMode.textContent = status.mode || 'Access Point';
         if (netStatusIp)   netStatusIp.textContent   = status.ip_address || '10.1.1.1';
-
-        if (netStatusInternet) {
-            netStatusInternet.textContent = status.internet_connected ? '● ONLINE' : '○ Offline';
-            netStatusInternet.style.color = status.internet_connected ? '#10b981' : '#ef4444';
-        }
-        if (netStatusFwd) {
-            netStatusFwd.textContent = status.ip_forwarding ? '● Enabled' : '○ Disabled';
-            netStatusFwd.style.color = status.ip_forwarding ? '#10b981' : '#94a3b8';
-        }
-        if (netStatusCtrl) {
-            netStatusCtrl.textContent = status.controller_online ? '● Online' : '○ Offline';
-            netStatusCtrl.style.color = status.controller_online ? '#10b981' : '#ef4444';
+        setStatusVal(netStatusInternet, status.internet_connected, '● ONLINE', '○ Offline');
+        setStatusVal(netStatusFwd, status.ip_forwarding, '● Enabled', '○ Disabled', '#94a3b8');
+        setStatusVal(netStatusCtrl, status.controller_online, '● Online', '○ Offline');
+        if (netStatusCopterNet) {
+            if (status.connection_state === 'connected') {
+                setStatusVal(netStatusCopterNet, status.copter_internet, '● ONLINE', '○ No route');
+            } else {
+                netStatusCopterNet.textContent = '—';
+                netStatusCopterNet.style.color = '#94a3b8';
+            }
         }
         if (wifiModeBadge) wifiModeBadge.textContent = status.mode || 'AP Mode';
         if (chkBidirectional) chkBidirectional.checked = !!status.bidirectional_enabled;
@@ -1357,6 +1785,9 @@
             natStatusBadge.textContent = status.bidirectional_enabled ? 'Active' : 'Disabled';
             natStatusBadge.style.color = status.bidirectional_enabled ? '#10b981' : '#94a3b8';
         }
+        renderWifiSteps(status.steps);
+        renderWifiProblem(status);
+        if (wifiSetupLog) wifiSetupLog.textContent = status.setup_log || '(empty)';
         var ctrlIp = (status.ip_address && status.ip_address !== '10.1.1.1') ? status.ip_address : '<CONTROLLER_HOME_IP>';
         if (routeHelperCmd) routeHelperCmd.textContent = 'route add 10.1.1.0 mask 255.255.255.0 ' + ctrlIp;
     }
@@ -1370,11 +1801,63 @@
             });
     }
 
+    // Security of the network chosen in the scan list ('' when typed by hand).
+    function selectedWifiSecurity(ssid) {
+        if (!wifiSelect || wifiSelect.selectedIndex < 0) return { security: '', supported: true, note: '' };
+        var opt = wifiSelect.options[wifiSelect.selectedIndex];
+        if (!opt || opt.value !== ssid) return { security: '', supported: true, note: '' };
+        return {
+            security: opt.getAttribute('data-security') || '',
+            supported: opt.getAttribute('data-supported') !== '0',
+            note: opt.getAttribute('data-note') || ''
+        };
+    }
+
+    function updateSecurityHint() {
+        if (!wifiSecurityHint) return;
+        var ssid = (wifiSsid ? wifiSsid.value : '').trim();
+        var info = selectedWifiSecurity(ssid);
+        var isOpen = info.security === 'Open';
+        if (wifiPassword) {
+            wifiPassword.disabled = isOpen;
+            if (isOpen) wifiPassword.value = '';
+        }
+        if (!info.supported) {
+            wifiSecurityHint.style.display = 'block';
+            wifiSecurityHint.style.background = 'rgba(239, 68, 68, 0.15)';
+            wifiSecurityHint.style.border = '1px solid #ef4444';
+            wifiSecurityHint.style.color = '#fca5a5';
+            wifiSecurityHint.textContent = '❌ ' + info.note;
+        } else if (isOpen) {
+            wifiSecurityHint.style.display = 'block';
+            wifiSecurityHint.style.background = 'rgba(59, 130, 246, 0.15)';
+            wifiSecurityHint.style.border = '1px solid #3b82f6';
+            wifiSecurityHint.style.color = '#93c5fd';
+            wifiSecurityHint.textContent = 'Open network: no password needed.';
+        } else {
+            wifiSecurityHint.style.display = 'none';
+        }
+    }
+
+    function resetConnectButton() {
+        btnConnectWifi.disabled = false;
+        btnConnectWifi.textContent = '🌐 Connect to Home Wi-Fi';
+    }
+
+    function runningStepLabel(steps) {
+        var label = '';
+        (steps || []).forEach(function (st) { if (st.state === 'running') label = st.label; });
+        return label;
+    }
+
     btnRefreshWifiStatus.addEventListener('click', function () { refreshWifiStatus(); });
 
     btnConnectWifi.addEventListener('click', function () {
         if (isVehicleArmed) {
-            showToast('⚠️ SAFETY INTERLOCK: Cannot connect to home Wi-Fi while vehicle is ARMED!', true);
+            var armedMsg = 'Not sent: the copter currently reports ARMED, and home Wi-Fi is locked while armed. ' +
+                'If the motors are not running, check the Cockpit message list for an unexpected "MOTORS ARMED".';
+            renderWifiProblem({ failure: armedMsg });
+            showToast('⚠️ ' + armedMsg, true);
             return;
         }
         var ssid = (wifiSsid ? wifiSsid.value : '').trim();
@@ -1382,56 +1865,72 @@
             ssid = wifiSelect.value;
             if (wifiSsid) wifiSsid.value = ssid;
         }
-        var pwd  = wifiPassword ? wifiPassword.value : '';
-        if (!ssid) { alert('Please select or enter your Home Wi-Fi SSID.'); return; }
+        if (!ssid) { renderWifiProblem({ failure: 'Select or type your home Wi-Fi network name (SSID).' }); return; }
+        var info = selectedWifiSecurity(ssid);
+        if (!info.supported) { renderWifiProblem({ failure: info.note }); showToast('❌ ' + info.note, true); return; }
+        var pwd = (wifiPassword && !wifiPassword.disabled) ? wifiPassword.value : '';
+        if (info.security && info.security !== 'Open' && !pwd) {
+            renderWifiProblem({ failure: '"' + ssid + '" is secured (' + info.security + '). Enter its password.' });
+            return;
+        }
+
         btnConnectWifi.disabled = true;
-        btnConnectWifi.textContent = '🔄 Cycling AP (~15s)...';
-        apiRequest('/api/wifi/connect', 'POST', { ssid: ssid, password: pwd })
+        btnConnectWifi.textContent = '🔄 Sending settings...';
+        renderWifiSteps([]);
+        renderWifiProblem({});
+        apiRequest('/api/wifi/connect', 'POST', { ssid: ssid, password: pwd, security: info.security })
             .then(function (res) {
-                showToast(res.message || 'Connecting to Home Wi-Fi... SoloLink will briefly cycle.');
+                showToast(res.message || 'Connecting... SoloLink will drop briefly.');
                 var attempts = 0;
-                var maxAttempts = 25; // 25 * 2000ms = 50 seconds
+                var maxAttempts = 45;      // 45 x 2 s = 90 s
+                var lostLink = 0;
                 var pollTimer = setInterval(function () {
                     attempts++;
-
-                    if (attempts <= 6) {
-                        btnConnectWifi.textContent = '🔄 Cycling AP (~15s)...';
-                    } else if (attempts <= 14) {
-                        btnConnectWifi.textContent = '⏳ Getting IP lease...';
-                    } else {
-                        btnConnectWifi.textContent = '🌐 Verifying link (' + attempts + '/' + maxAttempts + ')...';
-                    }
-
                     apiRequest('/api/wifi/status')
                         .then(function (status) {
+                            lostLink = 0;
                             renderWifiStatus(status);
-                            if (status.internet_connected || (status.ip_address && status.ip_address !== '10.1.1.1')) {
+                            var stepLabel = runningStepLabel(status.steps);
+                            btnConnectWifi.textContent = '⏳ ' + (stepLabel || 'Working') + '...';
+
+                            if (status.connection_state === 'failed') {
                                 clearInterval(pollTimer);
-                                btnConnectWifi.disabled = false;
-                                btnConnectWifi.textContent = '🌐 Connect to Home Wi-Fi';
-                                showToast('🎉 Connected to ' + (status.connected_ssid || ssid) + '! Home IP: ' + status.ip_address);
-                            } else if (attempts >= maxAttempts) {
+                                resetConnectButton();
+                                showToast('❌ ' + (status.failure || 'Connection failed. See the progress list.'), true);
+                                return;
+                            }
+                            if (status.connection_state === 'connected') {
                                 clearInterval(pollTimer);
-                                btnConnectWifi.disabled = false;
-                                btnConnectWifi.textContent = '🌐 Connect to Home Wi-Fi';
-                                var diag = (status.setup_log) ? (' (' + status.setup_log.split('\n').pop() + ')') : '';
-                                showToast('Wi-Fi association finished. If your PC lost Wi-Fi, reconnect to SoloLink_... and check 2.4 GHz signal / password.' + diag);
+                                resetConnectButton();
+                                if (status.copter_internet) {
+                                    showToast('🎉 Connected to ' + status.connected_ssid + ' (' + status.ip_address + '). Solo has internet.');
+                                } else {
+                                    showToast('⚠️ ' + (status.warning || 'Controller connected, but Solo has no internet yet.'), true);
+                                }
+                                return;
+                            }
+                            if (attempts >= maxAttempts) {
+                                clearInterval(pollTimer);
+                                resetConnectButton();
+                                showToast('Still not connected after 90 s. Check the progress list and setup log.', true);
                             }
                         })
                         .catch(function () {
-                            // Link loss during hostapd restart is normal
+                            // Expected while SoloLink is paused: this page is served by the copter over SoloLink.
+                            lostLink++;
+                            btnConnectWifi.textContent = '📡 SoloLink paused while the Controller joins (' + (lostLink * 2) + ' s)...';
                             if (attempts >= maxAttempts) {
                                 clearInterval(pollTimer);
-                                btnConnectWifi.disabled = false;
-                                btnConnectWifi.textContent = '🌐 Connect to Home Wi-Fi';
-                                showToast('Connection timed out. Please ensure your PC is connected to SoloLink_... and check your 2.4 GHz Wi-Fi settings.', true);
+                                resetConnectButton();
+                                showToast('Lost contact with Solo. Reconnect this device to SoloLink_..., then press Refresh Network Status.', true);
                             }
                         });
                 }, 2000);
             }).catch(function (err) {
-                showToast('Error: ' + err.message, true);
-                btnConnectWifi.disabled = false;
-                btnConnectWifi.textContent = '🌐 Connect to Home Wi-Fi';
+                // Refused before anything was sent to the Controller: say why, and keep it on screen.
+                renderWifiProblem({ failure: 'Connect was not started: ' + err.message });
+                showToast('❌ ' + err.message, true);
+                resetConnectButton();
             });
     });
 
@@ -1448,9 +1947,13 @@
                 if (wifiSsid) { wifiSsid.value = ''; wifiSsid.focus(); }
             } else if (wifiSelect.value) {
                 if (wifiSsid) wifiSsid.value = wifiSelect.value;
-                if (wifiPassword) wifiPassword.focus();
+                if (wifiPassword && !wifiPassword.disabled) wifiPassword.focus();
             }
+            updateSecurityHint();
         });
+    }
+    if (wifiSsid) {
+        wifiSsid.addEventListener('input', updateSecurityHint);
     }
 
     setupPasswordToggle(wifiPassword, btnToggleWifiPwd, chkShowWifiPwd);
@@ -1634,6 +2137,10 @@
         apiRequest(url)
             .then(function (res) {
                 allParams = res.params || [];
+                if (!searchQuery) {
+                    fullParams = allParams;
+                    allParams.forEach(function (p) { knownDesc[p.name] = p.description || ''; });
+                }
                 paramSearchCount.textContent = 'Showing ' + res.count + ' of ' + res.total + ' parameters';
                 renderParamTable(allParams);
             }).catch(function (err) { showToast('Failed to load params: ' + err.message, true); });
@@ -1671,37 +2178,199 @@
         }
         var count = Object.keys(modifiedParams).length;
         showToast('Writing ' + count + ' parameter' + (count > 1 ? 's' : '') + ' to Pixhawk...');
+        btnSaveAllParams.disabled = true;
+        btnSaveAllParams.textContent = '⏳ Saving ' + count + ' param' + (count > 1 ? 's' : '') + '...';
         apiRequest('/api/params/save', 'POST', { params: modifiedParams })
             .then(function (res) {
+                btnSaveAllParams.disabled = false;
                 showToast(res.message);
                 modifiedParams = {};
                 updateSaveButtonState();
                 loadParams(paramSearchInput.value.trim());
-            }).catch(function (err) { showToast('Error saving: ' + err.message, true); });
-    });
-
-    btnFetchLive.addEventListener('click', function () {
-        btnFetchLive.disabled = true;
-        btnFetchLive.textContent = 'Fetching...';
-        apiRequest('/api/params/fetch-live', 'POST')
-            .then(function (res) {
-                showToast(res.message || 'Live parameters fetched!');
-                loadParams();
             }).catch(function (err) {
-                showToast('MAVLink fetch: ' + err.message, true);
-            }).then(function () {
-                btnFetchLive.disabled = false;
-                btnFetchLive.textContent = '📡 Fetch Live';
+                btnSaveAllParams.disabled = false;
+                updateSaveButtonState();
+                showToast('Error saving: ' + err.message, true);
             });
     });
 
+    function setParamSourceBadge(source, file) {
+        var badge = el('paramSourceBadge');
+        if (!badge) { return; }
+        if (source === 'live') {
+            badge.textContent = '🛰️ Source: Live MAVLink';
+            badge.className = 'param-source-badge live';
+        } else if (source === 'local') {
+            badge.textContent = '📁 Source: Local Cache File (' + (file || 'solo.param') + ')';
+            badge.className = 'param-source-badge local';
+        }
+    }
+
     var searchDebounce = null;
-    paramSearchInput.addEventListener('input', function (e) {
+    var fullParams = [];
+    var knownDesc = {};
+
+    function applyParamFilter() {
+        var q = paramSearchInput.value.trim().toLowerCase();
+        var rows = !q ? fullParams : fullParams.filter(function (p) {
+            return String(p.name).toLowerCase().indexOf(q) !== -1
+                || String(p.description || '').toLowerCase().indexOf(q) !== -1
+                || String(p.value).toLowerCase().indexOf(q) !== -1;
+        });
+        allParams = rows;
+        paramSearchCount.textContent = 'Showing ' + rows.length + ' of ' + fullParams.length + ' parameters';
+        renderParamTable(rows);
+    }
+
+    var fetchProgressTimer = null;
+
+    function renderFetchButtonProgress(status) {
+        if (!btnFetchLive) return;
+        var current = status.current || 0;
+        var total = status.total || 0;
+        var pct = status.percent || 0;
+        var phase = status.phase || 'running';
+
+        if (total > 0 && current > 0) {
+            pct = Math.max(pct, Math.min(100, Math.round((current / total) * 100)));
+        }
+
+        var label = '⏳ Fetching...';
+        if (phase === 'connecting') {
+            label = '📡 Connecting...';
+        } else if (phase === 'mavftp') {
+            if (total > 0 && current > 0) {
+                label = '⚡ MAVFTP ' + current + ' / ' + total + ' (' + pct + '%)';
+            } else if (current > 0) {
+                label = '⚡ MAVFTP ' + current + ' B';
+            } else {
+                label = '⚡ MAVFTP reading...';
+            }
+        } else if (phase === 'retry') {
+            label = '🔄 Retry ' + current + ' / ' + total + ' (' + pct + '%)';
+        } else if (total > 0 && current > 0) {
+            label = '📡 ' + current + ' / ' + total + ' (' + pct + '%)';
+        } else if (current > 0) {
+            label = '📡 ' + current + ' params';
+        } else if (pct > 0) {
+            label = '⏳ ' + pct + '%';
+        }
+
+        btnFetchLive.textContent = label;
+        btnFetchLive.style.background = 'linear-gradient(to right, #0284c7 0%, #0284c7 ' + pct + '%, var(--bg-card-alt, #1e293b) ' + pct + '%, var(--bg-card-alt, #1e293b) 100%)';
+        btnFetchLive.style.borderColor = '#0284c7';
+        btnFetchLive.style.color = '#ffffff';
+        btnFetchLive.style.boxShadow = '0 0 10px rgba(2, 132, 199, 0.4)';
+    }
+
+    function resetFetchButton(success, message) {
+        if (!btnFetchLive) return;
+        if (fetchProgressTimer) {
+            clearInterval(fetchProgressTimer);
+            fetchProgressTimer = null;
+        }
+        if (success === true) {
+            btnFetchLive.textContent = '✅ Fetched 100%';
+            btnFetchLive.style.background = 'linear-gradient(to right, #16a34a 0%, #16a34a 100%)';
+            btnFetchLive.style.borderColor = '#16a34a';
+            btnFetchLive.style.color = '#ffffff';
+            btnFetchLive.style.boxShadow = '0 0 12px rgba(22, 163, 74, 0.4)';
+            setTimeout(function () {
+                btnFetchLive.disabled = false;
+                btnFetchLive.textContent = '📡 Fetch Live';
+                btnFetchLive.style.background = '';
+                btnFetchLive.style.borderColor = '';
+                btnFetchLive.style.color = '';
+                btnFetchLive.style.boxShadow = '';
+            }, 1800);
+        } else if (success === false) {
+            btnFetchLive.textContent = '⚠️ Fetch Failed';
+            btnFetchLive.style.background = 'rgba(239, 68, 68, 0.2)';
+            btnFetchLive.style.borderColor = '#ef4444';
+            btnFetchLive.style.color = '#ef4444';
+            btnFetchLive.style.boxShadow = '';
+            setTimeout(function () {
+                btnFetchLive.disabled = false;
+                btnFetchLive.textContent = '📡 Fetch Live';
+                btnFetchLive.style.background = '';
+                btnFetchLive.style.borderColor = '';
+                btnFetchLive.style.color = '';
+            }, 2500);
+        } else {
+            btnFetchLive.disabled = false;
+            btnFetchLive.textContent = '📡 Fetch Live';
+            btnFetchLive.style.background = '';
+            btnFetchLive.style.borderColor = '';
+            btnFetchLive.style.color = '';
+            btnFetchLive.style.boxShadow = '';
+        }
+    }
+
+    function startFetchProgressPolling() {
+        if (fetchProgressTimer) {
+            clearInterval(fetchProgressTimer);
+        }
+        fetchProgressTimer = setInterval(function () {
+            apiRequest('/api/params/fetch-status', 'GET')
+                .then(function (st) {
+                    if (st) {
+                        renderFetchButtonProgress(st);
+                        if (!st.active && st.phase === 'done') {
+                            clearInterval(fetchProgressTimer);
+                            fetchProgressTimer = null;
+                        }
+                    }
+                })
+                .catch(function () {
+                    // Ignore transient network errors during polling
+                });
+        }, 180);
+    }
+
+    btnFetchLive.addEventListener('click', function () {
+        btnFetchLive.disabled = true;
+        renderFetchButtonProgress({ current: 0, total: 0, percent: 0, phase: 'connecting' });
+        startFetchProgressPolling();
+
+        apiRequest('/api/params/fetch-live', 'POST')
+            .then(function (res) {
+                showToast(res.message || 'Live parameters fetched!');
+                setParamSourceBadge(res.source || 'live', res.file);
+                paramSearchInput.value = '';
+                loadParams();
+                resetFetchButton(true, res.message);
+            }).catch(function (err) {
+                showToast('MAVLink fetch: ' + err.message, true);
+                var b = el('paramSourceBadge');
+                if (b) { b.textContent = '⚠️ Live MAVLink unavailable'; b.className = 'param-source-badge'; }
+                resetFetchButton(false, err.message);
+            });
+    });
+
+    // Auto-detect ongoing fetch if page was reloaded during download
+    try {
+        apiRequest('/api/params/fetch-status', 'GET')
+            .then(function (st) {
+                if (st && st.active) {
+                    btnFetchLive.disabled = true;
+                    renderFetchButtonProgress(st);
+                    startFetchProgressPolling();
+                }
+            })
+            .catch(function () {});
+    } catch (e) {}
+
+    paramSearchInput.addEventListener('input', function () {
+        if (fullParams.length) {
+            applyParamFilter();   // instant client-side row hide/reveal
+            return;
+        }
         clearTimeout(searchDebounce);
         searchDebounce = setTimeout(function () {
-            loadParams(e.target.value.trim());
+            loadParams(paramSearchInput.value.trim());
         }, 220);
     });
+
 
     btnExportParam.addEventListener('click', function () {
         window.location.href = '/api/params/export';
@@ -1724,8 +2393,6 @@
     // =========================================================================
     // System Status Polling
     // =========================================================================
-    var consecutiveStatusFails = 0;
-
     function updateArmedSafetyState(armed) {
         isVehicleArmed = Boolean(armed);
         if (firmwareArmedLock) {
@@ -1779,29 +2446,126 @@
     function checkSystemStatus() {
         fetch('/api/status').then(function (r) { return r.json(); })
             .then(function (status) {
-                consecutiveStatusFails = 0;
-                linkStatusBadge.className = 'conn-badge ' + (status.copter_online ? 'online' : 'offline');
-                linkStatusText.textContent = status.copter_online ? 'Online (10.1.1.10)' : 'Disconnected';
-                if (status.utility_version) {
-                    headerVersionTag.textContent = 'v' + status.utility_version;
-                    footerVersionText.textContent = 'Version ' + status.utility_version + ' (Iteration ' + (status.iteration || 1) + ')';
-                }
-                if (status.pixhawk_version && headerCopterVer) {
-                    var cleanVer = status.pixhawk_version.replace(/^ArduCopter\s*/i, '').replace(/unknown/gi, '').trim();
-                    if (cleanVer) {
-                        headerCopterVer.textContent = cleanVer;
+                var copterIsOnline = (status && status.copter_online === true);
+                var controllerIsOnline = !!(status && (status.controller_online === true || status.paired === true));
+
+                // STATE MACHINE GATE: ignore every copter_online reading until the installation
+                // countdown is actively running (installationInProgress === true).
+                if (installationInProgress) {
+                    if (!copterIsOnline) {
+                        // Track continuous offline time (drone must physically cut power first)
+                        if (offlineSinceMs === null) { offlineSinceMs = Date.now(); }
+                    } else if (offlineSinceMs !== null && (Date.now() - offlineSinceMs) >= REQUIRED_OFFLINE_MS
+                               && (timerStarted || rebootCountdownInterval !== null)) {
+                        // Verified: copter was offline >= 15s, now genuinely back online
+                        if (rebootCountdownInterval) {
+                            clearInterval(rebootCountdownInterval);
+                            rebootCountdownInterval = null;
+                        }
+                        timerStarted = false;
+                        isUpdateRunning = false;
+                        installationInProgress = false;
+                        offlineSinceMs = null;
+                        try { localStorage.removeItem('solo_reboot_until'); } catch (e) {}
+                        onCopterHardwareAlive();
+                    } else {
+                        // Premature 'true' (e.g., blip before power cut): ignore and restart offline clock
+                        offlineSinceMs = null;
                     }
                 }
-                if (typeof status.armed === 'boolean') {
-                    updateArmedSafetyState(status.armed);
-                }
-            }).catch(function () {
-                consecutiveStatusFails++;
-                if (consecutiveStatusFails >= 2) {
+                previousCopterOnline = copterIsOnline;
+
+                if (copterIsOnline) {
+                    linkStatusBadge.className = 'conn-badge online';
+                    linkStatusText.textContent = 'Online (10.1.1.10)';
+                } else {
                     linkStatusBadge.className = 'conn-badge offline';
                     linkStatusText.textContent = 'Link Lost';
                 }
+                updatePairGuardUI(copterIsOnline, controllerIsOnline);
+                if (status && status.utility_version) {
+                    headerVersionTag.textContent = 'v' + status.utility_version;
+                    footerVersionText.textContent = 'Version ' + status.utility_version + ' (Iteration ' + (status.iteration || 1) + ')';
+                }
+                if (status && headerCopterVer) {
+                    // Always mirror what the server knows about the Cube; never keep an old value
+                    var cleanVer = (status.pixhawk_version || '').replace(/^ArduCopter\s*/i, '').replace(/unknown/gi, '').trim();
+                    headerCopterVer.textContent = cleanVer || 'checking\u2026';
+                    headerCopterVer.title = cleanVer ? 'Installed on the Cube' : 'Waiting for the Cube to report its version';
+                }
+                if (status && typeof status.armed === 'boolean') {
+                    updateArmedSafetyState(status.armed);
+                }
+            }).catch(function () {
+                previousCopterOnline = false;
+                linkStatusBadge.className = 'conn-badge offline';
+                linkStatusText.textContent = 'Link Lost';
+                updatePairGuardUI(false, false);
             });
+    }
+
+    function updatePairGuardUI(isOnline, isControllerOnline) {
+        var btnPair = document.getElementById('btnPairController');
+        var pairNotice = document.getElementById('pairWifiNotice');
+        var pairBadge = document.getElementById('pairStatusBadge');
+
+        if (pairBadge) {
+            if (!isOnline) {
+                pairBadge.className = 'badge offline';
+                pairBadge.textContent = 'Offline';
+            } else if (isControllerOnline) {
+                pairBadge.className = 'badge badge-success success';
+                pairBadge.textContent = 'Paired & Connected';
+            } else {
+                pairBadge.className = 'badge badge-warning warning';
+                pairBadge.textContent = 'Not Connected';
+            }
+        }
+
+        if (btnPair) {
+            if (isOnline) {
+                btnPair.disabled = false;
+                btnPair.classList.remove('disabled');
+                btnPair.style.opacity = '1';
+                btnPair.style.cursor = 'pointer';
+                if (pairNotice) { pairNotice.style.display = 'none'; }
+            } else {
+                btnPair.disabled = true;
+                btnPair.classList.add('disabled');
+                btnPair.style.opacity = '0.5';
+                btnPair.style.cursor = 'not-allowed';
+                if (pairNotice) { pairNotice.style.display = 'inline'; }
+            }
+        }
+    }
+
+    var btnPairController = document.getElementById('btnPairController');
+    if (btnPairController) {
+        btnPairController.addEventListener('click', function (e) {
+            if (btnPairController.disabled) {
+                e.preventDefault();
+                showToast('Wi-Fi Connection Required: The SoloLink Wi-Fi network must also be connected to continue.', 'error');
+                return;
+            }
+            btnPairController.disabled = true;
+            btnPairController.textContent = '⏳ Pairing...';
+            apiRequest('/api/pair/start', 'POST', {})
+            .then(function (data) {
+                btnPairController.disabled = false;
+                btnPairController.textContent = '🔗 Pair Copter & Controller';
+                if (data && data.error) {
+                    showToast(data.message || 'Wi-Fi Connection Required: The SoloLink Wi-Fi network must also be connected to continue.', 'error');
+                } else {
+                    showToast((data && data.message) || 'Pairing initiated.', 'success');
+                    checkSystemStatus();
+                }
+            })
+            .catch(function (err) {
+                btnPairController.disabled = false;
+                btnPairController.textContent = '🔗 Pair Copter & Controller';
+                showToast((err && err.message) || 'Wi-Fi Connection Required: The SoloLink Wi-Fi network must also be connected to continue.', 'error');
+            });
+        });
     }
 
     // =========================================================================
@@ -2481,13 +3245,14 @@
     function initAppData() {
         loadVersionInfo();
         checkSystemStatus();
-        setInterval(checkSystemStatus, 8000);
+        setInterval(checkSystemStatus, 1000);
         pollArmedSafety();
         setInterval(pollArmedSafety, 1500);
         loadPresets();
         loadParams();
         refreshWifiStatus();
         initControllerSetup();
+        loadFirmwareChoices();
 
         // Check calibration status on load
         apiRequest('/api/calib/status')
@@ -2498,6 +3263,36 @@
                 }
             }).catch(function () {});
 
+        // Uninstall Web Utility button handler
+        var btnUninstall = el('btnUninstallApp');
+        if (btnUninstall) {
+            btnUninstall.addEventListener('click', function () {
+                var confirmed = window.confirm(
+                    "Are you sure you want to completely uninstall SoloWebUtility2 from the drone?\n\n" +
+                    "This will:\n" +
+                    "• Remove the auto-start entry from /etc/rc.local\n" +
+                    "• Delete /usr/bin/SoloWebUtility2 and /log/SoloWebUtility2\n" +
+                    "• Stop the web server process\n\n" +
+                    "Click OK to proceed with uninstallation."
+                );
+                if (!confirmed) return;
+
+                btnUninstall.disabled = true;
+                btnUninstall.textContent = "Uninstalling...";
+
+                apiRequest('/api/uninstall', 'POST', {})
+                    .then(function (res) {
+                        showToast("SoloWebUtility2 uninstalled successfully. Server is shutting down.");
+                        document.body.innerHTML = '<div style="display:flex;justify-content:center;align-items:center;height:100vh;background:#0b101b;color:#fca5a5;font-family:sans-serif;text-align:center;"><div><h1>🗑️ SoloWebUtility2 Uninstalled</h1><p style="color:#cbd5e1;margin-top:10px;">The application files and /etc/rc.local startup entry have been completely removed from the drone.</p><p style="color:#94a3b8;margin-top:5px;">The server process has shut down. You may now close this tab.</p></div></div>';
+                    })
+                    .catch(function (err) {
+                        showToast("Uninstall error: " + err.message, 'error');
+                        btnUninstall.disabled = false;
+                        btnUninstall.textContent = "🗑️ Uninstall Web Utility";
+                    });
+            });
+        }
+
         // Resume reboot countdown timer if active
         try {
             var savedRebootUntil = localStorage.getItem('solo_reboot_until');
@@ -2506,7 +3301,7 @@
                 if (rem > 0) {
                     flashProgressBar.style.width = '100%';
                     flashPercentLabel.textContent = '100%';
-                    flashStageLabel.textContent = 'Hardware Rebooting — Applying Updates (~8 min)';
+                    flashStageLabel.textContent = 'Hardware Rebooting — Applying Updates (~6 min)';
                     pipelineStatusBadge.textContent = 'REBOOTING';
                     pipelineStatusBadge.className = 'badge badge-accent';
                     stepCube.className       = 'step-item done';

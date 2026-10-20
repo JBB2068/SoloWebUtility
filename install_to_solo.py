@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-3DR Solo Web Utility -- Remote Installer v1.0.71
+3DR Solo Web Utility -- Remote Installer v1.2.0
 Uploads the web server and firmware to Solo Copter (10.1.1.10)
 and configures automatic startup on boot via /etc/rc.local.
 
@@ -60,10 +60,10 @@ def get_installer_version():
         vpath = get_local_path("version.json")
         if os.path.exists(vpath):
             with open(vpath, "r") as f:
-                return json.load(f).get("version", "1.0.71")
+                return json.load(f).get("version", "1.2.0")
     except Exception:
         pass
-    return "1.0.71"
+    return "1.2.0"
 
 
 def format_size(n):
@@ -484,16 +484,40 @@ def main():
     # =========================================================================
     # PHASE 3: Upload Firmware Packages to /log/firmware
     # =========================================================================
-    firmware_files = [
-        ("firmware/arducopter_solo.apj",      "%s/arducopter_solo.apj" % LOG_FW_DIR),
-        ("firmware/arducopter_green.apj",     "%s/arducopter_green.apj" % LOG_FW_DIR),
-        ("firmware/3dr-solo.tar.gz",          "%s/3dr-solo.tar.gz" % LOG_FW_DIR),
-        ("firmware/3dr-solo.tar.gz.md5",      "%s/3dr-solo.tar.gz.md5" % LOG_FW_DIR),
-        ("firmware/3dr-controller.tar.gz",    "%s/3dr-controller.tar.gz" % LOG_FW_DIR),
-        ("firmware/3dr-controller.tar.gz.md5","%s/3dr-controller.tar.gz.md5" % LOG_FW_DIR),
-        ("firmware/Solo.param",               "%s/Solo.param" % LOG_FW_DIR),
-        ("firmware/SoloGreen.param",          "%s/SoloGreen.param" % LOG_FW_DIR),
-    ]
+    try:
+        import bake_into_firmware
+        bake_ok = bake_into_firmware.ensure_firmware_baked(
+            firmware_dir=get_local_path("firmware"),
+            app_base_dir=LOCAL_DIR,
+            log_func=print
+        )
+    except Exception as e:
+        print("  [!] Firmware bake raised: %s" % str(e))
+        bake_ok = False
+    if not bake_ok:
+        print("\n[CRITICAL ERROR] 3dr-solo.tar.gz could not be baked/verified. Not uploading firmware.")
+        return
+
+    local_fw = get_local_path("firmware")
+    firmware_files = []
+    if os.path.isdir(local_fw):
+        for fn in sorted(os.listdir(local_fw)):
+            if fn.endswith((".apj", ".tar.gz", ".tar.gz.md5", ".md5", ".param", ".json", ".yaml")):
+                if fn in ("arducopter_solo.apj", "arducopter_green.apj"):
+                    continue
+                firmware_files.append(("firmware/%s" % fn, "%s/%s" % (LOG_FW_DIR, fn)))
+    if not firmware_files:
+        firmware_files = [
+            ("firmware/arducopter_CubeSolo_4.7.2.apj",  "%s/arducopter_CubeSolo_4.7.2.apj" % LOG_FW_DIR),
+            ("firmware/arducopter_CubeGreen_4.7.2.apj", "%s/arducopter_CubeGreen_4.7.2.apj" % LOG_FW_DIR),
+            ("firmware/3dr-solo.tar.gz",               "%s/3dr-solo.tar.gz" % LOG_FW_DIR),
+            ("firmware/3dr-solo.tar.gz.md5",           "%s/3dr-solo.tar.gz.md5" % LOG_FW_DIR),
+            ("firmware/3dr-controller.tar.gz",         "%s/3dr-controller.tar.gz" % LOG_FW_DIR),
+            ("firmware/3dr-controller.tar.gz.md5",     "%s/3dr-controller.tar.gz.md5" % LOG_FW_DIR),
+            ("firmware/Solo.param",                    "%s/Solo.param" % LOG_FW_DIR),
+            ("firmware/SoloGreen.param",               "%s/SoloGreen.param" % LOG_FW_DIR),
+            ("firmware/solocustombuild.yaml",          "%s/solocustombuild.yaml" % LOG_FW_DIR),
+        ]
 
     print("\n[*] Phase 3: Uploading Firmware Files to /log/firmware...")
     for idx, (loc_rel, rem_path) in enumerate(firmware_files, 1):

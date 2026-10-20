@@ -1,0 +1,37 @@
+# UTF-8
+#
+# Version Information for PyInstaller
+#
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=(1, 2, 0, 0),
+    prodvers=(1, 2, 0, 0),
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0)
+  ),
+  kids=[
+    StringFileInfo(
+      [
+        StringTable(
+          '040904b0',
+          [
+            StringStruct('CompanyName', 'Open Solo Community'),
+            StringStruct('FileDescription', 'Solo Web Utility v1.2.0 installer for the 3DR Solo'),
+            StringStruct('FileVersion', '1.2.0.0'),
+            StringStruct('InternalName', 'SoloWebUtility'),
+            StringStruct('LegalCopyright', 'Copyright (C) 2026 Open Solo Community. Free and open-source.'),
+            StringStruct('OriginalFilename', 'Solo Web Utility v1.2.0.exe'),
+            StringStruct('ProductName', '3DR Solo Web Utility'),
+            StringStruct('ProductVersion', '1.2.0.0'),
+            StringStruct('Comments', 'Installs Solo Web Utility v1.2.0 and its firmware on a 3DR Solo over SoloLink Wi-Fi.')
+          ]
+        )
+      ]
+    ),
+    VarFileInfo([VarStruct('Translation', [1033, 1200])])
+  ]
+)

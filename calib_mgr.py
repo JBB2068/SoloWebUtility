@@ -126,7 +126,8 @@ def get_mavlink_connection(endpoint=None, timeout=5.0, source_system=254):
                 except Exception:
                     pass
                 hb = mav.recv_match(type='HEARTBEAT', blocking=True, timeout=0.4)
-                if hb:
+                # Only lock on to the flight controller, never a GCS/controller or gimbal heartbeat
+                if hb and _is_autopilot_heartbeat(hb):
                     mav.target_system = hb.get_srcSystem()
                     mav.target_component = hb.get_srcComponent()
                     return mav
@@ -305,10 +306,175 @@ def calibrate_imu(mav, imu_type="simple", timeout=30.0, min_duration=8.0, settle
         return False, "IMU calibration timed out waiting for autopilot completion."
 
 
-def reboot_autopilot(mav, timeout=45.0, endpoint=None, log_cb=None, progress_cb=None, cancel_event=None, reset_delay=5.0):
+# ---------------------------------------------------------------------------
+# Low-level MAVLink helpers
+# ---------------------------------------------------------------------------
+MAV_TYPE_GCS = 6
+MAV_AUTOPILOT_INVALID = 8
+ACCELCAL_RESULT_SUCCESS = 16777215   # MAV_CMD_ACCELCAL_VEHICLE_POS param1 sent by ArduPilot on success
+ACCELCAL_RESULT_FAILED = 16777216    # ... and on failure
+
+MAG_CAL_RUNNING_STATES = (MAG_CAL_WAITING_TO_START, MAG_CAL_RUNNING_STEP_ONE, MAG_CAL_RUNNING_STEP_TWO)
+MAG_CAL_FAIL_STATES = (MAG_CAL_FAILED, MAG_CAL_BAD_ORIENTATION, MAG_CAL_BAD_RADIUS)
+
+# Mission Planner "Relaxed" fitness. ArduPilot applies 2x this to the internal /
+# secondary compass, so the Solo's internal compass is judged against 64.
+COMPASS_CAL_FIT_RELAXED = 32.0
+MAG_CAL_MAX_ATTEMPTS = 4
+
+
+def _is_mock(mav):
+    return getattr(mav, 'is_mock', False) or type(mav).__name__ == 'MockMavConnection'
+
+
+def _is_autopilot_heartbeat(hb):
+    """True for a flight-controller heartbeat (not a GCS, gimbal or other non-autopilot node)."""
+    ap = getattr(hb, 'autopilot', None)
+    typ = getattr(hb, 'type', None)
+    if ap is None and typ is None:
+        return True   # unknown message shape (mocks): accept
+    return ap != MAV_AUTOPILOT_INVALID and typ != MAV_TYPE_GCS
+
+
+def _text_of(msg):
+    t = getattr(msg, 'text', '')
+    if isinstance(t, bytes):
+        t = t.decode('utf-8', 'ignore')
+    return t.rstrip('\x00').strip()
+
+
+def _send_cmd(mav, cmd, p1=0.0, p2=0.0, p3=0.0, p4=0.0, p5=0.0, p6=0.0, p7=0.0):
+    target_sys = getattr(mav, 'target_system', 1) or 1
+    target_comp = getattr(mav, 'target_component', 1) or 1
+    mav.mav.command_long_send(target_sys, target_comp, cmd, 0,
+                              float(p1), float(p2), float(p3), float(p4), float(p5), float(p6), float(p7))
+
+
+def _gcs_heartbeat(mav):
+    try:
+        mav.mav.heartbeat_send(mavutil.mavlink.MAV_TYPE_GCS, mavutil.mavlink.MAV_AUTOPILOT_INVALID, 0, 0, 0)
+    except Exception:
+        pass
+
+
+def _param_id(msg):
+    pid = getattr(msg, 'param_id', '')
+    if isinstance(pid, bytes):
+        pid = pid.decode('ascii', 'ignore')
+    return pid.rstrip('\x00')
+
+
+def read_param(mav, name, timeout=3.0):
+    """Read one autopilot parameter by name. Returns float or None."""
+    if _is_mock(mav):
+        return None
+    target_sys = getattr(mav, 'target_system', 1) or 1
+    target_comp = getattr(mav, 'target_component', 1) or 1
+    try:
+        mav.mav.param_request_read_send(target_sys, target_comp, name.encode('ascii') if sys.version_info[0] >= 3 else name, -1)
+    except Exception:
+        return None
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        msg = mav.recv_match(type='PARAM_VALUE', blocking=True, timeout=0.5)
+        if msg and _param_id(msg) == name:
+            return float(msg.param_value)
+    return None
+
+
+def set_param(mav, name, value, timeout=3.0):
+    """Set one autopilot parameter (REAL32) and wait for the echo. Returns True on confirmation."""
+    if _is_mock(mav):
+        return False
+    target_sys = getattr(mav, 'target_system', 1) or 1
+    target_comp = getattr(mav, 'target_component', 1) or 1
+    for _ in range(2):
+        try:
+            mav.mav.param_set_send(target_sys, target_comp,
+                                   name.encode('ascii') if sys.version_info[0] >= 3 else name,
+                                   float(value), 9)  # MAV_PARAM_TYPE_REAL32
+        except Exception:
+            return False
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            msg = mav.recv_match(type='PARAM_VALUE', blocking=True, timeout=0.5)
+            if msg and _param_id(msg) == name and abs(float(msg.param_value) - float(value)) < 1e-3:
+                return True
+    return False
+
+
+def cancel_mag_cal(mav, log_cb=None, attempts=3, reboot_if_stuck=True):
     """
-    Reboot the autopilot via MAVLink command (MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN),
-    wait for the reboot to take place, and automatically reconnect when heartbeats resume.
+    Stop any active/failed compass calibration on ALL compasses
+    (MAV_CMD_DO_CANCEL_MAG_CAL 42426, param1 = 0 = all).
+
+    Why this matters: ArduPilot's Compass::cal_update() re-raises
+    AP_Notify::events.compass_cal_failed on EVERY loop while any calibrator sits in
+    the FAILED state, so the failure tone repeats forever until the calibration is
+    cancelled (calibrator stop()) or the autopilot reboots.
+
+    Confirms the stop by watching MAG_CAL_PROGRESS / failed MAG_CAL_REPORT messages
+    stop arriving. If they don't stop after `attempts` tries and reboot_if_stuck is
+    set, reboots the autopilot as a last resort (guaranteed silence).
+    Returns True if the calibration is confirmed stopped.
+    """
+    def _log(msg, level="INFO"):
+        if log_cb:
+            log_cb(msg, level)
+        else:
+            print("[COMPASS_CAL] %s" % msg)
+
+    if not mav:
+        return False
+    mock = _is_mock(mav)
+    for attempt in range(1, attempts + 1):
+        try:
+            _send_cmd(mav, MAV_CMD_DO_CANCEL_MAG_CAL, 0)
+        except Exception as e:
+            _log("Could not send MAV_CMD_DO_CANCEL_MAG_CAL: %s" % e, "WARNING")
+            return False
+        sent = time.time()
+        still_active = False
+        acked = None
+        window = 0.2 if mock else 2.5
+        while time.time() - sent < window:
+            msg = mav.recv_match(type=['COMMAND_ACK', 'MAG_CAL_PROGRESS', 'MAG_CAL_REPORT', 'STATUSTEXT'],
+                                 blocking=True, timeout=0.3)
+            if not msg:
+                continue
+            mt = msg.get_type()
+            if mt == 'COMMAND_ACK' and getattr(msg, 'command', None) == MAV_CMD_DO_CANCEL_MAG_CAL:
+                acked = getattr(msg, 'result', None)
+            elif mt == 'MAG_CAL_PROGRESS' and time.time() - sent > 1.0:
+                if getattr(msg, 'cal_status', 0) in MAG_CAL_RUNNING_STATES:
+                    still_active = True
+            elif mt == 'MAG_CAL_REPORT' and time.time() - sent > 1.0:
+                if getattr(msg, 'cal_status', 0) in MAG_CAL_FAIL_STATES:
+                    still_active = True
+            elif mt == 'STATUSTEXT':
+                t = _text_of(msg)
+                if t:
+                    _log("Autopilot: %s" % t, "INFO")
+        if not still_active:
+            _log("[OK] Compass calibration cancelled on all compasses (MAV_CMD_DO_CANCEL_MAG_CAL%s) - buzzer released." % (
+                ", ACK %s" % RESULT_NAMES.get(acked, acked) if acked is not None else ""), "SUCCESS")
+            return True
+        _log("Autopilot still reports an active/failed mag cal after cancel #%d - retrying..." % attempt, "WARNING")
+
+    if reboot_if_stuck:
+        _log("Mag cal would not stop - rebooting autopilot to silence the buzzer (wait ~20 s).", "WARNING")
+        try:
+            _send_cmd(mav, MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN, 1)
+        except Exception:
+            pass
+    return False
+
+
+def reboot_autopilot(mav, timeout=60.0, endpoint=None, log_cb=None, progress_cb=None, cancel_event=None, reset_delay=3.0):
+    """
+    Reboot the autopilot (MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN, param1 = 1), confirm it
+    actually went down (its heartbeat stops), then wait for the flight controller's
+    heartbeat to return and reconnect.
 
     Returns:
       (bool success, new_mav_connection, str message)
@@ -319,96 +485,103 @@ def reboot_autopilot(mav, timeout=45.0, endpoint=None, log_cb=None, progress_cb=
         else:
             print("[REBOOT] %s" % msg)
 
+    def _prog(pct, details):
+        if progress_cb:
+            progress_cb("reboot", pct, details)
+
     if not mav:
         return False, None, "MAVLink connection not provided."
 
-    target_sys = getattr(mav, 'target_system', 1) or 1
-    target_comp = getattr(mav, 'target_component', 1) or 1
+    mock = _is_mock(mav)
+    ap_sys = getattr(mav, 'target_system', 1) or 1
 
-    _log("Sending autopilot reboot command (MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN)...", "HEADER")
-    if progress_cb:
-        progress_cb("reboot", 10, "Issuing reboot command...")
+    went_down = False
+    for attempt in (1, 2):
+        _log("Sending autopilot reboot command (MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN, param1=1)%s..." % (
+            "" if attempt == 1 else " - retry"), "HEADER")
+        _prog(10, "Issuing reboot command...")
+        try:
+            _send_cmd(mav, MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN, 1)
+        except Exception as e:
+            return False, None, "Failed to send reboot command: %s" % str(e)
 
-    # Send MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN (246): param1 = 1 (reboot autopilot)
-    try:
-        mav.mav.command_long_send(
-            target_sys,
-            target_comp,
-            MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN,
-            0,      # confirmation
-            1.0,    # param1: 1 = reboot autopilot
-            0.0, 0.0, 0.0, 0.0, 0.0, 0.0
-        )
-    except Exception as e:
-        return False, None, "Failed to send reboot command: %s" % str(e)
+        # Watch the autopilot heartbeat: a reboot shows up as a gap of >= 2.5 s
+        sent = time.time()
+        last_hb = sent
+        watch = 0.0 if mock else 12.0
+        while time.time() - sent < watch:
+            if cancel_event and cancel_event.is_set():
+                return False, None, "Reboot sequence canceled by user."
+            msg = mav.recv_match(type=['HEARTBEAT', 'COMMAND_ACK'], blocking=True, timeout=0.3)
+            now = time.time()
+            if msg is not None and msg.get_type() == 'COMMAND_ACK':
+                if getattr(msg, 'command', 0) == MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN:
+                    _log("Autopilot acknowledged reboot (%s)." % RESULT_NAMES.get(getattr(msg, 'result', 0), "?"), "INFO")
+            elif msg is not None and msg.get_type() == 'HEARTBEAT':
+                try:
+                    src = msg.get_srcSystem()
+                except Exception:
+                    src = ap_sys
+                if src == ap_sys and _is_autopilot_heartbeat(msg):
+                    last_hb = now
+            if now - last_hb >= 2.5:
+                went_down = True
+                break
+        if mock or went_down:
+            break
+        _log("Autopilot heartbeat did not stop - the reboot command may have been ignored.", "WARNING")
 
-    # Wait briefly for acknowledgment
-    try:
-        ack = mav.recv_match(type='COMMAND_ACK', blocking=True, timeout=1.5)
-        if ack and getattr(ack, 'command', 0) in (MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN, 0):
-            _log("Autopilot acknowledged reboot command.", "INFO")
-    except Exception:
-        pass
+    if not mock and not went_down:
+        return False, None, "Autopilot did not reboot (heartbeat never stopped after two reboot commands)."
 
-    # Close the current MAVLink session before reboot
     try:
         mav.close()
     except Exception:
         pass
 
-    _log("Autopilot is restarting. Waiting for sensors and firmware to initialize (~15-25s)...", "INFO")
-    if progress_cb:
-        progress_cb("reboot", 30, "Autopilot restarting...")
-
-    # Wait grace period while Pixhawk hardware resets
-    if reset_delay > 0:
+    _log("Autopilot is restarting. Waiting for its heartbeat (~15-25 s)...", "INFO")
+    _prog(30, "Autopilot restarting...")
+    if reset_delay > 0 and not mock:
         time.sleep(reset_delay)
 
-    # Poll for reconnection and heartbeats
     start_wait = time.time()
     deadline = start_wait + timeout
-    new_mav = None
-
     while time.time() < deadline:
         if cancel_event and cancel_event.is_set():
             return False, None, "Reboot sequence canceled by user."
-
         elapsed = int(time.time() - start_wait)
-        pct = min(90, 30 + int((elapsed / float(timeout)) * 60))
-        if progress_cb:
-            progress_cb("reboot", pct, "Waiting for autopilot heartbeat (%ds elapsed)..." % elapsed)
-
+        _prog(min(90, 30 + int((elapsed / float(timeout)) * 60)), "Waiting for autopilot heartbeat (%ds elapsed)..." % elapsed)
         new_mav = get_mavlink_connection(endpoint=endpoint, timeout=2.0)
         if new_mav:
             _log("[OK] Autopilot back online! Heartbeat restored from System %d, Component %d." % (
-                getattr(new_mav, 'target_system', 1),
-                getattr(new_mav, 'target_component', 1)
-            ), "SUCCESS")
-            if progress_cb:
-                progress_cb("reboot", 100, "Autopilot reconnected and ready.")
+                getattr(new_mav, 'target_system', 1), getattr(new_mav, 'target_component', 1)), "SUCCESS")
+            _prog(100, "Autopilot reconnected and ready.")
             return True, new_mav, "Autopilot successfully rebooted and reconnected."
-
         time.sleep(1.0)
 
     return False, None, "Timed out waiting for autopilot to reboot and resume heartbeats."
 
 
-def calibrate_compass(mav, timeout=120.0, wait_completion=True, autosave=True, log_cb=None, progress_cb=None, cancel_event=None):
+def calibrate_compass(mav, timeout=600.0, wait_completion=True, autosave=True, log_cb=None, progress_cb=None,
+                      cancel_event=None, stall_timeout=120.0, relax_fit=True):
     """
-    Perform Compass (Magnetometer) calibration using MAV_CMD_DO_START_MAG_CAL
-    with fallback to MAV_CMD_PREFLIGHT_CALIBRATION.
+    Compass (magnetometer) calibration with MAV_CMD_DO_START_MAG_CAL (42424):
+      param1 = 0  all compasses ArduPilot uses for yaw
+      param2 = 1  retry on failure (ArduPilot restarts a failed compass itself)
+      param3 = 1  autosave offsets when every compass succeeds
+      param4 = 0  no start delay
+      param5 = 0  no autopilot autoreboot (the manager reboots and waits for heartbeat)
 
-    Parameters:
-      mav: pymavlink connection object
-      timeout: maximum time to wait for completion (seconds)
-      wait_completion: if True, monitors MAG_CAL_PROGRESS / MAG_CAL_REPORT until complete
-      autosave: automatically save offsets to parameters upon success
-      log_cb: callable(msg, level)
-      progress_cb: callable(stage, pct, details)
-      cancel_event: threading.Event to cancel operation
+    COMPASS_CAL_FIT is raised to 32 (Mission Planner "Relaxed"; internal compass 64)
+    for the run if it is lower, and restored afterwards.
 
-    Returns:
-      (bool success, str message)
+    Ends in failure if: the autopilot rejects the start, a compass fails more than
+    MAG_CAL_MAX_ATTEMPTS times, there is no progress for stall_timeout seconds, the
+    hard timeout passes, or the user cancels. On EVERY non-success exit the
+    calibration is cancelled on all compasses (see cancel_mag_cal) so the
+    autopilot's failure tone cannot keep playing.
+
+    Returns (bool success, str message).
     """
     def _log(msg, level="INFO"):
         if log_cb:
@@ -416,200 +589,215 @@ def calibrate_compass(mav, timeout=120.0, wait_completion=True, autosave=True, l
         else:
             print("[COMPASS_CAL] %s" % msg)
 
+    def _prog(pct, details):
+        if progress_cb:
+            progress_cb("compass", pct, details)
+
     if not mav:
         return False, "MAVLink connection not provided."
 
-    target_sys = getattr(mav, 'target_system', 1) or 1
-    target_comp = getattr(mav, 'target_component', 1) or 1
-
+    mock = _is_mock(mav)
     _log("Starting Compass (Magnetometer) Calibration...", "HEADER")
-    _log("Rotate the Solo slowly and smoothly across all 3 axes (pitch, roll, yaw) in a sphere.", "WARNING")
 
-    if progress_cb:
-        progress_cb("compass", 5, "Starting compass calibration...")
-
-    # Send MAV_CMD_DO_START_MAG_CAL (42424)
-    # param1 = 0 (all compasses), param2 = 0 (retry), param3 = 1 (autosave), param4 = 0 (delay)
-    cal_started = False
+    # Clear any calibration left over from an earlier run (also silences a stuck failure tone)
     try:
-        mav.mav.command_long_send(
-            target_sys,
-            target_comp,
-            MAV_CMD_DO_START_MAG_CAL,
-            0,                      # confirmation
-            0.0,                    # param1: mag_mask (0 = all compasses)
-            0.0,                    # param2: retry
-            1.0 if autosave else 0.0,  # param3: autosave
-            0.0,                    # param4: delay
-            0.0,                    # param5: autoreboot
-            0.0, 0.0
-        )
-        cal_started = True
-    except Exception as e:
-        _log("MAV_CMD_DO_START_MAG_CAL send failed: %s, falling back to preflight calibration..." % str(e), "WARNING")
+        _send_cmd(mav, MAV_CMD_DO_CANCEL_MAG_CAL, 0)
+    except Exception:
+        pass
 
-    # Fallback to standard MAV_CMD_PREFLIGHT_CALIBRATION (param2 = 1) if needed
-    if not cal_started:
-        try:
-            mav.mav.command_long_send(
-                target_sys,
-                target_comp,
-                MAV_CMD_PREFLIGHT_CALIBRATION,
-                0,
-                0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0
-            )
-            cal_started = True
-        except Exception as e2:
-            return False, "Failed to start compass calibration: %s" % str(e2)
+    # Which compasses will ArduPilot calibrate? (only those used for yaw)
+    expected = None
+    uses = []
+    for idx, pname in enumerate(("COMPASS_USE", "COMPASS_USE2", "COMPASS_USE3")):
+        v = read_param(mav, pname, timeout=2.0)
+        uses.append(v)
+    if all(v is not None for v in uses):
+        expected = set(i for i, v in enumerate(uses) if v >= 0.5)
+        names = {0: "Compass 0 (external, leg)", 1: "Compass 1 (internal Cube)", 2: "Compass 2"}
+        _log("Compasses to calibrate: %s" % (", ".join(names.get(i, "Compass %d" % i) for i in sorted(expected)) or "none"), "INFO")
+        if not expected:
+            return False, "No compass is enabled (COMPASS_USE/USE2/USE3 are all 0)."
 
-    if not wait_completion:
-        if progress_cb:
-            progress_cb("compass", 100, "Compass calibration active. Rotate drone.")
-        _log("[OK] Compass calibration initiated. Rotate Solo to complete calibration.", "SUCCESS")
-        return True, "Compass calibration started successfully."
-
-    # Monitor calibration progress and completion
-    deadline = time.time() + timeout
-    last_hb = 0
-    highest_pct = 5
-    compass_progress = {}
-    compass_completed = {}
-    compass_fitness = {}
-
-    while time.time() < deadline:
-        if cancel_event and cancel_event.is_set():
-            # Send cancel command if supported
-            try:
-                mav.mav.command_long_send(
-                    target_sys, target_comp,
-                    MAV_CMD_DO_CANCEL_MAG_CAL,
-                    0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
-                )
-            except Exception:
-                pass
-            return False, "Compass calibration canceled by user."
-
-        now = time.time()
-        # Maintain GCS heartbeat
-        if now - last_hb >= 1.0:
-            try:
-                mav.mav.heartbeat_send(
-                    mavutil.mavlink.MAV_TYPE_GCS,
-                    mavutil.mavlink.MAV_AUTOPILOT_INVALID,
-                    0, 0, 0
-                )
-            except Exception:
-                pass
-            last_hb = now
-
-        msg = mav.recv_match(
-            type=['MAG_CAL_PROGRESS', 'MAG_CAL_REPORT', 'COMMAND_ACK', 'STATUSTEXT'],
-            blocking=True,
-            timeout=0.5
-        )
-        if not msg:
-            continue
-
-        mtype = msg.get_type()
-
-        if mtype == 'MAG_CAL_PROGRESS':
-            cid = getattr(msg, 'compass_id', 0)
-            pct = getattr(msg, 'completion_pct', 0)
-            status = getattr(msg, 'cal_status', 0)
-            compass_progress[cid] = pct
-            if pct >= 100 and status == MAG_CAL_SUCCESS:
-                compass_completed[cid] = True
-
-            avg_pct = int(sum(compass_progress.values()) / max(1, len(compass_progress)))
-            if avg_pct > highest_pct:
-                highest_pct = avg_pct
-                _log("Compass %d calibration progress: %d%%" % (cid, pct), "INFO")
-                if progress_cb:
-                    progress_cb("compass", highest_pct, {
-                        "compass_id": cid,
-                        "pct": pct,
-                        "status": MAG_STATUS_NAMES.get(status, str(status)),
-                        "remaining": [c for c in compass_progress if not compass_completed.get(c, False)]
-                    })
-
-        elif mtype == 'MAG_CAL_REPORT':
-            cid = getattr(msg, 'compass_id', 0)
-            cal_status = getattr(msg, 'cal_status', 0)
-            fitness = getattr(msg, 'fitness', 0.0)
-            stat_name = MAG_STATUS_NAMES.get(cal_status, str(cal_status))
-
-            if cal_status == MAG_CAL_SUCCESS:
-                compass_completed[cid] = True
-                compass_progress[cid] = 100
-                compass_fitness[cid] = fitness
-                _log("[OK] Compass %d calibrated successfully! (Fitness: %.3f)" % (cid, fitness), "SUCCESS")
-
-                # If not autosaved, send accept command
-                if not autosave:
-                    try:
-                        mav.mav.command_long_send(
-                            target_sys, target_comp,
-                            MAV_CMD_DO_ACCEPT_MAG_CAL,
-                            0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
-                        )
-                    except Exception:
-                        pass
-
-                num_detected = len(compass_progress)
-                num_done = len([c for c, d in compass_completed.items() if d])
-                remaining = [c for c in compass_progress if not compass_completed.get(c, False)]
-
-                # Require ALL detected compasses to finish
-                if num_detected > 0 and not remaining:
-                    _log("[OK] ALL %d COMPASSES CALIBRATED SUCCESSFULLY!" % num_detected, "SUCCESS")
-                    for c_id in sorted(compass_completed.keys()):
-                        _log("  - Compass %d: Success (Fitness: %.3f)" % (c_id, compass_fitness.get(c_id, 0.0)), "SUCCESS")
-                    if progress_cb:
-                        progress_cb("compass", 100, {
-                            "compass_id": cid,
-                            "pct": 100,
-                            "status": "ALL_SUCCESS",
-                            "fitness": round(fitness, 3),
-                            "all_done": True,
-                            "remaining": []
-                        })
-                    return True, "All compasses (%s) completed successfully." % (
-                        ", ".join("Compass %d" % c for c in sorted(compass_completed.keys()))
-                    )
+    # Relax the fitness threshold for this run if it is stricter than "Relaxed"
+    orig_fit = None
+    fit_changed = False
+    if wait_completion and relax_fit:
+        orig_fit = read_param(mav, "COMPASS_CAL_FIT", timeout=2.0)
+        if orig_fit is not None:
+            if orig_fit < COMPASS_CAL_FIT_RELAXED:
+                if set_param(mav, "COMPASS_CAL_FIT", COMPASS_CAL_FIT_RELAXED):
+                    fit_changed = True
+                    _log("COMPASS_CAL_FIT %.1f -> %.1f for this calibration (external limit %.0f, internal %.0f); restored afterwards." % (
+                        orig_fit, COMPASS_CAL_FIT_RELAXED, COMPASS_CAL_FIT_RELAXED, 2 * COMPASS_CAL_FIT_RELAXED), "INFO")
                 else:
-                    rem_str = ", ".join("Compass %d" % c for c in remaining)
-                    _log(">> Compass %d done (%d/%d). Continue rotating for remaining: %s" % (cid, num_done, num_detected, rem_str), "WARNING")
-                    if progress_cb:
-                        progress_cb("compass", highest_pct, {
-                            "compass_id": cid,
-                            "pct": 100,
-                            "status": "SUCCESS",
-                            "fitness": round(fitness, 3),
-                            "all_done": False,
-                            "remaining": remaining
-                        })
+                    _log("Could not set COMPASS_CAL_FIT; using current value %.1f." % orig_fit, "WARNING")
+            else:
+                _log("COMPASS_CAL_FIT = %.1f (external limit %.0f, internal %.0f)." % (orig_fit, orig_fit, 2 * orig_fit), "INFO")
 
-            elif cal_status in (MAG_CAL_FAILED, MAG_CAL_BAD_ORIENTATION, MAG_CAL_BAD_RADIUS):
-                _log("Compass %d calibration failed with status: %s" % (cid, stat_name), "ERROR")
-                return False, "Compass %d calibration failed (%s)." % (cid, stat_name)
+    success = False
+    try:
+        _log("Rotate the Solo slowly and smoothly through every orientation (full sphere: nose up/down, each side, upside down).", "WARNING")
+        _prog(1, "Starting compass calibration...")
+        try:
+            _send_cmd(mav, MAV_CMD_DO_START_MAG_CAL,
+                      0,                      # param1: all compasses
+                      1,                      # param2: retry on failure
+                      1 if autosave else 0,   # param3: autosave
+                      0,                      # param4: delay
+                      0)                      # param5: no autoreboot
+        except Exception as e:
+            return False, "Failed to send MAV_CMD_DO_START_MAG_CAL: %s" % e
 
-        elif mtype == 'STATUSTEXT':
-            text = getattr(msg, 'text', '')
-            if isinstance(text, bytes):
-                text = text.decode('utf-8', 'ignore')
-            text = text.rstrip('\x00').strip()
-            if text:
-                _log("Autopilot: %s" % text, "INFO")
-                # Do NOT terminate on individual compass STATUSTEXT when tracking via MAG_CAL packets
-                if not compass_progress:
-                    t_lower = text.lower()
-                    if "mag" in t_lower and ("success" in t_lower or "complete" in t_lower):
-                        if progress_cb:
-                            progress_cb("compass", 100, "Compass calibration complete.")
-                        _log("[OK] Compass calibration finished successfully.", "SUCCESS")
-                        return True, "Compass calibration completed successfully."
+        if not wait_completion:
+            success = True   # leave it running on purpose; caller monitors
+            _prog(100, "Compass calibration active. Rotate drone.")
+            _log("[OK] Compass calibration initiated. Rotate Solo to complete calibration.", "SUCCESS")
+            return True, "Compass calibration started successfully."
 
-    return False, "Compass calibration timed out waiting for rotation/completion."
+        start = time.time()
+        hard_deadline = start + timeout
+        last_progress_t = start
+        last_hb = 0
+        best = {}        # cid -> best pct this attempt
+        attempt = {}     # cid -> attempt number
+        status = {}      # cid -> last cal_status
+        done = {}        # cid -> report dict for SUCCESS
+        pending_fail = {}  # cid -> time a failure report was seen (waiting for auto-retry)
+        last_new_success = None
+        accept_sent = False
+        last_overall = 0
+
+        while True:
+            now = time.time()
+            if cancel_event and cancel_event.is_set():
+                return False, "Compass calibration canceled by user."
+            if now > hard_deadline:
+                return False, "Compass calibration timed out after %d s." % int(timeout)
+            if now - last_progress_t > stall_timeout:
+                return False, "No calibration progress for %d s - keep rotating continuously through all orientations, away from metal." % int(stall_timeout)
+            for cid, t_fail in list(pending_fail.items()):
+                if now - t_fail > (0.5 if mock else 8.0):
+                    return False, "Compass %d failed and the autopilot did not restart it (%s)." % (cid, MAG_STATUS_NAMES.get(status.get(cid), "?"))
+
+            if now - last_hb >= 1.0:
+                _gcs_heartbeat(mav)
+                last_hb = now
+
+            # Completion: every expected compass succeeded (and was saved)
+            ids = expected if expected is not None else set(list(best.keys()) + list(done.keys()))
+            if ids and all(c in done for c in ids):
+                settled = expected is not None or (last_new_success and now - last_new_success > (0 if mock else 2.0))
+                if settled:
+                    unsaved = [c for c in ids if not done[c].get("autosaved", 1)]
+                    if unsaved and autosave and not accept_sent and now - last_new_success > 6.0:
+                        _log("Offsets not yet saved for compass %s - sending MAV_CMD_DO_ACCEPT_MAG_CAL." % unsaved, "WARNING")
+                        try:
+                            _send_cmd(mav, MAV_CMD_DO_ACCEPT_MAG_CAL, 0)
+                        except Exception:
+                            pass
+                        accept_sent = True
+                    if not unsaved or (accept_sent and now - last_new_success > 10.0) or not autosave:
+                        if not autosave and not accept_sent:
+                            try:
+                                _send_cmd(mav, MAV_CMD_DO_ACCEPT_MAG_CAL, 0)
+                            except Exception:
+                                pass
+                        success = True
+                        _log("[OK] ALL %d COMPASSES CALIBRATED SUCCESSFULLY!" % len(ids), "SUCCESS")
+                        for c in sorted(ids):
+                            r = done[c]
+                            _log("  - Compass %d: fitness %.2f, offsets (%.0f, %.0f, %.0f)%s" % (
+                                c, r.get("fitness", 0.0), r.get("ofs_x", 0.0), r.get("ofs_y", 0.0), r.get("ofs_z", 0.0),
+                                ", saved" if r.get("autosaved", 1) else ""), "SUCCESS")
+                        _prog(100, {"compass_id": sorted(ids)[-1], "pct": 100, "status": "ALL_SUCCESS",
+                                    "fitness": round(done[sorted(ids)[-1]].get("fitness", 0.0), 3),
+                                    "all_done": True, "remaining": []})
+                        return True, "All compasses (%s) completed successfully." % ", ".join("Compass %d" % c for c in sorted(ids))
+
+            msg = mav.recv_match(type=['MAG_CAL_PROGRESS', 'MAG_CAL_REPORT', 'COMMAND_ACK', 'STATUSTEXT'],
+                                 blocking=True, timeout=0.5)
+            if not msg:
+                continue
+            mtype = msg.get_type()
+
+            if mtype == 'COMMAND_ACK':
+                if getattr(msg, 'command', None) == MAV_CMD_DO_START_MAG_CAL:
+                    res = getattr(msg, 'result', MAV_RESULT_ACCEPTED)
+                    if res not in (MAV_RESULT_ACCEPTED, MAV_RESULT_IN_PROGRESS):
+                        return False, "Autopilot rejected compass calibration start (%s). Is the vehicle disarmed?" % RESULT_NAMES.get(res, res)
+                    _log("Autopilot accepted MAV_CMD_DO_START_MAG_CAL (all compasses, retry on, autosave on).", "INFO")
+
+            elif mtype == 'MAG_CAL_PROGRESS':
+                cid = getattr(msg, 'compass_id', 0)
+                pct = int(getattr(msg, 'completion_pct', 0))
+                st = getattr(msg, 'cal_status', 0)
+                att = int(getattr(msg, 'attempt', 1) or 1)
+                status[cid] = st
+                pending_fail.pop(cid, None)
+                if att > attempt.get(cid, att):
+                    _log("Compass %d did not fit - autopilot restarted it automatically (attempt %d of %d). Keep rotating." % (
+                        cid, att, MAG_CAL_MAX_ATTEMPTS), "WARNING")
+                    best[cid] = 0
+                    last_progress_t = now
+                attempt[cid] = att
+                if att > MAG_CAL_MAX_ATTEMPTS:
+                    return False, "Compass %d failed %d times. Move away from metal/electronics and recheck the compass mounting." % (cid, att - 1)
+                if pct > best.get(cid, -1):
+                    best[cid] = pct
+                    last_progress_t = now
+                ids_now = expected if expected is not None else set(best.keys())
+                overall = int(sum((100 if c in done else best.get(c, 0)) for c in ids_now) / float(max(1, len(ids_now))))
+                overall = min(overall, 99)
+                if overall != last_overall:
+                    last_overall = overall
+                    _log("Compass %d: %d%% (attempt %d)" % (cid, pct, att), "INFO")
+                _prog(overall, {"compass_id": cid, "pct": pct, "attempt": att,
+                                "status": MAG_STATUS_NAMES.get(st, str(st)),
+                                "remaining": sorted(c for c in ids_now if c not in done)})
+
+            elif mtype == 'MAG_CAL_REPORT':
+                cid = getattr(msg, 'compass_id', 0)
+                st = getattr(msg, 'cal_status', 0)
+                status[cid] = st
+                rep = {
+                    "fitness": float(getattr(msg, 'fitness', 0.0) or 0.0),
+                    "autosaved": int(getattr(msg, 'autosaved', 1) or 0) if hasattr(msg, 'autosaved') else 1,
+                    "ofs_x": float(getattr(msg, 'ofs_x', 0.0) or 0.0),
+                    "ofs_y": float(getattr(msg, 'ofs_y', 0.0) or 0.0),
+                    "ofs_z": float(getattr(msg, 'ofs_z', 0.0) or 0.0),
+                }
+                if st == MAG_CAL_SUCCESS:
+                    if cid not in done:
+                        last_new_success = now
+                        last_progress_t = now
+                        _log("[OK] Compass %d fit OK (fitness %.2f). %s" % (cid, rep["fitness"],
+                             "Saved." if rep["autosaved"] else "Waiting for the other compass(es) before saving..."), "SUCCESS")
+                    done[cid] = rep
+                    best[cid] = 100
+                    ids_now = expected if expected is not None else set(best.keys())
+                    remaining = sorted(c for c in ids_now if c not in done)
+                    _prog(min(99, int(sum((100 if c in done else best.get(c, 0)) for c in ids_now) / float(max(1, len(ids_now))))),
+                          {"compass_id": cid, "pct": 100, "status": "SUCCESS", "fitness": round(rep["fitness"], 3),
+                           "all_done": False, "remaining": remaining})
+                elif st in MAG_CAL_FAIL_STATES:
+                    if cid not in pending_fail:
+                        pending_fail[cid] = now
+                        _log("Compass %d result: %s (fitness %.2f, offsets %.0f/%.0f/%.0f)." % (
+                            cid, MAG_STATUS_NAMES.get(st, st), rep["fitness"], rep["ofs_x"], rep["ofs_y"], rep["ofs_z"]), "ERROR")
+
+            elif mtype == 'STATUSTEXT':
+                text = _text_of(msg)
+                if text:
+                    _log("Autopilot: %s" % text, "INFO")
+    finally:
+        if wait_completion and not success:
+            _log("Stopping compass calibration on the autopilot (all compasses)...", "WARNING")
+            cancel_mag_cal(mav, log_cb=log_cb)
+        if fit_changed and orig_fit is not None:
+            if set_param(mav, "COMPASS_CAL_FIT", orig_fit):
+                _log("COMPASS_CAL_FIT restored to %.1f." % orig_fit, "INFO")
+            else:
+                _log("Could not restore COMPASS_CAL_FIT to %.1f (it remains %.1f)." % (orig_fit, COMPASS_CAL_FIT_RELAXED), "WARNING")
 
 
 def calibrate_imu_reboot_compass(
@@ -617,7 +805,7 @@ def calibrate_imu_reboot_compass(
     endpoint=None,
     imu_type="simple",
     wait_for_compass=True,
-    compass_timeout=120.0,
+    compass_timeout=600.0,
     reboot_timeout=45.0,
     imu_timeout=30.0,
     reboot_reset_delay=5.0,
@@ -756,6 +944,7 @@ class CalibrationManager(object):
         self.log_buffer = []
         self.compass_progress = {}  # {0: pct, 1: pct}
         self.compass_fitness = {}   # {0: fitness, 1: fitness}
+        self.compass_saved = False  # offsets saved by the autopilot in the last compass run
         self.lock = threading.RLock()
         self.cancel_event = threading.Event()
         self.continue_event = threading.Event()
@@ -783,12 +972,30 @@ class CalibrationManager(object):
                 "message": self.message,
                 "compass_progress": dict(self.compass_progress),
                 "compass_fitness": dict(self.compass_fitness),
+                "compass_saved": self.compass_saved,
                 "logs": list(self.log_buffer)
             }
 
-    def cancel(self):
+    def cancel(self, endpoint=None):
         if not self.is_running:
-            return False, "No calibration currently in progress."
+            # Nothing running here, but the autopilot may still be in a (failed) mag cal
+            # from an earlier run -- e.g. after an app restart -- with its tone playing.
+            def _silence():
+                mav = get_mavlink_connection(endpoint=endpoint, timeout=5.0)
+                if not mav:
+                    self.log("Cancel: could not reach the autopilot to stop compass calibration.", "WARNING")
+                    return
+                try:
+                    cancel_mag_cal(mav, log_cb=self.log)
+                finally:
+                    try:
+                        mav.close()
+                    except Exception:
+                        pass
+            th = threading.Thread(target=_silence)
+            th.daemon = True
+            th.start()
+            return True, "Sent compass-calibration stop to the autopilot."
         self.cancel_event.set()
         self.continue_event.set()
         self.log("Cancellation requested by user.", "WARNING")
@@ -806,15 +1013,14 @@ class CalibrationManager(object):
 
     def start_imu(self, endpoint=None, **kwargs):
         """
-        Execute Step 3: Full 6-Axis Accelerometer Calibration.
-        Walks the user through 6 specific orientations in sequence:
-          1. Accurately Level
-          2. Left side
-          3. Right side
-          4. Nose down
-          5. Nose up
-          6. On back
-        Pauses at each orientation until the user clicks Continue.
+        Full 6-axis accelerometer calibration, then an AUTOMATIC autopilot reboot.
+
+        Walks the user through Level, Left, Right, Nose Down, Nose Up, On Back
+        (MAV_CMD_ACCELCAL_VEHICLE_POS order), pausing at each until Continue is
+        clicked. ArduPilot reports the outcome with MAV_CMD_ACCELCAL_VEHICLE_POS
+        param1 = 16777215 (success) / 16777216 (failed) and/or a STATUSTEXT.
+        On success the Cube is rebooted (MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN,
+        param1 = 1); calibration is marked complete once its heartbeat returns.
         """
         if self.is_running:
             return False, "A calibration or reboot task is already in progress."
@@ -831,179 +1037,175 @@ class CalibrationManager(object):
         self.cancel_event.clear()
         self.continue_event.clear()
 
+        def _set(**kw):
+            with self.lock:
+                for k, v in kw.items():
+                    setattr(self, k, v)
+
+        def _fail(message, status="error"):
+            _set(is_running=False, status=status, message=message)
+            self.log(message, "ERROR" if status == "error" else "WARNING")
+
         def _worker():
             mav = None
+            acc = {"result": None, "reason": "", "requested": None}
+
+            def _pump(timeout=0.0):
+                """Process one autopilot message relevant to accel cal."""
+                msg = mav.recv_match(type=['STATUSTEXT', 'COMMAND_ACK', 'COMMAND_LONG'],
+                                     blocking=timeout > 0, timeout=timeout if timeout > 0 else None)
+                if not msg:
+                    return
+                mt = msg.get_type()
+                if mt == 'STATUSTEXT':
+                    t = _text_of(msg)
+                    if not t:
+                        return
+                    self.log("Autopilot: %s" % t, "INFO")
+                    tl = t.lower()
+                    if "calibration successful" in tl:
+                        acc["result"] = "success"
+                    elif "cal" in tl and "fail" in tl:
+                        acc["result"] = "failed"
+                        acc["reason"] = t
+                elif mt == 'COMMAND_LONG' and getattr(msg, 'command', 0) == MAV_CMD_ACCELCAL_VEHICLE_POS:
+                    p1 = int(round(getattr(msg, 'param1', 0)))
+                    if p1 == ACCELCAL_RESULT_SUCCESS:
+                        acc["result"] = "success"
+                    elif p1 == ACCELCAL_RESULT_FAILED:
+                        acc["result"] = "failed"
+                        acc["reason"] = acc["reason"] or "autopilot reported accelerometer calibration FAILED"
+                    elif 1 <= p1 <= 6:
+                        acc["requested"] = p1
+                elif mt == 'COMMAND_ACK' and getattr(msg, 'command', 0) == MAV_CMD_PREFLIGHT_CALIBRATION:
+                    res = getattr(msg, 'result', MAV_RESULT_ACCEPTED)
+                    if res not in (MAV_RESULT_ACCEPTED, MAV_RESULT_IN_PROGRESS):
+                        acc["result"] = "failed"
+                        acc["reason"] = "autopilot refused to start (%s) - keep the Solo still and disarmed" % RESULT_NAMES.get(res, res)
+
             try:
                 self.log("Connecting to Pixhawk autopilot via MAVLink...", "INFO")
                 mav = get_mavlink_connection(endpoint=endpoint, timeout=5.0)
                 if not mav:
-                    with self.lock:
-                        self.is_running = False
-                        self.status = "error"
-                        self.message = "Could not establish MAVLink connection to autopilot."
-                    self.log("MAVLink connection failed (timeout waiting for heartbeat).", "ERROR")
+                    _fail("Could not establish MAVLink connection to autopilot.")
                     return
 
                 self.active_mav = mav
-                target_sys = getattr(mav, 'target_system', 1) or 1
-                target_comp = getattr(mav, 'target_component', 1) or 1
+                is_mock = _is_mock(mav)
+                last_hb = [0.0]
 
-                # Send MAV_CMD_PREFLIGHT_CALIBRATION with param5=1.0 (3D 6-axis accel cal)
+                def _hb():
+                    now = time.time()
+                    if now - last_hb[0] >= 1.0:
+                        _gcs_heartbeat(mav)
+                        last_hb[0] = now
+
                 self.log("==================================================================", "HEADER")
                 self.log("STARTING FULL 6-AXIS ACCELEROMETER CALIBRATION", "HEADER")
                 self.log("Orientations: Level -> Left -> Right -> Nose Down -> Nose Up -> On Back", "HEADER")
                 self.log("==================================================================", "HEADER")
                 try:
-                    mav.mav.command_long_send(
-                        target_sys, target_comp,
-                        MAV_CMD_PREFLIGHT_CALIBRATION,
-                        0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0
-                    )
+                    # MAV_CMD_PREFLIGHT_CALIBRATION param5 = 1: interactive 6-position accel cal
+                    _send_cmd(mav, MAV_CMD_PREFLIGHT_CALIBRATION, 0, 0, 0, 0, 1)
                 except Exception as e:
-                    with self.lock:
-                        self.is_running = False
-                        self.status = "error"
-                        self.message = "Failed to start 6-axis calibration: %s" % str(e)
-                    self.log("Failed to send 6-axis calibration command: %s" % str(e), "ERROR")
+                    _fail("Failed to start 6-axis calibration: %s" % str(e))
                     return
 
-                positions = [
-                    (1, "Accurately Level"),
-                    (2, "Left Side"),
-                    (3, "Right Side"),
-                    (4, "Nose Down"),
-                    (5, "Nose Up"),
-                    (6, "On Back")
-                ]
-
-                last_hb = time.time()
-                cal_failed = False
-                fail_reason = ""
-                is_mock = getattr(mav, 'is_mock', False) or type(mav).__name__ == 'MockMavConnection'
+                positions = [(1, "Accurately Level"), (2, "Left Side"), (3, "Right Side"),
+                             (4, "Nose Down"), (5, "Nose Up"), (6, "On Back")]
 
                 for pos_num, p_name in positions:
-                    with self.lock:
-                        self.pos_index = pos_num
-                        self.pos_name = p_name
-                        self.status = "imu_waiting"
-                        self.message = "Place vehicle %s. Hold completely still, then click Continue." % p_name
-
+                    _set(pos_index=pos_num, pos_name=p_name, status="imu_waiting",
+                         message="Place vehicle %s. Hold completely still, then click Continue." % p_name)
                     self.log(">> Step %d/6: Place Solo %s. Hold completely still and click Continue." % (pos_num, p_name), "WARNING")
 
-                    # Wait for user confirmation (continue_event) while streaming heartbeats
+                    # Wait for the user's Continue, keeping the link alive
                     while not self.continue_event.is_set():
                         if self.cancel_event.is_set():
-                            with self.lock:
-                                self.is_running = False
-                                self.status = "canceled"
-                                self.message = "6-axis calibration canceled by user."
-                            self.log("Calibration canceled by user.", "WARNING")
+                            _fail("6-axis calibration canceled by user.", status="canceled")
                             return
-
-                        now = time.time()
-                        if now - last_hb >= 1.0:
-                            try:
-                                mav.mav.heartbeat_send(
-                                    mavutil.mavlink.MAV_TYPE_GCS,
-                                    mavutil.mavlink.MAV_AUTOPILOT_INVALID,
-                                    0, 0, 0
-                                )
-                            except Exception:
-                                pass
-                            last_hb = now
-
-                        msg = mav.recv_match(type=['STATUSTEXT', 'COMMAND_ACK'], blocking=False)
-                        if msg and msg.get_type() == 'STATUSTEXT':
-                            t = getattr(msg, 'text', '')
-                            if isinstance(t, bytes): t = t.decode('utf-8', 'ignore')
-                            t = t.rstrip('\x00').strip()
-                            if t: self.log("Autopilot: %s" % t, "INFO")
-
+                        _hb()
+                        _pump()
+                        if acc["result"] == "failed":
+                            _fail("6-axis calibration failed: %s" % acc["reason"])
+                            return
                         time.sleep(0.05)
-
                     self.continue_event.clear()
                     if self.cancel_event.is_set():
-                        with self.lock:
-                            self.is_running = False
-                            self.status = "canceled"
-                            self.message = "6-axis calibration canceled."
+                        _fail("6-axis calibration canceled.", status="canceled")
                         return
 
-                    # Position confirmed by user -> sample sensors
-                    with self.lock:
-                        self.status = "imu_sampling"
-                        self.message = "Sampling %s... Keep vehicle completely still!" % p_name
+                    _set(status="imu_sampling", message="Sampling %s... Keep vehicle completely still!" % p_name)
                     self.log("User confirmed %s. Sampling sensors (must stay motionless)..." % p_name, "INFO")
-
-                    # Send MAV_CMD_ACCELCAL_VEHICLE_POS (42429) with param1 = position number
+                    acc["requested"] = None
                     try:
-                        mav.mav.command_long_send(
-                            target_sys, target_comp,
-                            MAV_CMD_ACCELCAL_VEHICLE_POS,
-                            0, float(pos_num), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
-                        )
+                        # Tell ArduPilot the vehicle is in position pos_num
+                        _send_cmd(mav, MAV_CMD_ACCELCAL_VEHICLE_POS, pos_num)
                     except Exception as ex_send:
                         self.log("Note: MAV_CMD_ACCELCAL_VEHICLE_POS send: %s" % str(ex_send), "INFO")
-
                     try:
-                        mav.mav.command_ack_send(MAV_CMD_PREFLIGHT_CALIBRATION, MAV_RESULT_ACCEPTED)
+                        mav.mav.command_ack_send(MAV_CMD_PREFLIGHT_CALIBRATION, MAV_RESULT_ACCEPTED)  # legacy firmwares
                     except Exception:
                         pass
 
-                    # Sampling duration (~2.2s for real drone, instantaneous for mock)
-                    sample_dur = 0.0 if is_mock else 2.2
+                    # Wait until ArduPilot asks for the next position (or reports the result).
+                    min_dur = 0.0 if is_mock else 2.2
+                    max_dur = 0.0 if is_mock else (20.0 if pos_num == 6 else 10.0)
                     start_s = time.time()
-                    while time.time() - start_s < sample_dur:
+                    while True:
+                        el = time.time() - start_s
                         if self.cancel_event.is_set():
-                            with self.lock:
-                                self.is_running = False
-                                self.status = "canceled"
-                                self.message = "Canceled during sampling."
+                            _fail("Canceled during sampling.", status="canceled")
                             return
-                        msg = mav.recv_match(type=['STATUSTEXT'], blocking=False)
-                        if msg:
-                            t = getattr(msg, 'text', '')
-                            if isinstance(t, bytes): t = t.decode('utf-8', 'ignore')
-                            t = t.rstrip('\x00').strip()
-                            if t:
-                                self.log("Autopilot: %s" % t, "INFO")
-                                if "failed" in t.lower() or "failure" in t.lower():
-                                    cal_failed = True
-                                    fail_reason = t
-                        time.sleep(0.08)
-
-                    if cal_failed:
-                        with self.lock:
-                            self.is_running = False
-                            self.status = "error"
-                            self.message = "6-axis calibration failed: %s" % fail_reason
-                        self.log("6-axis calibration failed: %s" % fail_reason, "ERROR")
-                        return
+                        if acc["result"] == "failed":
+                            _fail("6-axis calibration failed: %s" % acc["reason"])
+                            return
+                        if el >= min_dur and (acc["result"] == "success" or
+                                              (pos_num < 6 and acc["requested"] == pos_num + 1)):
+                            break
+                        if el >= max_dur:
+                            break
+                        _hb()
+                        _pump(0.1)
 
                     with self.lock:
                         self.positions_done.append(pos_num)
                         self.progress = int((pos_num / 6.0) * 100)
                     self.log("[OK] Position %d/6 (%s) sampled successfully." % (pos_num, p_name), "SUCCESS")
 
-                # Settle pause for EEPROM offset matrix commit
-                if not is_mock:
-                    time.sleep(1.5)
+                if acc["result"] != "success" and not is_mock:
+                    _fail("The autopilot did not confirm the 6-axis calibration result. Nothing was rebooted - please run the calibration again.")
+                    return
 
-                with self.lock:
-                    self.is_running = False
-                    self.status = "imu_completed"
-                    self.progress = 100
-                    self.message = "6-Axis Accelerometer Calibration Complete! Offsets saved to persistent storage. Please reboot Solo."
-                self.log("[OK] 6-Axis Accelerometer Calibration finished successfully!", "SUCCESS")
-                self.log("All 6 positions sampled and calibrated. Offsets saved to autopilot storage.", "SUCCESS")
-                self.log(">> MANUAL REBOOT REQUIRED: Power-cycle Solo or click 'Reboot Autopilot' before Compass Calibration.", "WARNING")
+                # ---- Success: reboot the Cube automatically ----
+                _set(status="imu_rebooting", progress=100,
+                     message="Calibration successful — Rebooting autopilot automatically...")
+                self.log("[OK] 6-Axis Accelerometer Calibration successful - offsets saved by the autopilot.", "SUCCESS")
+                self.log("Calibration successful — Rebooting autopilot automatically...", "HEADER")
+
+                def _rb_prog(stage, pct, details):
+                    if details:
+                        _set(message="Calibration successful — Rebooting autopilot automatically... (%s)" % details)
+
+                ok_rb, new_mav, msg_rb = reboot_autopilot(
+                    mav, timeout=60.0, endpoint=endpoint, log_cb=self.log,
+                    progress_cb=_rb_prog, cancel_event=self.cancel_event,
+                    reset_delay=0.0 if is_mock else 3.0)
+                mav = None  # closed by reboot_autopilot
+                if new_mav:
+                    try:
+                        new_mav.close()
+                    except Exception:
+                        pass
+                if ok_rb:
+                    _set(is_running=False, status="imu_completed", progress=100,
+                         message="6-Axis IMU calibration complete and autopilot rebooted. Ready for Compass Calibration.")
+                    self.log("[OK] Autopilot rebooted and heartbeat restored - IMU calibration complete.", "SUCCESS")
+                else:
+                    _fail("IMU calibration saved, but the automatic reboot did not complete (%s). Power-cycle the Solo." % msg_rb)
 
             except Exception as ex:
-                with self.lock:
-                    self.is_running = False
-                    self.status = "error"
-                    self.message = "Error: %s" % str(ex)
-                self.log("Exception during 6-axis IMU calibration: %s" % str(ex), "ERROR")
+                _fail("Error: %s" % str(ex))
             finally:
                 self.active_mav = None
                 if mav:
@@ -1017,7 +1219,7 @@ class CalibrationManager(object):
         t.start()
         return True, "6-Axis Accelerometer Calibration initiated."
 
-    def start_compass(self, wait_completion=True, timeout=120.0, endpoint=None):
+    def start_compass(self, wait_completion=True, timeout=600.0, endpoint=None):
         """
         Execute Step 2: Compass Calibration ONLY.
         Initiates onboard mag calibration and streams real-time progress for all compasses.
@@ -1033,6 +1235,7 @@ class CalibrationManager(object):
         self.log_buffer = []
         self.compass_progress = {}
         self.compass_fitness = {}
+        self.compass_saved = False
         self.cancel_event.clear()
 
         def _worker():
@@ -1054,7 +1257,9 @@ class CalibrationManager(object):
                         elif details.get("all_done"):
                             self.message = "All compasses calibrated successfully!"
                         else:
-                            self.message = "Compass %d: %d%% (%s)" % (cid, cpct, details.get("status", ""))
+                            att = details.get("attempt", 1) or 1
+                            self.message = "Compass %d: %d%% (%s%s)" % (
+                                cid, cpct, details.get("status", ""), (", attempt %d" % att) if att > 1 else "")
                     elif details:
                         self.message = str(details)
 
@@ -1080,6 +1285,8 @@ class CalibrationManager(object):
                     cancel_event=self.cancel_event
                 )
                 if ok:
+                    with self.lock:
+                        self.compass_saved = True
                     self.log("[OK] Compass Calibration Complete! Offsets saved to persistent storage.", "SUCCESS")
                     self.log("Auto-rebooting autopilot in 3 seconds to commit compass offsets to EKF...", "WARNING")
 
@@ -1134,16 +1341,20 @@ class CalibrationManager(object):
                         self.log("[OK] Autopilot reboot complete! Compass offsets loaded into EKF.", "SUCCESS")
                         self.log(">> ALL SYSTEMS READY: Solo is calibrated and ready for flight!", "SUCCESS")
                 else:
+                    # calibrate_compass() has already cancelled the mag cal on all compasses
                     with self.lock:
                         self.is_running = False
                         self.status = "canceled" if self.cancel_event.is_set() else "error"
                         self.message = msg
+                    self.log(msg, "WARNING" if self.cancel_event.is_set() else "ERROR")
             except Exception as ex:
                 with self.lock:
                     self.is_running = False
                     self.status = "error"
                     self.message = "Error: %s" % str(ex)
                 self.log("Exception during Compass calibration: %s" % str(ex), "ERROR")
+                if mav:
+                    cancel_mag_cal(mav, log_cb=self.log)
             finally:
                 if mav:
                     try:

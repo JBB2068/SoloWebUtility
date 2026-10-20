@@ -57,25 +57,43 @@ export default {
       });
     }
 
-    // Windows Installer EXE
-    if (decodedPath === '/Solo Web Utility Installer.exe' || url.pathname === '/deploy_to_solo.exe') {
-      const r2Key = (decodedPath === '/Solo Web Utility Installer.exe') ? 'Solo Web Utility Installer.exe' : 'deploy_to_solo.exe';
+    // Windows Installer EXE (v1.2.0 and canonical aliases)
+    if (
+      decodedPath === '/Solo Web Utility v1.2.0.exe' ||
+      decodedPath === '/Solo Web Utility Installer.exe' ||
+      url.pathname === '/deploy_to_solo.exe'
+    ) {
+      const r2Key = (decodedPath === '/Solo Web Utility v1.2.0.exe')
+        ? 'Solo Web Utility v1.2.0.exe'
+        : (decodedPath === '/Solo Web Utility Installer.exe' ? 'Solo Web Utility Installer.exe' : 'deploy_to_solo.exe');
+      const filename = (decodedPath === '/Solo Web Utility v1.2.0.exe')
+        ? 'Solo Web Utility v1.2.0.exe'
+        : 'Solo Web Utility Installer.exe';
       return await handleR2Request(
         request, env, r2Key,
         'application/octet-stream',
         'attachment',
-        'Solo Web Utility Installer.exe'
+        filename
       );
     }
 
-    // Android APK
-    if (decodedPath === '/Solo Web Utility Installer.apk' || url.pathname === '/sololink_viewer.apk') {
-      const r2Key = (decodedPath === '/Solo Web Utility Installer.apk') ? 'Solo Web Utility Installer.apk' : 'sololink_viewer.apk';
+    // Android APK (v1.2.0 and canonical aliases)
+    if (
+      decodedPath === '/Solo Web Utility v1.2.0.apk' ||
+      decodedPath === '/Solo Web Utility Installer.apk' ||
+      url.pathname === '/sololink_viewer.apk'
+    ) {
+      const r2Key = (decodedPath === '/Solo Web Utility v1.2.0.apk')
+        ? 'Solo Web Utility v1.2.0.apk'
+        : (decodedPath === '/Solo Web Utility Installer.apk' ? 'Solo Web Utility Installer.apk' : 'sololink_viewer.apk');
+      const filename = (decodedPath === '/Solo Web Utility v1.2.0.apk')
+        ? 'Solo Web Utility v1.2.0.apk'
+        : 'Solo Web Utility Installer.apk';
       return await handleR2Request(
         request, env, r2Key,
         'application/vnd.android.package-archive',
         'attachment',
-        'Solo Web Utility Installer.apk'
+        filename
       );
     }
 

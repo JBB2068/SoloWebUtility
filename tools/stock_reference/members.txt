@@ -1,0 +1,4 @@
+imx6solo-3dr-1080p.dtb
+uImage
+3dr-solo-imx6solo-3dr-1080p.squashfs
+u-boot.imx

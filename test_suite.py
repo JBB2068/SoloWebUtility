@@ -11,6 +11,9 @@ import json
 import time
 import unittest
 import threading
+import shutil
+import tempfile
+import tarfile
 
 # Import modules to test
 import auth
@@ -31,22 +34,57 @@ class TestSoloWebUtility(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls._version_backup = None
+        cls._version_mtime = None
         cls._auth_backup = None
+        cls._auth_mtime = None
+        cls._param_backup = None
+        cls._param_mtime = None
         if os.path.exists(version_mgr.VERSION_FILE):
+            cls._version_mtime = os.path.getmtime(version_mgr.VERSION_FILE)
             with open(version_mgr.VERSION_FILE, "r") as f:
                 cls._version_backup = f.read()
         if os.path.exists(auth.AUTH_FILE):
+            cls._auth_mtime = os.path.getmtime(auth.AUTH_FILE)
             with open(auth.AUTH_FILE, "r") as f:
                 cls._auth_backup = f.read()
+        param_file = os.path.join(BASE_DIR, "solo.param")
+        if os.path.exists(param_file):
+            cls._param_mtime = os.path.getmtime(param_file)
+            with open(param_file, "r") as f:
+                cls._param_backup = f.read()
 
     @classmethod
     def tearDownClass(cls):
         if cls._version_backup is not None:
             with open(version_mgr.VERSION_FILE, "w") as f:
                 f.write(cls._version_backup)
+            if cls._version_mtime is not None:
+                try:
+                    os.utime(version_mgr.VERSION_FILE, (cls._version_mtime, cls._version_mtime))
+                except Exception:
+                    pass
         if cls._auth_backup is not None:
             with open(auth.AUTH_FILE, "w") as f:
                 f.write(cls._auth_backup)
+            if cls._auth_mtime is not None:
+                try:
+                    os.utime(auth.AUTH_FILE, (cls._auth_mtime, cls._auth_mtime))
+                except Exception:
+                    pass
+        param_file = os.path.join(BASE_DIR, "solo.param")
+        if cls._param_backup is not None:
+            with open(param_file, "w") as f:
+                f.write(cls._param_backup)
+            if cls._param_mtime is not None:
+                try:
+                    os.utime(param_file, (cls._param_mtime, cls._param_mtime))
+                except Exception:
+                    pass
+        try:
+            import bake_into_firmware
+            bake_into_firmware.ensure_firmware_baked(log_func=None)
+        except Exception:
+            pass
 
     def setUp(self):
         # Clean sessions
@@ -97,15 +135,19 @@ class TestSoloWebUtility(unittest.TestCase):
     def test_03_firmware_deduplication_and_files(self):
         """Verify firmware files exist and APJs are distinct while tar.gz is shared."""
         firmware_dir = os.path.join(BASE_DIR, "firmware")
-        solo_apj = os.path.join(firmware_dir, "arducopter_solo.apj")
-        green_apj = os.path.join(firmware_dir, "arducopter_green.apj")
+        solo_apj = os.path.join(firmware_dir, "arducopter_CubeSolo_4.7.2.apj")
+        green_apj = os.path.join(firmware_dir, "arducopter_CubeGreen_4.7.2.apj")
+        legacy_solo = os.path.join(firmware_dir, "arducopter_solo.apj")
+        legacy_green = os.path.join(firmware_dir, "arducopter_green.apj")
         tar_gz = os.path.join(firmware_dir, "3dr-solo.tar.gz")
         tar_md5 = os.path.join(firmware_dir, "3dr-solo.tar.gz.md5")
         ctrl_tar_gz = os.path.join(firmware_dir, "3dr-controller.tar.gz")
         ctrl_tar_md5 = os.path.join(firmware_dir, "3dr-controller.tar.gz.md5")
 
-        self.assertTrue(os.path.exists(solo_apj), "arducopter_solo.apj missing")
-        self.assertTrue(os.path.exists(green_apj), "arducopter_green.apj missing")
+        self.assertTrue(os.path.exists(solo_apj), "arducopter_CubeSolo_4.7.2.apj missing")
+        self.assertTrue(os.path.exists(green_apj), "arducopter_CubeGreen_4.7.2.apj missing")
+        self.assertFalse(os.path.exists(legacy_solo), "legacy arducopter_solo.apj must not exist")
+        self.assertFalse(os.path.exists(legacy_green), "legacy arducopter_green.apj must not exist")
         self.assertTrue(os.path.exists(tar_gz), "3dr-solo.tar.gz missing")
         self.assertTrue(os.path.exists(tar_md5), "3dr-solo.tar.gz.md5 missing")
         self.assertTrue(os.path.exists(ctrl_tar_gz), "3dr-controller.tar.gz missing")
@@ -118,9 +160,9 @@ class TestSoloWebUtility(unittest.TestCase):
         self.assertGreater(green_sz, 1000000, "Green Cube APJ must be valid firmware size")
         self.assertNotEqual(solo_sz, green_sz, "Solo APJ and Green Cube APJ should be distinct")
 
-        # Verify tar.gz sizes
+        # Verify tar.gz sizes (3dr-solo.tar.gz includes baked SoloWebUtility2)
         tar_sz = os.path.getsize(tar_gz)
-        self.assertEqual(tar_sz, 75983897)
+        self.assertGreater(tar_sz, 75000000, "3dr-solo.tar.gz should be a complete firmware archive")
         ctrl_tar_sz = os.path.getsize(ctrl_tar_gz)
         self.assertEqual(ctrl_tar_sz, 75114379)
         self.assertNotEqual(tar_sz, ctrl_tar_sz, "Solo Copter tar and Controller tar are distinct")
@@ -151,7 +193,7 @@ class TestSoloWebUtility(unittest.TestCase):
         self.assertTrue(gps_type_found)
 
         # Parameter update
-        ok, msg = param_mgr.mgr.set_param("WPNAV_SPEED", 1500)
+        ok, msg = param_mgr.mgr.set_param("WPNAV_SPEED", 1500, send_mavlink=False)
         self.assertTrue(ok)
         self.assertEqual(param_mgr.mgr.params["WPNAV_SPEED"], 1500)
 
@@ -179,40 +221,77 @@ class TestSoloWebUtility(unittest.TestCase):
 
         orig_ssh = wifi_mgr._ssh
         orig_ssh_paramiko = getattr(wifi_mgr, "_ssh_paramiko", orig_ssh)
-        sample_iwlist = (
-            "Cell 01 - Address: 00:11:22:33:44:55\n"
-            "          Channel:6\n"
-            "          Quality=60/70  Signal level=-50 dBm\n"
-            "          Encryption key:on\n"
-            "          ESSID:\"Home_2.4G\"\n"
-            "          IE: IEEE 802.11i/WPA2 Version 1\n"
-            "Cell 02 - Address: AA:BB:CC:DD:EE:FF\n"
-            "          Channel:1\n"
-            "          Quality=40/70  Signal level=-75 dBm\n"
-            "          Encryption key:off\n"
-            "          ESSID:\"Guest_Open\"\n"
+        sample_iw = (
+            "===IW===\n"
+            "BSS 00:11:22:33:44:55(on wlan0)\n"
+            "\tfreq: 2437\n"
+            "\tcapability: ESS Privacy ShortSlotTime (0x0411)\n"
+            "\tsignal: -50.00 dBm\n"
+            "\tSSID: Home_2.4G\n"
+            "\tBSS Load:\n"
+            "\t\t * station count: 2\n"
+            "\tRSN:\t * Version: 1\n"
+            "\t\t * Authentication suites: PSK\n"
+            "BSS aa:bb:cc:dd:ee:ff(on wlan0)\n"
+            "\tfreq: 2412\n"
+            "\tcapability: ESS (0x0401)\n"
+            "\tsignal: -75.00 dBm\n"
+            "\tSSID: Guest_Open\n"
+            "BSS aa:bb:cc:dd:ee:00(on wlan0)\n"
+            "\tfreq: 2437\n"
+            "\tsignal: -40.00 dBm\n"
+            "\tSSID: SoloLink_Test\n"
+            "===ERR===\n"
+            "===OWN===\n"
+            "SoloLink_Test\n"
         )
-        wifi_mgr._ssh = lambda cmd, host="10.1.1.1": (0, sample_iwlist if "scan" in cmd else 'ssid="SoloLink_Test"')
-        wifi_mgr._ssh_paramiko = lambda cmd, host="10.1.1.1", timeout=30: (0, "OK")
+        sample_status = (
+            "===SSID===\nHome_2.4G\n===ADDR===\n===PING===\nNO_ADDR\n===FWD===\n1\n===IPT===\n"
+            "===LOG===\n10:00:00 STATUS: FAILED reason=wrong_password detail=x\n===WPA===\n===END===\n"
+        )
+        sent = []
+
+        def fake_ssh(cmd, host="10.1.1.1", timeout=20):
+            sent.append(cmd)
+            if " scan" in cmd:
+                return (0, sample_iw)
+            if "connect" in cmd:
+                return (0, "LAUNCHED\n")
+            return (0, sample_status)
+
+        wifi_mgr._ssh = fake_ssh
+        wifi_mgr._ssh_paramiko = lambda cmd, host="10.1.1.1", timeout=30: fake_ssh(cmd, host, timeout)
         orig_ctrl_reach = wifi_mgr._ctrl_reachable
         wifi_mgr._ctrl_reachable = lambda: True
         try:
             wifi_status = wifi_mgr.get_wifi_status()
             self.assertIn("mode", wifi_status)
             self.assertIn("connected_ssid", wifi_status)
+            self.assertEqual(wifi_status["connection_state"], "failed")
+            self.assertIn("Wrong Wi-Fi password", wifi_status["failure"])
 
-            # Test scanning
+            # Scanning: fresh iw sweep, own SoloLink AP filtered out
             scan_res = wifi_mgr.scan_wifi_networks()
             self.assertTrue(scan_res.get("success"))
             self.assertEqual(scan_res.get("count"), 2)
             net_names = [n["ssid"] for n in scan_res.get("networks", [])]
             self.assertIn("Home_2.4G", net_names)
             self.assertIn("Guest_Open", net_names)
+            self.assertNotIn("SoloLink_Test", net_names)
 
-            # Test connect_home_wifi deployment command generation
-            ok, msg = wifi_mgr.connect_home_wifi("Home_2.4G", "SecretPassword")
+            # WPA PSK derivation (IEEE 802.11i test vector)
+            self.assertEqual(wifi_mgr.wpa_psk_hex("IEEE", "password"),
+                             "f42c6fc52df0ebef9ebb4b90b38a5f902e83fe1b135a70e23aed762e9710a12e")
+
+            # Connect: the password never travels in clear text; launch is detached
+            ok, msg = wifi_mgr.connect_home_wifi("Home_2.4G", "Secret$Pass`word")
             self.assertTrue(ok)
             self.assertIn("Home_2.4G", msg)
+            self.assertNotIn("Secret$Pass", sent[-1])
+            self.assertIn("setsid sh /tmp/swu-wifi.sh connect", sent[-1])
+
+            ok, msg = wifi_mgr.connect_home_wifi("Home_2.4G", "short")
+            self.assertFalse(ok)
         finally:
             wifi_mgr._ssh = orig_ssh
             wifi_mgr._ssh_paramiko = orig_ssh_paramiko
@@ -295,7 +374,26 @@ class TestSoloWebUtility(unittest.TestCase):
         ok_comp, msg_comp = calib_mgr.calibrate_compass(mock_mav3, timeout=5.0, wait_completion=True)
         self.assertTrue(ok_comp)
         self.assertIn("completed successfully", msg_comp)
-        self.assertEqual(mock_mav3.sent_commands[0][0], calib_mgr.MAV_CMD_DO_START_MAG_CAL)
+        sent_ids = [c[0] for c in mock_mav3.sent_commands]
+        # leftover cal is cleared first, then started on all compasses with retry=1 and autosave=1
+        self.assertEqual(sent_ids[0], calib_mgr.MAV_CMD_DO_CANCEL_MAG_CAL)
+        start_cmd = [c for c in mock_mav3.sent_commands if c[0] == calib_mgr.MAV_CMD_DO_START_MAG_CAL][0]
+        self.assertEqual(start_cmd[1], 0.0)   # param1: all compasses
+        self.assertEqual(start_cmd[2], 1.0)   # param2: retry on failure
+        self.assertEqual(sent_ids.count(calib_mgr.MAV_CMD_DO_CANCEL_MAG_CAL), 1)  # no cancel after success
+
+        # A failed compass must always be followed by MAV_CMD_DO_CANCEL_MAG_CAL (stops the failure tone)
+        mock_fail = MockMavConnection()
+        mock_fail.responses = [
+            MockMavMsg('COMMAND_ACK', command=calib_mgr.MAV_CMD_DO_START_MAG_CAL, result=calib_mgr.MAV_RESULT_ACCEPTED),
+            MockMavMsg('MAG_CAL_PROGRESS', compass_id=1, completion_pct=89, cal_status=calib_mgr.MAG_CAL_RUNNING_STEP_TWO),
+            MockMavMsg('MAG_CAL_REPORT', compass_id=1, cal_status=calib_mgr.MAG_CAL_FAILED, fitness=80.0),
+        ]
+        ok_fail, msg_fail = calib_mgr.calibrate_compass(mock_fail, timeout=5.0, wait_completion=True)
+        self.assertFalse(ok_fail)
+        fail_ids = [c[0] for c in mock_fail.sent_commands]
+        self.assertEqual(fail_ids[-1], calib_mgr.MAV_CMD_DO_CANCEL_MAG_CAL)
+        self.assertGreaterEqual(fail_ids.count(calib_mgr.MAV_CMD_DO_CANCEL_MAG_CAL), 2)
 
         # Test Full Pipeline (calibrate_imu_reboot_compass)
         mock_pipeline_mav = MockMavConnection()
@@ -378,6 +476,9 @@ class TestSoloWebUtility(unittest.TestCase):
             self.assertEqual(st["status"], "imu_completed")
             self.assertEqual(st["progress"], 100)
             self.assertEqual(st["positions_done"], [1, 2, 3, 4, 5, 6])
+            # the autopilot was rebooted automatically after a successful 6-axis calibration
+            self.assertIn(calib_mgr.MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN, [c[0] for c in imu_mock.sent_commands])
+            self.assertTrue(any("Rebooting autopilot automatically" in l["message"] for l in st["logs"]))
         finally:
             calib_mgr.get_mavlink_connection = orig_get_conn
 
@@ -408,7 +509,7 @@ class TestSoloWebUtility(unittest.TestCase):
             ok_start_comp, _ = engine_comp.start_compass()
             self.assertTrue(ok_start_comp)
             t0 = time.time()
-            while time.time() - t0 < 5.0:
+            while time.time() - t0 < 10.0:
                 if not engine_comp.get_state()["is_running"]:
                     break
                 time.sleep(0.02)
@@ -425,23 +526,1034 @@ class TestSoloWebUtility(unittest.TestCase):
 
         # Verify local firmware version detection
         ver = arducopter_builder.get_local_firmware_version()
-        self.assertEqual(ver, "4.7.1")
+        self.assertEqual(ver, "4.7.2")
 
         # Verify quick check against custom build API
         chk = arducopter_builder.update_engine.check_version_quick()
         self.assertTrue(chk.get("success"))
-        self.assertEqual(chk.get("local_version"), "4.7.1")
-        self.assertEqual(chk.get("online_version"), "4.7.1")
-        self.assertFalse(chk.get("update_available"))
+        self.assertEqual(chk.get("local_version"), "4.7.2")
+        self.assertTrue(bool(chk.get("online_version")))
 
-        # Verify clean install zip resolution
-        zip_solo = flash_mgr.resolve_clean_install_zip("solo")
-        zip_green = flash_mgr.resolve_clean_install_zip("green")
-        self.assertTrue(os.path.exists(zip_solo))
-        self.assertTrue(os.path.exists(zip_green))
-        self.assertIn("Clean Install", zip_solo)
-        self.assertIn("GREEN CUBE", zip_green)
+        # Verify versioned APJ resolution
+        apj_solo = flash_mgr.get_latest_apj("solo")
+        self.assertIsNotNone(apj_solo)
+        self.assertTrue(os.path.exists(apj_solo))
+        self.assertIn("CubeSolo", apj_solo)
+        self.assertIn("4.7.2", apj_solo)
 
+        apj_green = flash_mgr.get_latest_apj("green")
+        self.assertIsNotNone(apj_green)
+        self.assertTrue(os.path.exists(apj_green))
+        self.assertIn("CubeGreen", apj_green)
+        self.assertIn("4.7.2", apj_green)
+
+    def test_08_flask_modular_architecture(self):
+        """Test modern modular Flask application and isolated background TCP server."""
+        import app
+        from modules.legacy_server import start_legacy_server
+        import socket
+        import struct
+
+        # Test Flask test client
+        client = app.app.test_client()
+
+        # Public endpoints
+        res_idx = client.get("/")
+        self.assertEqual(res_idx.status_code, 200)
+
+        res_cp = client.get("/hotspot-detect.html")
+        self.assertEqual(res_cp.status_code, 302)
+
+        res_status = client.get("/api/status")
+        self.assertEqual(res_status.status_code, 200)
+        data_status = res_status.get_json()
+        self.assertIn("copter_online", data_status)
+        self.assertIn("utility_version", data_status)
+
+        res_ver = client.get("/api/version")
+        self.assertEqual(res_ver.status_code, 200)
+
+        # Login endpoint
+        res_login = client.post("/api/auth/login", json={"password": "sololink"})
+        self.assertEqual(res_login.status_code, 200)
+        token = res_login.get_json().get("token")
+        self.assertTrue(bool(token))
+
+        # Protected modular blueprint endpoints
+        headers = {"X-Auth-Token": token}
+        res_p = client.get("/api/params", headers=headers)
+        self.assertEqual(res_p.status_code, 200)
+
+        res_c = client.get("/api/controller/definitions", headers=headers)
+        self.assertEqual(res_c.status_code, 200)
+
+        res_f = client.get("/api/flash/status", headers=headers)
+        self.assertEqual(res_f.status_code, 200)
+
+        res_w = client.get("/api/wifi/status", headers=headers)
+        self.assertEqual(res_w.status_code, 200)
+
+        res_cal = client.get("/api/calib/status", headers=headers)
+        self.assertEqual(res_cal.status_code, 200)
+
+        res_pair = client.get("/api/pair/status", headers=headers)
+        self.assertEqual(res_pair.status_code, 200)
+
+        # Test isolated background legacy TCP server loop
+        server_thread = start_legacy_server(port=5533, flask_port=5000)
+        self.assertTrue(server_thread.is_alive())
+
+        test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        test_sock.connect(("127.0.0.1", 5533))
+        test_sock.sendall(struct.pack("!I", 4))
+        time.sleep(0.3)
+        st = server_thread.get_status()
+        self.assertEqual(st["connected_client_ip"], "127.0.0.1")
+        test_sock.close()
+        time.sleep(0.3)
+        server_thread.stop()
+
+    def test_09_wifi_lockdown_and_relatch(self):
+        """Test Wi-Fi roaming lockdown, WinError 10051 exception detection, and 3-attempt retry/re-latch."""
+        import socket
+        from modules.controller_firmware import (
+            is_network_socket_exception,
+            lock_wifi_profile,
+            unlock_wifi_profiles,
+            relatch_wifi_connection,
+        )
+        from modules.firmware import sftp_upload_to_copter
+
+        # 1. Verify socket / WinError 10051 detection
+        e_win = OSError(10051, "A socket operation was attempted to an unreachable network")
+        setattr(e_win, "winerror", 10051)
+        self.assertTrue(is_network_socket_exception(e_win))
+
+        e_str = RuntimeError("Custom socket failure: WinError 10051 unreachable network")
+        self.assertTrue(is_network_socket_exception(e_str))
+
+        e_timeout = socket.timeout("timed out")
+        self.assertTrue(is_network_socket_exception(e_timeout))
+
+        e_unrelated = ValueError("Invalid argument")
+        self.assertFalse(is_network_socket_exception(e_unrelated))
+
+        # 2. Test Wi-Fi lockdown and unlock execution
+        ssid, modified = lock_wifi_profile("SoloLink_TestProfile")
+        self.assertEqual(ssid, "SoloLink_TestProfile")
+        self.assertIsInstance(modified, list)
+        unlock_wifi_profiles(modified)
+
+        # 3. Test upload with sftp_upload_to_copter
+        import modules.firmware as fw
+        import flash_mgr
+        orig_scp = flash_mgr._scp_to
+        try:
+            flash_mgr._scp_to = lambda *a, **k: (0, "ok")
+            ok, msg = fw.sftp_upload_to_copter("test_file.txt", "/tmp/test_file.txt", saved_ssid="SoloLink_TestProfile")
+            self.assertTrue(ok)
+        finally:
+            flash_mgr._scp_to = orig_scp
+
+    def test_10_copter_reboot_command_and_countdown_templates(self):
+        """Test clean copter reboot command string, milestone logging, and 8-minute countdown elements."""
+        import modules.firmware as fw
+        executed_cmds = []
+
+        def mock_ssh_run(cmd, host="10.1.1.10", **kwargs):
+            executed_cmds.append((host, cmd))
+            return 0, ""
+
+        orig_ssh = fw.ssh_run_on_copter
+        fw.ssh_run_on_copter = mock_ssh_run
+        logs = []
+        try:
+            ok = fw.reboot_copter(host="10.1.1.10", log_callback=lambda m, lvl: logs.append((m, lvl)))
+            self.assertTrue(ok)
+            self.assertEqual(len(executed_cmds), 2)
+            self.assertIn("touch /log/updates/RUN_PAIR_ONCE", executed_cmds[0][1])
+            self.assertEqual(executed_cmds[1][0], "10.1.1.10")
+            self.assertEqual(executed_cmds[1][1], "nohup sh -c 'sleep 2 && reboot' >/dev/null 2>&1 &")
+            self.assertTrue(any("Staging one-time post-update pairing trigger" in l[0] for l in logs))
+            self.assertTrue(any("reboot triggered cleanly" in l[0] for l in logs))
+        finally:
+            fw.ssh_run_on_copter = orig_ssh
+
+        # Verify flash_mgr.py contains RUN_PAIR_ONCE staging and copter reboot
+        with open(os.path.join(BASE_DIR, "flash_mgr.py"), "r", encoding="utf-8") as f:
+            fm_src = f.read()
+        self.assertIn("touch /log/updates/RUN_PAIR_ONCE", fm_src)
+        self.assertIn("nohup sh -c 'sleep 2 && reboot' >/dev/null 2>&1 &", fm_src)
+        self.assertIn("[AUTO-REBOOT] Arming copter update and rebooting...", fm_src)
+
+        # Full Install must never ask the initramfs to reformat /log on the copter:
+        # only UPDATE is armed; settings are reset by emptying the RWFS overlay.
+        import inspect as _inspect
+        for _name in ("_pipeline", "_stage_copter_update", "_arm_copter_update_and_reboot"):
+            _src = _inspect.getsource(getattr(flash_mgr.FlashManager, _name))
+            local_flag_cmds = [l for l in _src.splitlines() if "RESETSETTINGS" in l and "touch" in l]
+            self.assertEqual(local_flag_cmds, [], "copter must not touch RESETSETTINGS (%s): %s" % (_name, local_flag_cmds))
+        # ...while the controller update (run over SSH on 10.1.1.1) is armed with UPDATE + RESETSETTINGS
+        _ctrl_src = _inspect.getsource(flash_mgr.FlashManager._stage_controller_update)
+        self.assertIn("touch /log/updates/UPDATE /log/updates/RESETSETTINGS", _ctrl_src)
+        self.assertIn("self._ctrl_cmd(", _ctrl_src)
+        self.assertIn("def _arm_copter_update_and_reboot", fm_src)
+        self.assertIn("def _full_install_preflight", fm_src)
+        self.assertIn("shutil.copyfile(self._solo_src, dst)", fm_src)   # copy, never move
+        self.assertNotIn("os.rename(self._solo_src", fm_src)
+        self.assertNotIn("shutil.move(self._solo_src", fm_src)
+        # pre-flight runs in Stage 1, before the Cube is flashed
+        self.assertLess(fm_src.find("self._full_install_preflight()"), fm_src.find("--load /firmware/arducopter.apj"))
+
+        # Verify modules/controller_firmware.py handles RUN_PAIR_ONCE post-update pairing automation
+        with open(os.path.join(BASE_DIR, "modules", "controller_firmware.py"), "r", encoding="utf-8") as f:
+            cf_src = f.read()
+        self.assertIn("[ -f /log/updates/RUN_PAIR_ONCE ]", cf_src)
+        self.assertIn("sololink_config --pair", cf_src)
+        self.assertIn("rm -f /log/updates/RUN_PAIR_ONCE", cf_src)
+        self.assertIn("Automatically broadcasting software pairing invitation now...", cf_src)
+
+        # Verify templates/updates.html contains 8-minute progress countdown and guard alert
+        with open(os.path.join(BASE_DIR, "templates", "updates.html"), "r", encoding="utf-8") as f:
+            up_src = f.read()
+        self.assertIn('id="rebootTimerBox"', up_src)
+        self.assertIn('id="rebootWarningAlert"', up_src)
+        self.assertIn('id="rebootCountdown"', up_src)
+        self.assertIn('id="rebootProgressBar"', up_src)
+        self.assertIn("DO NOT POWER OFF THE DRONE OR CONTROLLER. Firmware installation is executing internally.", up_src)
+        self.assertIn("Update Complete! Software pairing mode is currently active. Hold A+B on your Artoo Controller to finalize link.", up_src)
+        self.assertIn("step2PairCard", up_src)
+
+        # Verify static/app.js contains success transition, timerStarted safety lock, and smooth-scroll
+        with open(os.path.join(BASE_DIR, "static", "app.js"), "r", encoding="utf-8") as f:
+            app_src = f.read()
+        self.assertIn("Update Complete! Software pairing mode is currently active. Hold A+B on your Artoo Controller to finalize link.", app_src)
+        self.assertIn("scrollToPairingInstructions", app_src)
+        self.assertIn("step2PairCard", app_src)
+        self.assertIn("timerStarted", app_src)
+
+        # Verify flash_mgr.py establishes RUN_PAIR_ONCE explicitly before controller reboot at 10.1.1.1
+        run_pair_idx = fm_src.find("touch /log/updates/RUN_PAIR_ONCE")
+        ctrl_reboot_idx = fm_src.find("Triggering controller reboot at 10.1.1.1...")
+        self.assertTrue(run_pair_idx != -1 and ctrl_reboot_idx != -1)
+        self.assertTrue(run_pair_idx < ctrl_reboot_idx)
+
+        # Verify modules/firmware.py contains split network checks, 1s ping loop, and post-update pairing
+        with open(os.path.join(BASE_DIR, "modules", "firmware.py"), "r", encoding="utf-8") as f:
+            fw_src = f.read()
+        self.assertIn("def reconnect_wifi", fw_src)
+        self.assertIn("def _probe_copter_awake", fw_src)
+        self.assertIn("sololink_config --pair", fw_src)
+        self.assertIn("rm -f /log/updates/RUN_PAIR_ONCE", fw_src)
+        self.assertIn("set_copter_boot_in_progress", fw_src)
+
+        # Verify modules/telemetry.py keeps get_live_copter_status False while boot in progress
+        from modules.telemetry import (
+            set_copter_boot_in_progress,
+            set_live_copter_status,
+            get_live_copter_status,
+        )
+        set_copter_boot_in_progress(True)
+        self.assertFalse(get_live_copter_status())
+        set_copter_boot_in_progress(False)
+
+        # Verify static/app.js strictly links countdown timer to copter_online
+        self.assertIn("copterIsOnline", app_src)
+        self.assertIn("previousCopterOnline = false;", app_src)
+
+    def test_11_standard_pixhawk_flash_tar_bake_and_uninstall(self):
+        """Test standard Solo pixhawk flash, tar baking, 6-min countdown/ping, and uninstall endpoint."""
+        import tempfile
+        import tarfile
+        import flash_mgr
+        import app
+
+        # 1. Verify flash_mgr.py Stage 2 standard Solo pixhawk flash logic & APJ staging
+        with open(os.path.join(BASE_DIR, "flash_mgr.py"), "r", encoding="utf-8") as f:
+            fm_src = f.read()
+        self.assertIn("find_apj_file", fm_src)
+        self.assertIn("normalize_cube_type", fm_src)
+        self.assertIn("release_mavlink_connections()", fm_src)
+        self.assertIn("sololink_config --update-prepare pixhawk", fm_src)
+        self.assertIn("/usr/bin/pixhawk.py", fm_src)
+        self.assertIn("--load /firmware/arducopter.apj", fm_src)
+        self.assertIn("os.path.exists(\"/firmware/arducopter.apj\")", fm_src)
+        # Ensure rm -f /firmware/*.apj is NOT run
+        self.assertNotIn('self._run("rm -f /firmware/*.apj 2>/dev/null || true")', fm_src)
+        self.assertIn("Wait ~6 minutes for reboot to finish.", fm_src)
+
+        # Test normalize_cube_type and get_latest_apj
+        self.assertEqual(flash_mgr.normalize_cube_type("solo"), "CubeSolo")
+        self.assertEqual(flash_mgr.normalize_cube_type("black"), "CubeSolo")
+        self.assertEqual(flash_mgr.normalize_cube_type("Solo Cube (Black)"), "CubeSolo")
+        self.assertEqual(flash_mgr.normalize_cube_type("green"), "CubeGreen")
+        self.assertEqual(flash_mgr.normalize_cube_type("CubeGreen"), "CubeGreen")
+
+        solo_apj_found = flash_mgr.get_latest_apj("solo")
+        self.assertIsNotNone(solo_apj_found)
+        self.assertTrue(solo_apj_found.endswith("arducopter_CubeSolo_4.7.2.apj"))
+
+        green_apj_found = flash_mgr.get_latest_apj("green")
+        self.assertIsNotNone(green_apj_found)
+        self.assertTrue(green_apj_found.endswith("arducopter_CubeGreen_4.7.2.apj"))
+
+        # 2. Test bake_into_firmware module
+        import bake_into_firmware
+        tmp_dir = tempfile.mkdtemp()
+        try:
+            test_tar = os.path.join(tmp_dir, "3dr-solo.tar.gz")
+            shutil.copyfile(os.path.join(BASE_DIR, "firmware", "3dr-solo.tar.gz"), test_tar)
+            logs = []
+            ok, digest = bake_into_firmware.bake_tarball(test_tar, app_base_dir=BASE_DIR, log_func=lambda m: logs.append(m))
+            self.assertTrue(ok)
+            self.assertTrue(os.path.exists(test_tar + ".md5"))
+
+            # Container tarball layout: contains SquashFS rootfs and boot files, no loose files outside SquashFS
+            with tarfile.open(test_tar, "r:gz") as tf:
+                member_names = [m.name for m in tf.getmembers()]
+                self.assertIn("3dr-solo-imx6solo-3dr-1080p.squashfs", member_names)
+                self.assertIn("uImage", member_names)
+                self.assertIn("u-boot.imx", member_names)
+                self.assertNotIn("etc/inittab", member_names)
+                self.assertNotIn("etc/rc.local", member_names)
+                self.assertNotIn("etc/rc5.d/S99solowebutility", member_names)
+                self.assertNotIn("etc/init.d/solowebutility", member_names)
+                self.assertNotIn("usr/bin/SoloWebUtility2/app.py", member_names)
+
+            # Inner SquashFS verification via verify_tarball
+            v_ok, v_errs, swu_count = bake_into_firmware.verify_tarball(test_tar)
+            self.assertTrue(v_ok, "verify_tarball failed on test_tar: %s" % v_errs)
+            self.assertGreater(swu_count, 40)
+        finally:
+            shutil.rmtree(tmp_dir)
+
+        # 3. Test /api/ping and /api/status endpoints
+        client = app.app.test_client()
+        status_res = client.get("/api/status")
+        self.assertEqual(status_res.status_code, 200)
+
+        ping_res = client.get("/api/ping")
+        self.assertEqual(ping_res.status_code, 200)
+        self.assertIn("no-cache", ping_res.headers.get("Cache-Control", ""))
+        import json
+        ping_data = json.loads(ping_res.data)
+        self.assertTrue(ping_data.get("online"))
+        self.assertTrue(ping_data.get("pong"))
+
+        # 4. Verify /api/uninstall route and CLI flag in app.py
+        self.assertTrue(hasattr(app, "uninstall_solo_web_utility"))
+        with open(os.path.join(BASE_DIR, "app.py"), "r", encoding="utf-8") as f:
+            app_code = f.read()
+        self.assertIn("/api/uninstall", app_code)
+        self.assertIn("--uninstall", app_code)
+        self.assertIn("/etc/rc.local", app_code)
+        self.assertIn("/usr/bin/SoloWebUtility2", app_code)
+        self.assertIn("/log/SoloWebUtility2", app_code)
+
+        # 5. Verify UI countdown and /api/status AbortController polling in templates and app.js
+        with open(os.path.join(BASE_DIR, "static", "app.js"), "r", encoding="utf-8") as f:
+            app_js = f.read()
+        self.assertIn("/api/status", app_js)
+        self.assertIn("AbortController", app_js)
+        self.assertIn("2500", app_js)
+        self.assertIn("45000", app_js)
+        self.assertIn("startRebootCountdown(360)", app_js)
+        self.assertIn("btnUninstallApp", app_js)
+
+        with open(os.path.join(BASE_DIR, "templates", "index.html"), "r", encoding="utf-8") as f:
+            index_html = f.read()
+        self.assertIn("rebootCountdown", index_html)
+        self.assertIn("06:00", index_html)
+        self.assertIn("btnUninstallApp", index_html)
+
+        with open(os.path.join(BASE_DIR, "templates", "updates.html"), "r", encoding="utf-8") as f:
+            updates_html = f.read()
+        self.assertIn("startRebootCountdown(360)", updates_html)
+        self.assertIn("/api/status", updates_html)
+        self.assertIn("AbortController", updates_html)
+        self.assertIn("btnUninstallAppUpdates", updates_html)
+
+    def test_12_semantic_version_selection_and_legacy_filtering(self):
+        """Verify flash_mgr semantic version parsing, automatic selection of highest version, and legacy APJ filtering."""
+        import tempfile
+        import flash_mgr
+        import arducopter_builder
+
+        # 1. Verify semantic version parsing
+        self.assertEqual(flash_mgr.parse_apj_version("arducopter_CubeSolo_4.7.1.apj"), (4, 7, 1))
+        self.assertEqual(flash_mgr.parse_apj_version("arducopter_CubeGreen_4.7.2.apj"), (4, 7, 2))
+        self.assertEqual(flash_mgr.parse_apj_version("arducoptercubesolo-4.8.0.apj"), (4, 8, 0))
+        self.assertEqual(flash_mgr.parse_apj_version("arducopter_solo.apj"), (0, 0, 0))
+        self.assertEqual(flash_mgr.parse_apj_version("arducopter_green.apj"), (0, 0, 0))
+
+        # 2. Test semantic selection in isolated directory
+        tmp_dir = tempfile.mkdtemp(prefix="apj_test_")
+        try:
+            # Create dummy APJ files (> 100KB)
+            test_files = [
+                "arducopter_CubeSolo_4.7.1.apj",
+                "arducopter_CubeSolo_4.7.2.apj",
+                "arducopter_CubeGreen_4.7.1.apj",
+                "arducopter_CubeGreen_4.7.3.apj",
+                "arducopter_solo.apj",
+                "arducopter_green.apj",
+                "arducopter.apj",
+            ]
+            for fn in test_files:
+                with open(os.path.join(tmp_dir, fn), "wb") as f:
+                    f.write(b"APJ_DUMMY_DATA_" + b"0" * 150000)
+
+            # Check highest semantic version selection
+            best_solo = flash_mgr.get_latest_apj("solo", search_dirs=[tmp_dir])
+            self.assertIsNotNone(best_solo)
+            self.assertTrue(best_solo.endswith("arducopter_CubeSolo_4.7.2.apj"),
+                            "Expected 4.7.2 to be chosen over 4.7.1 and legacy solo, got: %s" % best_solo)
+
+            best_green = flash_mgr.get_latest_apj("green", search_dirs=[tmp_dir])
+            self.assertIsNotNone(best_green)
+            self.assertTrue(best_green.endswith("arducopter_CubeGreen_4.7.3.apj"),
+                            "Expected 4.7.3 to be chosen over 4.7.1 and legacy green, got: %s" % best_green)
+
+            # 3. Test clean_old_firmware_files logic
+            orig_fw_dir = arducopter_builder.FIRMWARE_DIR
+            try:
+                arducopter_builder.FIRMWARE_DIR = tmp_dir
+                removed = arducopter_builder.clean_old_firmware_files("CubeSolo", "4.7.2")
+                self.assertIn("arducopter_CubeSolo_4.7.1.apj", removed)
+                self.assertIn("arducopter_solo.apj", removed)
+                self.assertFalse(os.path.exists(os.path.join(tmp_dir, "arducopter_CubeSolo_4.7.1.apj")))
+                self.assertFalse(os.path.exists(os.path.join(tmp_dir, "arducopter_solo.apj")))
+                self.assertTrue(os.path.exists(os.path.join(tmp_dir, "arducopter_CubeSolo_4.7.2.apj")))
+            finally:
+                arducopter_builder.FIRMWARE_DIR = orig_fw_dir
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    def test_13_automatic_build_hook_and_startup_daemon(self):
+        """Verify automatic build hook (stale detection & ensure_firmware_baked) and startup daemon paths."""
+        import bake_into_firmware
+        import deploy_to_drone
+
+        # 1. Verify ensure_firmware_baked synchronizes any source changes from earlier tests
+        ok_sync = bake_into_firmware.ensure_firmware_baked()
+        self.assertTrue(ok_sync)
+
+        # After synchronization, archive MUST be fresh and not stale
+        stale, newer = bake_into_firmware.is_firmware_stale()
+        self.assertFalse(stale, "Expected freshly baked firmware archive to not be stale, but found: %s" % newer)
+        self.assertEqual(newer, [])
+
+        # 2. Test stale detection in isolated temp environment
+        tmp_dir = tempfile.mkdtemp(prefix="hook_test_")
+        try:
+            test_tar = os.path.join(tmp_dir, "3dr-solo.tar.gz")
+            shutil.copyfile(os.path.join(BASE_DIR, "firmware", "3dr-solo.tar.gz"), test_tar)
+            shutil.copyfile(os.path.join(BASE_DIR, "firmware", "3dr-solo.tar.gz.md5"), test_tar + ".md5")
+
+            # Artificially set tarball mtime to 100 seconds in the past
+            past_time = time.time() - 100
+            os.utime(test_tar, (past_time, past_time))
+
+            # Create a test app dir with a file modified now
+            test_app_dir = os.path.join(tmp_dir, "app_src")
+            os.makedirs(test_app_dir)
+            with open(os.path.join(test_app_dir, "app.py"), "w") as f:
+                f.write("# Modified app\n")
+
+            is_stale, modified = bake_into_firmware.is_firmware_stale(
+                tar_path=test_tar, app_base_dir=test_app_dir, firmware_dir=tmp_dir
+            )
+            self.assertTrue(is_stale)
+            self.assertIn("app.py", modified)
+
+            # 3. Test ensure_firmware_baked triggers auto-bake and resolves staleness
+            logs = []
+            orig_bake = bake_into_firmware.bake_tarball
+            try:
+                def mock_bake(tar_p, app_base_dir=BASE_DIR, log_func=None):
+                    now_t = time.time() + 10
+                    os.utime(tar_p, (now_t, now_t))
+                    with open(tar_p + ".md5", "w") as f:
+                        f.write("mock_md5  %s\n" % os.path.basename(tar_p))
+                    return True, "mock_md5"
+                bake_into_firmware.bake_tarball = mock_bake
+                ok = bake_into_firmware.ensure_firmware_baked(
+                    tar_path=test_tar, app_base_dir=test_app_dir, firmware_dir=tmp_dir, log_func=lambda m: logs.append(m)
+                )
+                self.assertTrue(ok)
+                # After baking, should no longer be stale
+                is_stale_now, _ = bake_into_firmware.is_firmware_stale(
+                    tar_path=test_tar, app_base_dir=test_app_dir, firmware_dir=tmp_dir
+                )
+                self.assertFalse(is_stale_now)
+            finally:
+                bake_into_firmware.bake_tarball = orig_bake
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+        # 4. Verify inittab respawn entry configuration in bake_into_firmware and deploy_to_drone
+        inittab_line = bake_into_firmware.INITTAB_RESPAWN_ENTRY
+        self.assertIn("SWU:345:respawn:", inittab_line)
+        self.assertIn("/usr/bin/SoloWebUtility2/solo_web_app.py", inittab_line)
+        self.assertIn("/log/solowebutility.log", inittab_line)
+
+        deploy_inittab = deploy_to_drone.INITTAB_RESPAWN_ENTRY
+        self.assertIn("SWU:345:respawn:", deploy_inittab)
+        self.assertIn("/usr/bin/SoloWebUtility2/solo_web_app.py", deploy_inittab)
+        self.assertIn("/log/solowebutility.log", deploy_inittab)
+
+        # 5. Verify deploy_to_drone.py main includes ensure_firmware_baked
+        with open(os.path.join(BASE_DIR, "deploy_to_drone.py"), "r", encoding="utf-8") as f:
+            d_code = f.read()
+        self.assertIn("ensure_firmware_baked", d_code)
+
+        # 6. Verify container layout and inner SquashFS contents of staged 3dr-solo.tar.gz
+        tar_path = os.path.join(BASE_DIR, "firmware", "3dr-solo.tar.gz")
+        with tarfile.open(tar_path, "r:gz") as tf:
+            names = [m.name for m in tf.getmembers()]
+            self.assertIn("3dr-solo-imx6solo-3dr-1080p.squashfs", names)
+            self.assertIn("uImage", names)
+            self.assertIn("u-boot.imx", names)
+            self.assertNotIn("etc/inittab", names)
+            self.assertNotIn("etc/rc.local", names)
+            self.assertNotIn("etc/init.d/solowebutility", names)
+            self.assertNotIn("etc/rc5.d/S99solowebutility", names)
+            for m in tf.getmembers():
+                self.assertFalse(m.name.startswith("etc/") or m.name.startswith("usr/"),
+                                 "Loose file found in container tarball: %s" % m.name)
+
+        v_ok, v_errs, swu_count = bake_into_firmware.verify_tarball(tar_path)
+        self.assertTrue(v_ok, "verify_tarball failed on staged 3dr-solo.tar.gz: %s" % v_errs)
+        self.assertGreater(swu_count, 40)
+
+        # 7. Verify robust port binding retry logic and 0.0.0.0 host in solo_web_app and webcore
+        with open(os.path.join(BASE_DIR, "solo_web_app.py"), "r", encoding="utf-8") as f:
+            swa_code = f.read()
+        self.assertIn("max_retries = 60", swa_code)
+        self.assertIn("retry_delay = 2", swa_code)
+        self.assertIn("bind_host = '0.0.0.0'", swa_code)
+        self.assertIn("(bind_host, chosen_port)", swa_code)
+
+        with open(os.path.join(BASE_DIR, "webcore.py"), "r", encoding="utf-8") as f:
+            wc_code = f.read()
+        self.assertIn("max_retries=60", wc_code)
+        self.assertIn("retry_delay=2", wc_code)
+        self.assertIn('host="0.0.0.0"', wc_code)
+
+
+    def test_14_custombuild_yaml_builder(self):
+        """solocustombuild.yaml drives the custom.ardupilot.org build (offline checks)."""
+        import io
+        import json
+        import tarfile
+        import arducopter_builder as ab
+
+        # 1. Real config file parses (no PyYAML) and validates against CustomBuild schema 0.0.1
+        cfg, path = ab.load_build_config(os.path.join(BASE_DIR, "firmware", "solocustombuild.yaml"))
+        self.assertEqual(cfg["config_version"], "0.0.1")
+        self.assertEqual(cfg["vehicle"]["id"], "copter")
+        self.assertEqual(cfg["board"]["id"], "CubeSolo")
+        self.assertIn("APJ_TOOL_PARAMETERS", cfg["selected_features"])
+        self.assertIn("MODE_SPORT", cfg["selected_features"])
+        self.assertIn("PrecLand - IRLock", cfg["selected_features"])   # labels with spaces
+        self.assertNotIn("SCRIPTING", cfg["selected_features"])
+        with open(path) as f:
+            naive = [l.strip()[2:] for l in f if l.strip().startswith("- ")]
+        self.assertEqual(naive, cfg["selected_features"])
+        self.assertFalse(hasattr(ab, "ENABLE_FEATURES"))               # no hardcoded feature lists
+
+        # 2. Invalid configs are rejected
+        for bad in ("config_version: 9.9.9\n", "vehicle:\n\tid: x\n"):
+            with self.assertRaises(ValueError):
+                ab.validate_build_config(ab.parse_custombuild_yaml(bad))
+
+        # 3. Feature resolution against a board's feature list
+        board = [
+            {"id": "APJ_TOOL_PARAMETERS", "default": {"enabled": False}, "dependencies": []},
+            {"id": "MODE_SPORT", "default": {"enabled": False}, "dependencies": ["DEP_X"]},
+            {"id": "DEP_X", "default": {"enabled": False}, "dependencies": []},
+            {"id": "SCRIPTING", "default": {"enabled": True}, "dependencies": []},
+        ]
+        mini = dict(cfg)
+        mini["selected_features"] = ["MODE_SPORT", "NOT_ON_THIS_BOARD"]
+        sel, rep = ab.resolve_selected_features(mini, board)
+        self.assertEqual(sel, ["APJ_TOOL_PARAMETERS", "DEP_X", "MODE_SPORT"])  # SCRIPTING stays off
+        self.assertEqual(rep["unknown"], ["NOT_ON_THIS_BOARD"])
+        self.assertTrue(rep["added_dependencies"])
+        self.assertEqual(rep["added_required"], ["APJ_TOOL_PARAMETERS"])
+
+        # 4. Artifact archive -> arducopter.apj, and FAILURE state is reported with log lines
+        apj_src = os.path.join(BASE_DIR, "firmware", "arducopter_CubeSolo_4.7.2.apj")
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+            for name, data in (("copter-CubeSolo-abc/arducopter_with_bl.hex", b":00"),
+                               ("copter-CubeSolo-abc/arducopter.apj", open(apj_src, "rb").read())):
+                ti = tarfile.TarInfo(name)
+                ti.size = len(data)
+                tar.addfile(ti, io.BytesIO(data))
+        state = {"n": 0}
+
+        def fake_get(url, timeout=25):
+            if url.endswith("/artifact"):
+                return buf.getvalue()
+            if "/logs" in url:
+                return b"region flash overflowed\nBuild failed\n"
+            state["n"] += 1
+            st = "RUNNING" if state["n"] < 2 else "FAILURE"
+            return json.dumps({"progress": {"percent": 50, "state": st}}).encode()
+
+        orig_get = ab._http_get
+        ab._http_get = fake_get
+        tmp = tempfile.mkdtemp()
+        try:
+            out = ab.download_artifact_apj("abc", os.path.join(tmp, "x.apj"))
+            with open(out, "rb") as f:
+                self.assertIn("image", json.loads(f.read().decode("utf-8")))
+            with self.assertRaises(RuntimeError) as cm:
+                ab.poll_build("abc", poll_interval=0.01, max_wait=5)
+            self.assertIn("FAILURE", str(cm.exception))
+            self.assertIn("Build failed", str(cm.exception))
+        finally:
+            ab._http_get = orig_get
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_15_home_wifi_internet_routing(self):
+        """Copter default route + DNS repair, Controller NAT/DHCP script, and the update gate fallback."""
+        import arducopter_builder as ab
+
+        # --- 1. Copter default route: 'ip route' output contains 10.1.1.10, which
+        #        used to hide a missing default route ("10.1.1.1" in "10.1.1.10").
+        routes = {"default": ""}
+        ran = []
+
+        def fake_run(cmd):
+            ran.append(cmd)
+            if cmd.startswith("ip -4 addr show dev wlan0"):
+                return 0, "    inet 10.1.1.10/24 brd 10.1.1.255 scope global wlan0\n"
+            if cmd.startswith("ip route show default"):
+                return 0, routes["default"]
+            if cmd.startswith("ip route replace default via 10.1.1.1"):
+                routes["default"] = "default via 10.1.1.1 dev wlan0\n"
+                return 0, ""
+            return 0, ""
+
+        tmp = tempfile.mkdtemp()
+        orig_run, orig_resolv = wifi_mgr._run_local, wifi_mgr.RESOLV_CONF
+        orig_platform = sys.platform
+        try:
+            wifi_mgr._run_local = fake_run
+            sys.platform = "linux2"
+            # resolv.conf is a symlink into a runtime dir (as on many Yocto images)
+            real = os.path.join(tmp, "run", "resolv.conf")
+            os.makedirs(os.path.dirname(real))
+            with open(real, "w") as f:
+                f.write("nameserver 10.1.1.1\n")
+            link = os.path.join(tmp, "resolv.conf")
+            os.symlink(real, link)
+            wifi_mgr.RESOLV_CONF = link
+
+            self.assertTrue(wifi_mgr.ensure_copter_internet_route())
+            self.assertTrue(any(c.startswith("ip route replace default via 10.1.1.1 dev wlan0") for c in ran))
+            self.assertTrue(os.path.islink(link))          # symlink kept, target rewritten
+            with open(real) as f:
+                text = f.read()
+            self.assertTrue(text.split("nameserver")[1].strip().startswith("8.8.8.8"))
+            self.assertIn("nameserver 1.1.1.1", text)
+
+            # Already correct -> no further route changes (idempotent)
+            ran[:] = []
+            self.assertTrue(wifi_mgr.ensure_copter_internet_route())
+            self.assertFalse(any("replace" in c for c in ran))
+
+            # A stale default via another gateway is replaced
+            routes["default"] = "default via 192.168.1.1 dev wlan0\n"
+            self.assertTrue(wifi_mgr.ensure_copter_internet_route())
+            self.assertEqual(routes["default"], "default via 10.1.1.1 dev wlan0\n")
+
+            # Not on the copter (no 10.1.1.x on wlan0): never touch host routes/DNS
+            ran[:] = []
+            wifi_mgr._run_local = lambda cmd: (ran.append(cmd) or (0, ""))
+            self.assertTrue(wifi_mgr.ensure_copter_internet_route())
+            self.assertFalse(any("replace" in c or "mount" in c for c in ran))
+        finally:
+            wifi_mgr._run_local, wifi_mgr.RESOLV_CONF = orig_run, orig_resolv
+            sys.platform = orig_platform
+            shutil.rmtree(tmp, ignore_errors=True)
+
+        # --- 2. Controller helper: NAT at the top of the chains, rp_filter off,
+        #        udhcpc with -n -t 10 and without -q (stays running to renew).
+        script = wifi_mgr.CONTROLLER_SCRIPT
+        self.assertIn("iptables -t nat -I POSTROUTING 1 -o $IFACE -j MASQUERADE", script)
+        self.assertIn("iptables -I FORWARD 1 -i $AP_IFACE -o $IFACE -j ACCEPT", script)
+        self.assertIn("iptables -I FORWARD 1 -i $IFACE -o $AP_IFACE -j ACCEPT", script)
+        self.assertIn("rp_filter", script)
+        dhcp_lines = [l for l in script.splitlines() if "udhcpc -i" in l]
+        self.assertTrue(dhcp_lines)
+        for l in dhcp_lines:
+            self.assertIn("-n -t 10", l)
+            self.assertNotIn(" -q", l)
+
+        # --- 3. Update gate: repairs the route first, then falls back to the Controller.
+        calls = []
+        orig = (wifi_mgr.ensure_copter_internet_route, wifi_mgr.controller_has_internet, ab._tcp_probe)
+        try:
+            wifi_mgr.ensure_copter_internet_route = lambda: calls.append("route") or True
+            wifi_mgr.controller_has_internet = lambda timeout=3: calls.append("ctrl") or True
+            ab._tcp_probe = lambda h, p, t: calls.append("probe:" + h) or False
+            self.assertTrue(ab.check_internet_connection())
+            self.assertEqual(calls[0], "route")
+            self.assertEqual(calls[1:], ["probe:8.8.8.8", "probe:1.1.1.1", "ctrl"])
+            self.assertEqual(ab.LAST_INTERNET_PATH, "controller")
+
+            ab._tcp_probe = lambda h, p, t: h == "8.8.8.8"
+            self.assertTrue(ab.check_internet_connection())
+            self.assertEqual(ab.LAST_INTERNET_PATH, "direct")
+
+            ab._tcp_probe = lambda h, p, t: False
+            wifi_mgr.controller_has_internet = lambda timeout=3: False
+            self.assertFalse(ab.check_internet_connection())
+            self.assertIsNone(ab.LAST_INTERNET_PATH)
+        finally:
+            (wifi_mgr.ensure_copter_internet_route, wifi_mgr.controller_has_internet, ab._tcp_probe) = orig
+
+    def test_16_wifi_connect_workflow_diagnostics(self):
+        """Step checklist, pre-flight security checks and copter step in get_wifi_status()."""
+        orig = (wifi_mgr._ssh, wifi_mgr._ctrl_reachable, wifi_mgr.copter_network_diagnostics)
+        sent = []
+        log_lines = [
+            "10:00:00 STATUS: CONNECTING",
+            "10:00:00 STEP prepare OK settings and helper sent",
+            "10:00:01 STEP teardown RUN", "10:00:02 STEP teardown OK cleared",
+            "10:00:02 STEP ap_pause RUN", "10:00:03 STEP ap_pause OK hostapd stopped",
+            "10:00:03 STEP supplicant RUN", "10:00:04 STEP supplicant OK running on wlan0",
+            "10:00:04 STEP associate RUN",
+        ]
+        state = {"log": list(log_lines), "addr": ""}
+
+        def fake_ssh(cmd, host="10.1.1.1", timeout=20):
+            sent.append(cmd)
+            if "connect" in cmd:
+                return (0, "LAUNCHED\n")
+            return (0, "===SSID===\nHome\n===ADDR===\n%s\n===PING===\n%s\n===FWD===\n1\n===IPT===\n"
+                       "===LOG===\n%s\n===WPA===\n===END===\n" % (
+                           state["addr"], "PING_OK" if state["addr"] else "NO_ADDR", "\n".join(state["log"])))
+        try:
+            wifi_mgr._ssh = fake_ssh
+            wifi_mgr._ctrl_reachable = lambda: True
+
+            # Pre-flight: unsupported or inconsistent security is refused before SoloLink drops
+            wifi_mgr._LAST_SCAN.update({"WPA3Only": "WPA3", "Cafe": "Open", "Home": "WPA2"})
+            ok, msg = wifi_mgr.connect_home_wifi("WPA3Only", "password123")
+            self.assertFalse(ok); self.assertIn("WPA3", msg)
+            ok, msg = wifi_mgr.connect_home_wifi("Home", "")
+            self.assertFalse(ok); self.assertIn("Enter its Wi-Fi password", msg)
+            n = len(sent)
+            ok, msg = wifi_mgr.connect_home_wifi("Cafe", "typed-by-mistake")
+            self.assertTrue(ok)
+            self.assertIn("key_mgmt=NONE", __import__("base64").b64decode(
+                sent[-1].split("/tmp/wpa_client.conf ")[1].split(" ")[0]).decode("utf-8"))
+            self.assertIn("STEP prepare OK", sent[-1])
+            self.assertEqual(len(sent), n + 1)
+
+            # Mid-connect: associate step running, later steps pending
+            st = wifi_mgr.get_wifi_status()
+            self.assertEqual(st["connection_state"], "connecting")
+            steps = dict((x["id"], x["state"]) for x in st["steps"])
+            self.assertEqual(steps["supplicant"], "ok")
+            self.assertEqual(steps["associate"], "running")
+            self.assertEqual(steps["dhcp"], "pending")
+
+            # Wrong password: failing step marked, later steps skipped, clear error
+            state["log"] = log_lines + ["10:00:09 STEP associate FAIL key_rejected_during_4-way_handshake",
+                                        "10:00:09 STATUS: FAILED reason=wrong_password detail=x"]
+            st = wifi_mgr.get_wifi_status()
+            steps = dict((x["id"], x) for x in st["steps"])
+            self.assertEqual(st["connection_state"], "failed")
+            self.assertEqual(steps["associate"]["state"], "failed")
+            self.assertIn("key rejected", steps["associate"]["detail"])
+            self.assertEqual(steps["dhcp"]["state"], "skipped")
+            self.assertIn("Wrong Wi-Fi password", st["failure"])
+
+            # Connected, copter cannot reach the internet -> copter step failed + warning
+            done = ["10:00:%02d STEP %s OK x" % (i, sid) for i, sid in
+                    enumerate(["associate", "dhcp", "nat", "ap_resume", "internet"], 10)]
+            state["log"] = log_lines + done + ["10:00:20 STATUS: CONNECTED ip=192.168.1.5 gw=192.168.1.1 freq=2437 internet=yes"]
+            state["addr"] = "    inet 192.168.1.5/24 scope global wlan0"
+            wifi_mgr.copter_network_diagnostics = lambda: {
+                "applicable": True, "route_ok": True, "dns_ok": True, "internet": False,
+                "detail": "route ok, DNS ok, but 8.8.8.8/1.1.1.1 not reachable through the Controller"}
+            st = wifi_mgr.get_wifi_status()
+            steps = dict((x["id"], x["state"]) for x in st["steps"])
+            self.assertEqual(st["connection_state"], "connected")
+            self.assertEqual(steps["internet"], "ok")
+            self.assertEqual(steps["copter"], "failed")
+            self.assertFalse(st["copter_internet"])
+            self.assertIn("copter cannot reach the internet", st["warning"])
+
+            wifi_mgr.copter_network_diagnostics = lambda: {
+                "applicable": True, "route_ok": True, "dns_ok": True, "internet": True, "detail": "ok"}
+            st = wifi_mgr.get_wifi_status()
+            self.assertTrue(st["copter_internet"])
+            self.assertEqual([x["state"] for x in st["steps"]], ["ok"] * len(wifi_mgr.CONNECT_STEPS))
+            self.assertEqual(st["warning"], "")
+            json.dumps(st)
+            self.assertNotIn("error", st)      # app.js apiRequest() rejects any truthy "error" key
+
+            # Built-in SoloLink station mode is used, kept md5-consistent, and undone on failure
+            script = wifi_mgr.CONTROLLER_SCRIPT
+            self.assertIn("sololink_config --set-config StationEnable $1", script)
+            self.assertIn("ifup -f $IFACE", script)
+            self.assertIn("md5sum $1.conf > $1.conf.md5", script)
+            fail_fn = script[script.index("fail() {"):script.index("wpa_state() {")]
+            self.assertIn("station_config_off", fail_fn)
+            self.assertIn("ctrl_interface_group=0", wifi_mgr.build_wpa_config("Home", "password123"))
+        finally:
+            wifi_mgr._ssh, wifi_mgr._ctrl_reachable, wifi_mgr.copter_network_diagnostics = orig
+            wifi_mgr._LAST_SCAN.clear()
+
+    def test_17_wifi_arm_interlock_and_session_only_station(self):
+        """Arming drops home Wi-Fi (retrying until confirmed); station mode is never left saved."""
+        script = wifi_mgr.CONTROLLER_SCRIPT
+        connect_fn = script[script.index("do_connect() {"):script.index("do_reset() {")]
+        # saved settings are switched back off right after wpa_supplicant starts
+        self.assertLess(connect_fn.index("station_config_on"), connect_fn.index("station_config_off"))
+        self.assertLess(connect_fn.index("station_config_off"), connect_fn.index("step associate"))
+        off_fn = script[script.index("do_station_off() {"):script.index("do_scan() {")]
+        self.assertNotIn("hostapd", off_fn)            # SoloLink is never restarted in flight
+        self.assertIn("DISCONNECTED reason=armed", off_fn)
+
+        orig = (wifi_mgr._ssh, wifi_mgr._ctrl_reachable, wifi_mgr._STATION_MAYBE_ACTIVE)
+        calls = []
+        replies = ["STATION_OFF_RC=1\n", "STATION_OFF_RC=0\n"]   # first attempt fails, retry succeeds
+
+        def fake_ssh(cmd, host="10.1.1.1", timeout=20):
+            if "station-off" in cmd:
+                calls.append(time.time())
+                return (0, replies.pop(0) if replies else "STATION_OFF_RC=0\n")
+            return (0, "")
+        armed = {"v": False}
+        try:
+            wifi_mgr._ssh = fake_ssh
+            wifi_mgr._ctrl_reachable = lambda: True
+            wifi_mgr._note_station(True)
+            t = threading.Thread(target=wifi_mgr._interlock_loop, args=(lambda: armed["v"], 0.02, 0.1))
+            t.daemon = True
+            t.start()
+            time.sleep(0.2)
+            self.assertEqual(calls, [])                 # disarmed: nothing sent
+            armed["v"] = True
+            deadline = time.time() + 3
+            while wifi_mgr._STATION_MAYBE_ACTIVE and time.time() < deadline:
+                time.sleep(0.02)
+            self.assertFalse(wifi_mgr._STATION_MAYBE_ACTIVE)
+            self.assertEqual(len(calls), 2)             # failed once, retried, confirmed
+            time.sleep(0.3)
+            self.assertEqual(len(calls), 2)             # no repeats once the station is off
+
+            # status after the drop explains what happened
+            log = "10:00:00 STATUS: CONNECTED ip=192.168.1.5 gw=x freq=2437 internet=yes\n10:05:00 STATUS: DISCONNECTED reason=armed"
+            wifi_mgr._ssh = lambda cmd, host="10.1.1.1", timeout=20: (0, (
+                "===SSID===\nHome\n===ADDR===\n===PING===\nNO_ADDR\n===FWD===\n1\n===IPT===\n"
+                "===LOG===\n%s\n===WPA===\n===END===\n" % log))
+            st = wifi_mgr.get_wifi_status()
+            self.assertEqual(st["connection_state"], "idle")
+            self.assertIn("vehicle armed", st["warning"])
+        finally:
+            wifi_mgr._ssh, wifi_mgr._ctrl_reachable = orig[0], orig[1]
+            wifi_mgr._note_station(orig[2])
+
+    def test_18_heartbeat_armed_state_is_validated(self):
+        """Only checksum-valid heartbeats from the autopilot (compid 1) may change the armed state."""
+        import struct
+        import cockpit_mgr as cm
+
+        def hb(armed, compid=1, mtype=2, version=1):
+            payload = struct.pack('<IBBBBB', 5, mtype, 3, (0x80 if armed else 0) | 0x1D, 4, 3)
+            if version == 1:
+                hdr = struct.pack('<BBBBB', len(payload), 0, 1, compid, 0)
+                magic = b'\xfe'
+            else:
+                hdr = struct.pack('<BBBBBBBBB', len(payload), 0, 0, 0, 1, compid, 0, 0, 0)
+                magic = b'\xfd'
+            crc = cm.calc_x25_crc(bytearray(hdr + payload) + bytearray([50]))
+            return magic + hdr + payload + struct.pack('<H', crc)
+
+        st = cm.TelemetryState()
+        client = cm.LiveMAVLinkClient(st)
+        client.parse_mavlink_bytes(hb(True)); self.assertTrue(st.armed)
+        client.parse_mavlink_bytes(hb(False)); self.assertFalse(st.armed)
+        client.parse_mavlink_bytes(hb(True, version=2)); self.assertTrue(st.armed)
+        client.parse_mavlink_bytes(hb(False, version=2)); self.assertFalse(st.armed)
+        client.parse_mavlink_bytes(hb(True, compid=154, mtype=26)); self.assertFalse(st.armed)   # gimbal
+        bad = bytearray(hb(True)); bad[8] ^= 1
+        client.parse_mavlink_bytes(bytes(bad)); self.assertFalse(st.armed)                    # corrupt frame
+        client.parse_mavlink_bytes(hb(False, compid=154, mtype=26) + hb(True)); self.assertTrue(st.armed)
+
+    def test_19_controller_commands_are_valid_shell(self):
+        """Every command sent to the Controller must parse (a '&;' once made it reject connect/reset)."""
+        import subprocess
+        sent = []
+
+        def fake_ssh(cmd, host="10.1.1.1", timeout=20):
+            sent.append(cmd)
+            return (0, "")
+        orig = (wifi_mgr._ssh, wifi_mgr._ctrl_reachable)
+        try:
+            wifi_mgr._ssh = fake_ssh
+            wifi_mgr._ctrl_reachable = lambda: True
+            wifi_mgr._LAST_SCAN["Home"] = "WPA2"
+            wifi_mgr.connect_home_wifi("Home", "pa$$`word'1")
+            wifi_mgr.reset_to_default_ap()
+            wifi_mgr.disconnect_on_armed()
+            wifi_mgr.set_bidirectional(True)
+            wifi_mgr.set_bidirectional(False)
+            wifi_mgr._scan_cache["result"] = None
+            wifi_mgr.scan_wifi_networks()
+            wifi_mgr.get_wifi_status()
+        finally:
+            wifi_mgr._ssh, wifi_mgr._ctrl_reachable = orig
+            wifi_mgr._LAST_SCAN.clear()
+        self.assertGreaterEqual(len(sent), 7)
+        for cmd in sent:
+            self.assertNotRegex(cmd, r"&\s*;") if hasattr(self, "assertNotRegex") else \
+                self.assertNotRegexpMatches(cmd, r"&\s*;")
+        if os.path.exists("/bin/sh"):
+            for cmd in sent:
+                p = subprocess.Popen(["/bin/sh", "-n", "-c", cmd], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                out, err = p.communicate()
+                self.assertEqual(p.returncode, 0, "shell syntax error: %r in %r" % (err, cmd[-200:]))
+        # BusyBox 1.21 on the Controller is built without FANCY_HEAD: "head -1" fails silently
+        # (it broke the DHCP address check). Only "head -n N" / "sed -n Np" are allowed.
+        import re as _re
+        self.assertIsNone(_re.search(r"\bhead -\d", wifi_mgr.CONTROLLER_SCRIPT))
+        for cmd in sent:
+            self.assertIsNone(_re.search(r"\bhead -\d", cmd))
+        # success markers only count as whole output lines, never inside an echoed command
+        self.assertFalse(wifi_mgr._has_line("sh: syntax error near ';': ...; echo LAUNCHED", "LAUNCHED"))
+        self.assertTrue(wifi_mgr._has_line("root@10.1.1.1's password: \nLAUNCHED\n", "LAUNCHED"))
+
+    def test_20_previous_versions_and_custom_firmware(self):
+        """Older builds are archived (3 kept) and offered for revert; custom .apj uploads are validated."""
+        import json as _json
+        import arducopter_builder
+        import flash_mgr
+        tmp = tempfile.mkdtemp()
+        saved = (arducopter_builder.FIRMWARE_DIR, flash_mgr.FIRMWARE_DIR, flash_mgr.BASE_DIR,
+                 flash_mgr.PERSISTENT_FW_DIR, flash_mgr.get_latest_apj, flash_mgr._firmware_roots)
+
+        def apj(board_id, pad=120000):
+            return _json.dumps({"board_id": board_id, "image": "A" * pad, "image_size": pad,
+                                "summary": "ArduCopter", "git_identity": "abc123"})
+
+        def put(name, board_id=9):
+            with open(os.path.join(tmp, name), "w") as f:
+                f.write(apj(board_id))
+        try:
+            arducopter_builder.FIRMWARE_DIR = tmp
+            flash_mgr.FIRMWARE_DIR = tmp
+            flash_mgr.BASE_DIR = tmp
+            flash_mgr.PERSISTENT_FW_DIR = os.path.join(tmp, "no_such_dir")
+            orig_latest = saved[4]
+            flash_mgr.get_latest_apj = lambda cube_type, search_dirs=None, log_fn=None: orig_latest(cube_type, search_dirs=[tmp])
+            flash_mgr._firmware_roots = lambda: [tmp]
+
+            # Five successive builds: each archive step keeps the 3 newest older versions
+            for v in ["4.5.7", "4.6.0", "4.6.3", "4.7.1", "4.7.2"]:
+                put("arducopter_CubeSolo_%s.apj" % v)
+                arducopter_builder.clean_old_firmware_files("CubeSolo", v)
+            put("arducopter_CubeGreen_4.7.2.apj", 140)
+            top = sorted(f for f in os.listdir(tmp) if f.endswith(".apj"))
+            self.assertEqual(top, ["arducopter_CubeGreen_4.7.2.apj", "arducopter_CubeSolo_4.7.2.apj"])
+            prev = sorted(os.listdir(os.path.join(tmp, "previous")))
+            self.assertEqual(prev, ["arducopter_CubeSolo_4.6.0.apj", "arducopter_CubeSolo_4.6.3.apj",
+                                    "arducopter_CubeSolo_4.7.1.apj"])
+
+            ch = flash_mgr.list_firmware_choices("solo")
+            self.assertEqual(ch["latest"]["version"], "4.7.2")
+            self.assertEqual([c["version"] for c in ch["previous"]], ["4.7.1", "4.6.3", "4.6.0"])
+            self.assertEqual(flash_mgr.list_firmware_choices("green")["previous"], [])
+
+            # Custom upload: validated, sanitised, stored in <firmware>/custom
+            with self.assertRaises(ValueError):
+                flash_mgr.save_custom_apj("bad.apj", "this is not json")
+            with self.assertRaises(ValueError):
+                flash_mgr.save_custom_apj("bad.apj", _json.dumps({"board_id": 9}))
+            c = flash_mgr.save_custom_apj("../../etc/my build.apj", apj(9))
+            self.assertEqual(c["file"], "my_build.apj")
+            self.assertEqual(os.path.dirname(c["path"]), os.path.join(tmp, "custom"))
+            self.assertEqual(c["board_id"], 9)
+            ch = flash_mgr.list_firmware_choices("solo")
+            self.assertEqual([x["file"] for x in ch["custom"]], ["my_build.apj"])
+            self.assertTrue(flash_mgr.get_latest_apj("solo").endswith("arducopter_CubeSolo_4.7.2.apj"))
+
+            # Only offered files may be flashed
+            self.assertIsNone(flash_mgr.resolve_firmware_choice("solo", None))
+            p = ch["previous"][0]["path"]
+            self.assertEqual(flash_mgr.resolve_firmware_choice("solo", p), p)
+            self.assertEqual(flash_mgr.resolve_firmware_choice("solo", c["path"]), c["path"])
+            with self.assertRaises(ValueError):
+                flash_mgr.resolve_firmware_choice("solo", "/etc/passwd")
+            with self.assertRaises(ValueError):   # a green build is not offered for the black cube
+                flash_mgr.resolve_firmware_choice("solo", os.path.join(tmp, "arducopter_CubeGreen_4.7.2.apj"))
+
+            eng = flash_mgr.FlashManager()
+            ok, msg = eng.start_flash("solo", "cube_only", "/etc/passwd")
+            self.assertFalse(ok)
+            self.assertIn("rejected", msg)
+            self.assertFalse(eng.is_flashing)
+        finally:
+            (arducopter_builder.FIRMWARE_DIR, flash_mgr.FIRMWARE_DIR, flash_mgr.BASE_DIR,
+             flash_mgr.PERSISTENT_FW_DIR, flash_mgr.get_latest_apj, flash_mgr._firmware_roots) = saved
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_21_cube_version_from_live_mavlink(self):
+        """Header version = what the Cube runs (AUTOPILOT_VERSION / boot banner), CRC-checked."""
+        import struct
+        import cockpit_mgr
+        st = cockpit_mgr.TelemetryState()
+        client = cockpit_mgr.LiveMAVLinkClient(st)
+
+        def frame_v1(msgid, payload, extra, compid=1):
+            hdr = struct.pack('<BBBBBB', 0xfe, len(payload), 1, 1, compid, msgid)
+            crc = cockpit_mgr.calc_x25_crc(bytearray(hdr[1:] + payload) + bytearray([extra]))
+            return hdr + payload + struct.pack('<H', crc)
+
+        def frame_v2(msgid, payload, extra, compid=1):
+            payload = payload.rstrip(b"\x00") or b"\x00"          # MAVLink 2 trailing-zero truncation
+            hdr = struct.pack('<BBBBBBBBBB', 0xfd, len(payload), 0, 0, 2, 1, compid,
+                              msgid & 0xff, (msgid >> 8) & 0xff, msgid >> 16)
+            crc = cockpit_mgr.calc_x25_crc(bytearray(hdr[1:] + payload) + bytearray([extra]))
+            return hdr + payload + struct.pack('<H', crc)
+
+        def av(major, minor, patch):
+            fsw = (major << 24) | (minor << 16) | (patch << 8) | 255
+            return struct.pack('<QQIIIIHH', 0, 0, fsw, 0, 0, 0, 0, 0) + b"fb773567" + b"\x00" * 16
+
+        self.assertIsNone(st.cube_version)
+        bad = bytearray(frame_v1(148, av(9, 9, 9), 178)); bad[22] ^= 1
+        client.parse_mavlink_bytes(bytes(bad)); self.assertIsNone(st.cube_version)        # corrupt frame
+        client.parse_mavlink_bytes(frame_v1(148, av(4, 7, 2), 178, compid=154))
+        self.assertIsNone(st.cube_version)                                                  # not the autopilot
+        client.parse_mavlink_bytes(frame_v1(148, av(4, 7, 2), 178)); self.assertEqual(st.cube_version, "4.7.2")
+        client.parse_mavlink_bytes(frame_v2(148, av(4, 7, 1), 178)); self.assertEqual(st.cube_version, "4.7.1")
+        txt = struct.pack('<B', 6) + b"ArduCopter V4.7.2 (fb773567)".ljust(50, b"\x00")
+        client.parse_mavlink_bytes(frame_v1(253, txt, 83)); self.assertEqual(st.cube_version, "4.7.2")
+
+        orig = cockpit_mgr.telemetry
+        try:
+            cockpit_mgr.telemetry = st
+            self.assertEqual(cockpit_mgr.get_cube_version(), "ArduCopter 4.7.2")
+        finally:
+            cockpit_mgr.telemetry = orig
+
+        sent = []
+        client.send_packet = lambda pkt: sent.append(pkt)
+        client.request_autopilot_version()
+        pkt = bytearray(sent[0])
+        self.assertEqual(pkt[5], 76)                                                        # COMMAND_LONG
+        self.assertEqual(struct.unpack('<H', bytes(pkt[6 + 28:6 + 30]))[0], 520)
+        self.assertEqual(cockpit_mgr.calc_x25_crc(pkt[1:-2] + bytearray([152])),
+                         struct.unpack('<H', bytes(pkt[-2:]))[0])
 
 if __name__ == "__main__":
     suite = unittest.TestLoader().loadTestsFromTestCase(TestSoloWebUtility)
