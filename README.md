@@ -2,21 +2,22 @@
 
 A concise, self-contained on-board web server and management portal for the **3DR Solo** drone running **Open Solo 4.0.0 / latest ArduCopter stable version**.
 
-> **Version 1.0.71** — Runs on Solo Copter iMX6 (Python 2.7/3.x, zero external deps). Zero framework dependencies in the browser (vanilla JS/CSS/HTML).
+> **Version 1.2.0** — Runs on Solo Copter i.MX6 (Python 2.7, zero external deps). Zero framework dependencies in the browser (vanilla JS/CSS/HTML).
 
 ---
 
 ## 🌟 Features
 
 ### ⚡ Firmware Update (Tab 1)
-- **Cube Selector:** Stock Solo Cube (Black) or Green Cube — only the APJ file differs; all other files are shared.
-- **Scope Selector:** Full Install (Cube + Copter iMX6 + Controller iMX6) or Cube Only.
+- **Cube Selector:** Stock Solo Cube (Black) or Green Cube.
+- **ArduCopter Version Control:** Revert to any of the last 3 ArduCopter builds or flash a custom `.apj` uploaded directly from the browser (older builds are archived to `firmware/previous` instead of deleted).
+- **Scope Selector:** Full Install (Cube + Copter i.MX6 + Controller i.MX6) or Cube Only. Cube-only installs no longer require the extended reboot countdown.
+- **Golden Image:** Ships ArduCopter 4.7.2 (4.7.1 preserved for instant rollback).
 - **Official 3DR sequence** (mirrors `postinstall.sh` from the firmware ZIPs):
   1. `pixhawk.py --load /firmware/arducopter.apj` — Flash Cube → auto-reboot Cube.
-  2. `sololink_config --update-prepare sololink` + copy tarball to `/log/updates` + `touch UPDATE RESETSETTINGS` → Reboot Copter iMX6.
-  3. SSH to 10.1.1.1 and stage controller update → Reboot Controller iMX6.
-- **Live terminal** with real-time log streaming and 8-minute reboot countdown.
-- **Deduplication:** Both cube types share the same `3dr-solo.tar.gz` and `3dr-controller.tar.gz`. Only the APJ file is different.
+  2. `sololink_config --update-prepare sololink` + copy tarball to `/log/updates` + `touch UPDATE RESETSETTINGS` → Reboot Copter i.MX6.
+  3. SSH to 10.1.1.1 and stage controller update → Reboot Controller i.MX6.
+- **Live terminal** with real-time log streaming and reboot progress.
 
 ### 🔗 Automatic Pairing (between firmware flash and calibrations)
 - Pairing widget appears directly on the Firmware tab **between** the flash result and the calibration reminders — exactly the correct workflow order.
@@ -25,8 +26,8 @@ A concise, self-contained on-board web server and management portal for the **3D
 - Also available as a full dedicated Pairing tab.
 
 ### 📶 Wi-Fi & Internet (Tab 2)
-- **Connect to Home Wi-Fi:** Uses **`sololink_config --set-wifi-sta '<ssid>' '<pass>'`** (the official 3DR developer method) on the Controller's wlan1 interface.
-- **Bi-Directional Routing:** 1-click NAT masquerade (`iptables`) so your home PC can reach `10.1.1.10` through your home LAN without switching networks. Includes the Windows `route add` command you need.
+- **Connect to Home Wi-Fi:** Uses stock station mode, session-only with an arm interlock and live step diagnostics.
+- **Bi-Directional Routing:** 1-click NAT masquerade (`iptables`) so your home PC can reach `10.1.1.10` through your home LAN without switching networks.
 - **Reset to Default:** Clears STA credentials and restores factory SoloLink AP mode.
 - **Network Status Panel:** Shows mode, SSID, controller IP, internet, IP forwarding, and controller SSH status.
 
@@ -53,36 +54,32 @@ A concise, self-contained on-board web server and management portal for the **3D
 - CLI utility: `python change_password.py` or `python change_password.py --reset`
 
 ### 🏷️ Versioning
-- Increments by 0.0.1 each iteration (currently at **1.0.71**).
-- Version visible in header, footer, and REST API.
+- Version: **1.2.0**
+- Version visible in header, footer, and REST API (`version.json`).
 
 ---
 
-## 🚀 Installation
+## 🚀 Installation & Deployment
 
 ### Option 1: One-Click from Windows PC
 1. Connect your PC to Solo Wi-Fi (`SoloLink_...`).
-2. Double-click **`deploy_to_solo.bat`** (or run `python install_to_solo.py`).
+2. Double-click **`deploy_to_drone.bat`** (or run `python deploy_to_drone.py`).
 3. Open: **http://10.1.1.10** — Password: `sololink`
 
-### Option 2: Manual SCP
-```bash
-scp -r SoloWebUtility/ root@10.1.1.10:/home/root/
-ssh root@10.1.1.10 "nohup python /home/root/SoloWebUtility/solo_web_app.py 80 > /log/solo_web_server.log 2>&1 &"
-```
+### Option 2: Android Installer
+1. Connect your Android device to SoloLink Wi-Fi.
+2. Launch the `Solo Web Utility Installer` Android app to deploy directly to the drone.
 
-### Local Testing
-```bash
-python solo_web_app.py 8080
-# Visit http://localhost:8080
-```
+### Option 3: Mac Installer
+1. Connect your Mac to SoloLink Wi-Fi.
+2. Run `mac_installer/install_solo_web_utility.command`.
 
 ---
 
 ## 📋 Recommended Workflow After Clean Install
 
 1. **Firmware Update Tab** → Select cube type → Full Install → Start.
-2. Wait for the 8-minute reboot countdown to complete.
+2. Wait for the reboot sequence to complete.
 3. **Pairing section** (on the same Firmware tab) → Initiate Automated Pairing.
 4. **Calibrations** (same tab, below pairing) → IMU Calibration → Compass Calibration.
 
@@ -94,31 +91,36 @@ python solo_web_app.py 8080
 SoloWebUtility/
 ├── bin/
 │   ├── pixhawk.py               # Pixhawk serial bootloader flasher
-│   └── uploader.py              # APJ uploader
+│   ├── uploader.py              # APJ uploader
+│   └── apj_tool.py              # APJ inspection utility
 ├── firmware/
-│   ├── arducopter_CubeSolo_*.apj  # latest ArduCopter stable version — Stock Solo Cube (1.37 MB)
-│   ├── arducopter_CubeGreen_*.apj # latest ArduCopter stable release — Green Cube (1.42 MB)
-│   ├── 3dr-solo.tar.gz          # Copter iMX6 Linux image (76 MB) — shared by both
+│   ├── arducopter_CubeSolo_*.apj  # Current ArduCopter stable — Stock Solo Cube
+│   ├── arducopter_CubeGreen_*.apj # Current ArduCopter stable — Green Cube
+│   ├── previous/                # Previous builds preserved for rollback
 │   ├── 3dr-solo.tar.gz.md5
-│   ├── 3dr-controller.tar.gz    # Controller iMX6 Linux image (75 MB)
-│   └── 3dr-controller.tar.gz.md5
+│   ├── 3dr-controller.tar.gz.md5
+│   └── 3dr-solo.tar.gz.baked
+├── modules/                     # Modular server components
+│   ├── auth.py                  # Authentication & session management
+│   ├── calibration.py           # Calibration routines
+│   ├── controller.py            # Controller settings & Artoo manager
+│   ├── firmware.py              # Firmware staging and flashing
+│   ├── parameters.py            # Parameter fetching and editing
+│   ├── telemetry.py             # MAVLink telemetry stream
+│   └── wifi.py                  # Wi-Fi station mode management
 ├── static/
 │   ├── index.html               # Single-page app
 │   ├── style.css                # Dark aviation UI
 │   └── app.js                   # Vanilla JS client (ES5, no frameworks)
-├── auth.py                      # SHA-256 + salt password & session management
-├── change_password.py           # CLI password utility
-├── flash_mgr.py                 # Firmware flash pipeline (mirrors official postinstall.sh)
-├── pair_mgr.py                  # Copter ↔ Controller pairing (sololink_config --pair)
-├── calib_mgr.py                 # Automated IMU cal -> Reboot -> Compass cal sequence
-├── wifi_mgr.py                  # Wi-Fi mgmt (sololink_config --set-wifi-sta)
-├── param_mgr.py                 # Parameter editor + MAVLink live fetch
-├── presets.py                   # Parameter presets
-├── version_mgr.py               # Version tracker and release management
-├── solo_web_app.py              # HTTP server + REST API
-├── install_to_solo.py           # Remote installer to 10.1.1.10
-├── deploy_to_solo.bat           # Windows 1-click deployer
-└── run_local_server.bat         # Windows local test launcher
+├── templates/                   # Server-side HTML templates
+├── android_installer/           # Android APK installer project
+├── mac_installer/               # macOS native deployment scripts
+├── release/                     # PyInstaller release build scripts and specs
+├── tools/                       # Firmware baking and packaging tools
+├── solo_web_app.py              # Primary HTTP server + REST API
+├── deploy_to_drone.bat          # Windows 1-click drone deployer
+├── deploy_to_drone.py           # Python deployment engine
+└── version.json                 # Version descriptor & changelog
 ```
 
 ---
@@ -132,12 +134,4 @@ Click 🔒 in the top-right header.
 ```bash
 python /home/root/SoloWebUtility/change_password.py          # Interactive change
 python /home/root/SoloWebUtility/change_password.py --reset  # Reset to 'sololink'
-```
-
----
-
-## 🏷️ Version Management
-```bash
-python version_mgr.py                           # Print current version
-python version_mgr.py --inc "Added GPS preset"  # Increment by 0.0.1
 ```
