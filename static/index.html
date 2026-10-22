@@ -676,35 +676,6 @@
                     <!-- Loaded dynamically grouped by category -->
                 </div>
 
-                <!-- Roll/Pitch Sensitivity: Mission Planner "Basic Tuning" style slider.
-                     Writes ATC_RAT_RLL_P/I and ATC_RAT_PIT_P/I (RATE_RLL/PIT_P/I on ArduCopter <= 3.3)
-                     to the same value through /api/params/save, only when the slider is released. -->
-                <div class="preset-group-block rps-block" id="rpsBlock">
-                    <div class="preset-group-header">
-                        <span class="preset-group-title" title="Simultaneously adjusts Roll &amp; Pitch Rate P and I gains (1:1 ratio).">🎚️ Roll/Pitch Sensitivity</span>
-                        <span class="preset-group-count" id="rpsNamesBadge">ATC_RAT_RLL/PIT P &amp; I</span>
-                        <span class="badge-warning rps-asym-badge" id="rpsAsymBadge" style="display:none;"
-                              title="Custom/Asymmetric PID values detected. Moving this slider will lock Roll &amp; Pitch Rate P/I to the same value.">⚠ Custom / Asymmetric</span>
-                    </div>
-                    <p class="preset-desc rps-subtitle">Simultaneously adjusts Roll &amp; Pitch Rate P and I gains (1:1 ratio). Higher feels more responsive but can oscillate; lower feels softer. The value is written to the Cube when you release the slider.</p>
-                    <div class="rps-warning" id="rpsAsymWarning" style="display:none;">
-                        ⚠ Custom/Asymmetric PID values detected. Moving this slider will lock Roll &amp; Pitch Rate P/I to the same value.
-                    </div>
-                    <div class="rps-row">
-                        <span class="rps-end">0.080</span>
-                        <input type="range" id="rpsSlider" class="rps-slider" min="0.080" max="0.400" step="0.005" value="0.135"
-                               aria-label="Roll/Pitch Sensitivity" disabled>
-                        <span class="rps-end">0.400</span>
-                        <input type="number" id="rpsNumber" class="param-input rps-number" min="0.080" max="0.400" step="0.005"
-                               value="0.135" aria-label="Roll/Pitch Sensitivity value" disabled>
-                    </div>
-                    <div class="rps-row rps-actions">
-                        <span class="rps-current" id="rpsCurrent">Waiting for parameters…</span>
-                        <button class="btn btn-secondary btn-sm" id="btnRpsDefault" disabled>↺ Reset to Default (0.135)</button>
-                        <button class="btn btn-secondary btn-sm" id="btnRpsSoloStock" disabled
-                                title="Restore the Solo's stock ArduCopter 4.7 rate tune (it is asymmetric: roll 0.091, pitch 0.103)">↺ Solo Stock Tune (R 0.091 / P 0.103)</button>
-                    </div>
-                </div>
             </div>
 
             <!-- Full Parameter Editor -->

@@ -1720,51 +1720,6 @@ class TestSoloWebUtility(unittest.TestCase):
         self.assertNotIn("modifiedParams[k] = res.params[k]", block)
         self.assertIn("delete modifiedParams[k]", block)
 
-    def test_23_roll_pitch_sensitivity_slider(self):
-        """Roll/Pitch Sensitivity slider (Parameters tab): Mission Planner style 0.080-0.400 step 0.005,
-        default 0.135, writes ATC_RAT_RLL/PIT_P/I (RATE_* on ArduCopter <= 3.3) to one value through
-        /api/params/save, only when the slider is released, and warns about asymmetric tunes."""
-        import re as _re
-        with open(os.path.join(BASE_DIR, "static", "index.html"), "r", encoding="utf-8") as f:
-            html = f.read()
-        with open(os.path.join(BASE_DIR, "templates", "index.html"), "r", encoding="utf-8") as f:
-            self.assertEqual(f.read(), html, "static/index.html and templates/index.html must stay identical")
-
-        # placed right below the preset boxes, inside the presets card
-        self.assertLess(html.index('id="presetsGrid"'), html.index('id="rpsBlock"'))
-        self.assertLess(html.index('id="rpsBlock"'), html.index("ArduPilot Parameter Editor"))
-        slider = _re.search(r'<input type="range" id="rpsSlider"[^>]*>', html).group(0)
-        for attr in ('min="0.080"', 'max="0.400"', 'step="0.005"', 'value="0.135"'):
-            self.assertIn(attr, slider)
-        self.assertIn("Roll/Pitch Sensitivity", html)
-        self.assertIn("Simultaneously adjusts Roll &amp; Pitch Rate P and I gains (1:1 ratio).", html)
-        self.assertIn("Custom/Asymmetric PID values detected. Moving this slider will lock Roll &amp; Pitch Rate P/I to the same value.", html)
-        self.assertIn('id="btnRpsDefault"', html)
-
-        with open(os.path.join(BASE_DIR, "static", "app.js"), "r", encoding="utf-8") as f:
-            js = f.read()
-        start = js.index("var RPS = {")
-        block = js[start:js.index("btnSaveAllParams.addEventListener", start)]
-        self.assertIn("MIN: 0.080, MAX: 0.400, STEP: 0.005, DEFAULT: 0.135, TOL: 0.0001", block)
-        self.assertIn("['ATC_RAT_RLL_P', 'ATC_RAT_RLL_I', 'ATC_RAT_PIT_P', 'ATC_RAT_PIT_I']", block)
-        self.assertIn("['RATE_RLL_P', 'RATE_RLL_I', 'RATE_PIT_P', 'RATE_PIT_I']", block)
-        # same write pipeline as "Save Changes" (param_mgr.set_batch_params)
-        self.assertIn("apiRequest('/api/params/save', 'POST', { params: newValues })", block)
-        # dragging ('input') never writes; only 'change' (release) commits
-        on_input = block[block.index("rpsSlider.addEventListener('input'"):block.index("rpsSlider.addEventListener('change'")]
-        self.assertNotIn("rpsCommit", on_input)
-        self.assertNotIn("apiRequest", on_input)
-        self.assertIn("rpsCommitValue(parseFloat(rpsSlider.value))", block)
-        # kept in sync with loads and with manual edits in the table
-        self.assertIn("syncSensitivitySlider();\n            }).catch(function (err) { showToast('Failed to load params", js)
-        onchange = js[js.index("window.onParamInputChange = function"):js.index("var RPS = {")]
-        self.assertIn("syncSensitivitySlider();", onchange)
-
-        # the four values exist under these names in the ArduCopter 4.7 parameter set the presets use
-        import param_mgr as _pm
-        for n in ("ATC_RAT_RLL_P", "ATC_RAT_RLL_I", "ATC_RAT_PIT_P", "ATC_RAT_PIT_I"):
-            self.assertNotIn(n, _pm.PARAM_ALIASES_PRE_4_7)   # same name on every 3.4+ firmware
-
 if __name__ == "__main__":
     suite = unittest.TestLoader().loadTestsFromTestCase(TestSoloWebUtility)
     runner = unittest.TextTestRunner(stream=sys.stdout, verbosity=2)

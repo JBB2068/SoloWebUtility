@@ -1,4 +1,4 @@
-image 1f0158ee32b73bacf6f0a844bfe26913
+image 287c88644d5b1ea0da4e7ddb3295173a
 ecbd052cf4cf20692fa8b09b3769b8ab  (recipe) tools/bake_squashfs.sh
 2baed77a8919d189bdc48c784f618dbf  app.py
 456e45a4a98a5d615a8e809228e2785d  arducopter_builder.py
@@ -41,17 +41,17 @@ d467aa145c5cd9196d9fcb95a20c5225  solo.param
 9898b6570fda3fc01f0a1c5e7d6480f6  solo_web_app.py
 d7f76dd75c19ffd78619845a103d376a  static/3DR_Solo_User_Manual_Updated_2026.pdf
 07c148881ce2708ad85ddfc5ffe9dc92  static/Solo_Web_Utility_Owners_Manual.pdf
-62b3ea0f88b9a8c318377d2a6c58ddd2  static/app.js
+21234c04940ace24a31ce82ae61d1db7  static/app.js
 d0deb7f900dc60e596600ae90a6e8699  static/cockpit.css
 8286b555618f8d2960b43ceaa93bfa73  static/cockpit.js
-765e98bc8dbcab476eea38c85362faaf  static/index.html
+91fea46fd06f19e117465dac1ba66ff1  static/index.html
 075c6c464b218fa88d56eb974bdd98e6  static/jmuxer.min.js
 2aab2ca4000237c0e20058323469f6b9  static/manual.html
 a9a712b7f620cc2e14694348246170c6  static/solo_drone_manual.html
 d022df64c87d6939a0203ab09a50b4ba  static/solo_icon.png
 d4c5749deda789b47c7e72a46bfd0e61  static/solo_icon_512.png
-f27fc3d9dedf648b265240673538c7ea  static/style.css
-765e98bc8dbcab476eea38c85362faaf  templates/index.html
+c6a70306cd23dfd8a8750a3cbb03be13  static/style.css
+91fea46fd06f19e117465dac1ba66ff1  templates/index.html
 9ba0e69ed82438d5b621c2d6f7de2149  templates/updates.html
 8af3e84ddd963b2bb5917485ae28447d  version.json
 ba65e63da86b93d1ed42e0132ae649d5  version_mgr.py
