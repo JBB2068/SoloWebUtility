@@ -180,8 +180,8 @@ class TestSoloWebUtility(unittest.TestCase):
         self.assertIn("here_gps", preset_ids)
         self.assertIn("stock_compass", preset_ids)
         self.assertIn("retract_gear", preset_ids)
-        self.assertIn("speed_sport", preset_ids)
-        self.assertIn("speed_cinematic", preset_ids)
+        self.assertIn("speed_default", preset_ids)
+        self.assertIn("speed_fast", preset_ids)
         self.assertIn("bait_drop", preset_ids)
         self.assertIn("lipo_default", preset_ids)
         self.assertIn("liion_default", preset_ids)
@@ -1554,6 +1554,216 @@ class TestSoloWebUtility(unittest.TestCase):
         self.assertEqual(struct.unpack('<H', bytes(pkt[6 + 28:6 + 30]))[0], 520)
         self.assertEqual(cockpit_mgr.calc_x25_crc(pkt[1:-2] + bytearray([152])),
                          struct.unpack('<H', bytes(pkt[-2:]))[0])
+
+    def test_22_parameter_presets_write_to_cube(self):
+        """Presets must reach the Cube: only the autopilot is addressed (never the Solo
+        Controller/GCS or the gimbal), every name exists on the Cube (ArduCopter 4.7 names,
+        pre-4.7 names with unit scaling on older firmware), switches are written first,
+        and the values the Cube confirmed are what the API reports."""
+        import presets as _presets
+        import param_mgr as _pm
+
+        class _Msg(object):
+            def __init__(self, name, value):
+                self.param_id = name
+                self.param_value = float(value)
+                self.param_type = 9
+
+        class _FakeCube(object):
+            """ArduCopter-like: answers only PARAM_* addressed to 1/1, ignores unknown names."""
+            def __init__(self, names):
+                self.params = dict((n, 0.0) for n in names)
+                self.queue = []
+                self.order = []
+                self.misaddressed = 0
+                cube = self
+
+                class _Link(object):
+                    def param_request_read_send(self, ts, tc, name, idx):
+                        cube._handle(ts, tc, name, None)
+
+                    def param_set_send(self, ts, tc, name, value, ptype):
+                        cube._handle(ts, tc, name, value)
+                self.mav = _Link()
+                self.target_system, self.target_component = 255, 190   # first heartbeat was the GCS
+
+            def _handle(self, ts, tc, name, value):
+                name = name.decode("ascii") if isinstance(name, bytes) else name
+                if (ts, tc) != (1, 1):
+                    self.misaddressed += 1
+                    return
+                if name not in self.params:
+                    return
+                if value is not None:
+                    self.params[name] = float(value)
+                    self.order.append(name)
+                self.queue.append(_Msg(name, self.params[name]))
+
+            def recv_match(self, type=None, blocking=True, timeout=0.1):
+                return self.queue.pop(0) if self.queue else None
+
+        common = ["COMPASS_ORIENT", "LGR_ENABLE", "LGR_OPTIONS", "SERVO7_FUNCTION", "SERVO7_MIN", "SERVO7_MAX",
+                  "SERVO7_REVERSED", "RC7_OPTION", "RC8_OPTION", "SERVO8_FUNCTION", "GRIP_ENABLE", "GRIP_TYPE",
+                  "GRIP_GRAB", "GRIP_RELEASE", "BATT_MONITOR", "BATT_ARM_VOLT", "BATT_LOW_VOLT", "BATT_CRT_VOLT",
+                  "BATT_LOW_MAH", "BATT_CRT_MAH", "BATT_LOW_TIMER", "BATT_FS_LOW_ACT", "BATT_FS_CRT_ACT",
+                  "BATT_FS_VOLTSRC", "MOT_BAT_VOLT_MIN", "MOT_BAT_VOLT_MAX", "MOT_BAT_CURR_MAX", "LOIT_BRK_DELAY",
+                  "LOIT_ANG_MAX", "ATC_INPUT_TC"]
+        new_names = sorted(_pm.PARAM_ALIASES_PRE_4_7.keys())
+        old_names = [_pm.PARAM_ALIASES_PRE_4_7[n][0] for n in new_names]
+
+        # 1. heartbeat filter: GCS / Solo Controller and gimbal are never the target
+        class _Hb(object):
+            def __init__(self, typ, ap):
+                self.type, self.autopilot = typ, ap
+        self.assertFalse(_pm._is_autopilot_heartbeat(_Hb(6, 8)))     # GCS / Solo Controller
+        self.assertFalse(_pm._is_autopilot_heartbeat(_Hb(26, 8)))    # gimbal
+        self.assertTrue(_pm._is_autopilot_heartbeat(_Hb(2, 3)))      # quadrotor, ArduPilot
+
+        # 2. presets use ArduCopter 4.7 names only (no retired or renamed parameters)
+        retired = set(old_names) | set(["LGR_SERVO_DEPLOY", "LGR_SERVO_RTRACT"])
+        for pr in _presets.get_all_presets():
+            self.assertEqual(sorted(set(pr["params"]) & retired), [], "preset %s uses retired names" % pr["id"])
+
+        # 2b. Default restores the CubeSolo / CubeGreen-solo ArduCopter 4.7 defaults; Fast changes
+        #     the same settings, each one faster/sharper, within the 4.7 parameter ranges
+        stock = {"ATC_ANGLE_MAX": 20.0, "LOIT_ANG_MAX": 30.0, "ATC_INPUT_TC": 0.25, "LOIT_SPEED_MS": 5.0,
+                 "ATC_ACC_R_MAX": 360.0, "ATC_ACC_P_MAX": 360.0, "ATC_ACC_Y_MAX": 70.0, "PSC_NE_JERK": 5.0,
+                 "LOIT_BRK_JRK_M": 5.0, "PHLD_BRK_RATE": 6.0, "PHLD_BRK_ANGLE": 25.0,
+                 "LOIT_ACC_MAX_M": 2.0, "LOIT_BRK_ACC_M": 1.75, "LOIT_BRK_DELAY": 0.25, "WP_SPD": 3.0,
+                 "WP_SPD_UP": 3.2, "WP_SPD_DN": 2.4, "PILOT_SPD_UP": 1.33, "PILOT_SPD_DN": 1.33}
+        ranges = {"ATC_ANGLE_MAX": (10, 80), "LOIT_ANG_MAX": (0, 45), "ATC_INPUT_TC": (0, 1),
+                  "LOIT_SPEED_MS": (0.2, 35), "LOIT_ACC_MAX_M": (1, 9.81), "LOIT_BRK_ACC_M": (0.25, 2.5),
+                  "LOIT_BRK_DELAY": (0, 2), "WP_SPD": (0.1, 20), "WP_SPD_UP": (0.1, 10), "WP_SPD_DN": (0.1, 10),
+                  "PILOT_SPD_UP": (0.5, 5), "PILOT_SPD_DN": (0, 5), "ATC_ACC_R_MAX": (0, 1800),
+                  "ATC_ACC_P_MAX": (0, 1800), "ATC_ACC_Y_MAX": (0, 720), "PSC_NE_JERK": (1, 50),
+                  "LOIT_BRK_JRK_M": (5, 50), "PHLD_BRK_RATE": (4, 12), "PHLD_BRK_ANGLE": (20, 45)}
+        default_p = _presets.get_preset("speed_default")["params"]
+        fast_p = _presets.get_preset("speed_fast")["params"]
+        self.assertEqual(default_p, stock)
+        self.assertEqual(sorted(fast_p), sorted(default_p))
+        for k in fast_p:
+            self.assertTrue(ranges[k][0] <= fast_p[k] <= ranges[k][1], "%s out of range" % k)
+            if k in ("ATC_INPUT_TC", "LOIT_BRK_DELAY"):
+                self.assertLess(fast_p[k], default_p[k], k)       # shorter = crisper / brakes sooner
+            elif k != "LOIT_SPEED_MS":
+                self.assertGreater(fast_p[k], default_p[k], k)
+        # Loiter's speed-up/slow-down time constant LOIT_SPEED_MS / (g*tan(lean)) must be shorter than Default's
+        import math as _math
+        def _tau(p):
+            lean = min(p["LOIT_ANG_MAX"], p["ATC_ANGLE_MAX"])
+            return p["LOIT_SPEED_MS"] / (9.81 * _math.tan(_math.radians(lean)))
+        self.assertLess(_tau(fast_p), 1.0)
+        self.assertLess(_tau(fast_p), _tau(default_p))
+        self.assertGreater(fast_p["LOIT_SPEED_MS"], default_p["LOIT_SPEED_MS"])
+        self.assertIsNone(_presets.get_preset("speed_sport"))
+        self.assertIsNone(_presets.get_preset("speed_cinematic"))
+
+        orig_mavutil = _pm.mavutil
+        if _pm.mavutil is None:
+            class _MavutilStub(object):
+                class mavlink(object):
+                    MAV_PARAM_TYPE_REAL32 = 9
+            _pm.mavutil = _MavutilStub()
+        try:
+            # 3. ArduCopter 4.7 Cube: every preset is written and confirmed with its own values
+            for pr in _presets.get_all_presets():
+                cube = _FakeCube(common + new_names)
+                ok, confirmed, failed, msg = _pm.commit_batch_mavlink(cube, pr["params"])
+                self.assertTrue(ok, "%s: %s" % (pr["id"], msg))
+                self.assertEqual(cube.misaddressed, 0)
+                for k, v in pr["params"].items():
+                    self.assertAlmostEqual(cube.params[k], float(v), places=4)
+                    self.assertAlmostEqual(float(confirmed[k]), float(v), places=4)
+
+            # 4. pre-4.7 Cube: renamed parameters go to the old names in the old units
+            cube = _FakeCube(common + old_names)
+            ok, confirmed, failed, msg = _pm.commit_batch_mavlink(cube, _presets.get_preset("speed_fast")["params"])
+            self.assertTrue(ok, msg)
+            self.assertEqual(cube.params["WPNAV_SPEED"], 1000.0)        # 10 m/s
+            self.assertEqual(cube.params["ANGLE_MAX"], 4000.0)          # 40 deg
+            self.assertEqual(cube.params["PILOT_SPEED_UP"], 400.0)      # 4 m/s
+            self.assertEqual(cube.params["LOIT_ACC_MAX"], 500.0)        # 5 m/s/s
+            self.assertEqual(cube.params["LOIT_ANG_MAX"], 40.0)         # same name and unit before 4.7
+            self.assertEqual(cube.params["PHLD_BRAKE_RATE"], 12.0)      # deg/s, same unit
+            self.assertEqual(cube.params["PHLD_BRAKE_ANGLE"], 4000.0)   # 40 deg in centidegrees
+            self.assertEqual(cube.params["ATC_ACCEL_R_MAX"], 90000.0)   # 900 deg/s/s in cdeg/s/s
+            self.assertEqual(cube.params["ATC_ACCEL_Y_MAX"], 18000.0)   # 180 deg/s/s
+            self.assertEqual(cube.params["PSC_JERK_XY"], 10.0)          # m/s/s/s, unchanged unit
+            self.assertEqual(cube.params["LOIT_BRK_JERK"], 2000.0)      # 20 m/s/s/s in cm/s/s/s
+            self.assertIn("WPNAV_SPEED", confirmed)
+
+            # 5. feature switches are written before their settings
+            cube = _FakeCube(common + new_names)
+            _pm.commit_batch_mavlink(cube, _presets.get_preset("bait_drop")["params"])
+            self.assertLess(cube.order.index("GRIP_ENABLE"), cube.order.index("GRIP_GRAB"))
+            self.assertLess(cube.order.index("GRIP_TYPE"), cube.order.index("GRIP_RELEASE"))
+
+            # 6. a parameter the Cube does not have is reported by name; the rest are saved
+            cube = _FakeCube(common + new_names)
+            ok, confirmed, failed, msg = _pm.commit_batch_mavlink(cube, {"COMPASS_ORIENT": 0, "NO_SUCH_PARAM": 1})
+            self.assertFalse(ok)
+            self.assertIn("NO_SUCH_PARAM", failed)
+            self.assertIn("NO_SUCH_PARAM", msg)
+            self.assertEqual(confirmed, {"COMPASS_ORIENT": 0})
+        finally:
+            _pm.mavutil = orig_mavutil
+
+        # 7. the apply-preset route reports what the Cube confirmed; the page does not
+        #    re-mark an applied preset as unsaved changes
+        with open(os.path.join(BASE_DIR, "solo_web_app.py"), "r", encoding="utf-8") as f:
+            swa = f.read()
+        self.assertIn('"params": result.get("confirmed", preset[\'params\'])', swa)
+        with open(os.path.join(BASE_DIR, "static", "app.js"), "r", encoding="utf-8") as f:
+            js = f.read()
+        start = js.index("window.applyPreset = function")
+        block = js[start:js.index("function updateSaveButtonState", start)]
+        self.assertNotIn("modifiedParams[k] = res.params[k]", block)
+        self.assertIn("delete modifiedParams[k]", block)
+
+    def test_23_roll_pitch_sensitivity_slider(self):
+        """Roll/Pitch Sensitivity slider (Parameters tab): Mission Planner style 0.080-0.400 step 0.005,
+        default 0.135, writes ATC_RAT_RLL/PIT_P/I (RATE_* on ArduCopter <= 3.3) to one value through
+        /api/params/save, only when the slider is released, and warns about asymmetric tunes."""
+        import re as _re
+        with open(os.path.join(BASE_DIR, "static", "index.html"), "r", encoding="utf-8") as f:
+            html = f.read()
+        with open(os.path.join(BASE_DIR, "templates", "index.html"), "r", encoding="utf-8") as f:
+            self.assertEqual(f.read(), html, "static/index.html and templates/index.html must stay identical")
+
+        # placed right below the preset boxes, inside the presets card
+        self.assertLess(html.index('id="presetsGrid"'), html.index('id="rpsBlock"'))
+        self.assertLess(html.index('id="rpsBlock"'), html.index("ArduPilot Parameter Editor"))
+        slider = _re.search(r'<input type="range" id="rpsSlider"[^>]*>', html).group(0)
+        for attr in ('min="0.080"', 'max="0.400"', 'step="0.005"', 'value="0.135"'):
+            self.assertIn(attr, slider)
+        self.assertIn("Roll/Pitch Sensitivity", html)
+        self.assertIn("Simultaneously adjusts Roll &amp; Pitch Rate P and I gains (1:1 ratio).", html)
+        self.assertIn("Custom/Asymmetric PID values detected. Moving this slider will lock Roll &amp; Pitch Rate P/I to the same value.", html)
+        self.assertIn('id="btnRpsDefault"', html)
+
+        with open(os.path.join(BASE_DIR, "static", "app.js"), "r", encoding="utf-8") as f:
+            js = f.read()
+        start = js.index("var RPS = {")
+        block = js[start:js.index("btnSaveAllParams.addEventListener", start)]
+        self.assertIn("MIN: 0.080, MAX: 0.400, STEP: 0.005, DEFAULT: 0.135, TOL: 0.0001", block)
+        self.assertIn("['ATC_RAT_RLL_P', 'ATC_RAT_RLL_I', 'ATC_RAT_PIT_P', 'ATC_RAT_PIT_I']", block)
+        self.assertIn("['RATE_RLL_P', 'RATE_RLL_I', 'RATE_PIT_P', 'RATE_PIT_I']", block)
+        # same write pipeline as "Save Changes" (param_mgr.set_batch_params)
+        self.assertIn("apiRequest('/api/params/save', 'POST', { params: newValues })", block)
+        # dragging ('input') never writes; only 'change' (release) commits
+        on_input = block[block.index("rpsSlider.addEventListener('input'"):block.index("rpsSlider.addEventListener('change'")]
+        self.assertNotIn("rpsCommit", on_input)
+        self.assertNotIn("apiRequest", on_input)
+        self.assertIn("rpsCommitValue(parseFloat(rpsSlider.value))", block)
+        # kept in sync with loads and with manual edits in the table
+        self.assertIn("syncSensitivitySlider();\n            }).catch(function (err) { showToast('Failed to load params", js)
+        onchange = js[js.index("window.onParamInputChange = function"):js.index("var RPS = {")]
+        self.assertIn("syncSensitivitySlider();", onchange)
+
+        # the four values exist under these names in the ArduCopter 4.7 parameter set the presets use
+        import param_mgr as _pm
+        for n in ("ATC_RAT_RLL_P", "ATC_RAT_RLL_I", "ATC_RAT_PIT_P", "ATC_RAT_PIT_I"):
+            self.assertNotIn(n, _pm.PARAM_ALIASES_PRE_4_7)   # same name on every 3.4+ firmware
 
 if __name__ == "__main__":
     suite = unittest.TestLoader().loadTestsFromTestCase(TestSoloWebUtility)

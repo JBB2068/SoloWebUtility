@@ -4,6 +4,10 @@
 ArduPilot Parameter Presets for 3DR Solo / Open Solo latest ArduCopter stable version.
 Contains calibrated configurations for Here GPS, Landing Gear, Speed modes,
 Bait drop, and LiPo / Li-ion Battery management.
+
+Parameter names and units are ArduCopter 4.7 (e.g. ATC_ANGLE_MAX in degrees, WP_SPD and
+LOIT_SPEED_MS in m/s). param_mgr writes the pre-4.7 name with the right scale when the
+Cube still runs an older ArduCopter (see param_mgr.PARAM_ALIASES_PRE_4_7).
 """
 
 PRESETS = {
@@ -31,50 +35,78 @@ PRESETS = {
         "id": "retract_gear",
         "name": "Retractable Landing Gear",
         "category": "Airframe",
-        "description": "Configures landing gear servo output on SERVO7, manual toggle on RC7, and automatic deployment in RTL and LAND modes.",
+        "description": "Configures landing gear servo output on SERVO7 (deployed 1000 us, retracted 2000 us), manual toggle on RC7, retract after takeoff and deploy for landing.",
         "icon": "🛬",
         "params": {
             "LGR_ENABLE": 1,          # Enable Landing Gear feature
-            "LGR_OPTIONS": 3,         # Auto-deploy on RTL and Land modes
-            "LGR_SERVO_DEPLOY": 1000, # Deploy PWM value
-            "LGR_SERVO_RTRACT": 2000, # Retract PWM value
+            "LGR_OPTIONS": 3,         # bit0 retract after takeoff, bit1 deploy during land
             "SERVO7_FUNCTION": 29,    # 29: Landing Gear output on Servo 7
+            # ArduCopter 4.x has no LGR_SERVO_DEPLOY/RTRACT: deployed = SERVO7_MAX and
+            # retracted = SERVO7_MIN, swapped by SERVO7_REVERSED -> deploy 1000, retract 2000
+            "SERVO7_MIN": 1000,
+            "SERVO7_MAX": 2000,
+            "SERVO7_REVERSED": 1,
             "RC7_OPTION": 29          # 29: Landing Gear switch on RC7
         }
     },
-    "speed_sport": {
-        "id": "speed_sport",
-        "name": "Speed Control: Sport Mode (High Velocity)",
+    "speed_default": {
+        "id": "speed_default",
+        "name": "Flight Performance: Default (Solo Stock)",
         "category": "Flight Performance",
-        "description": "Unlocks maximum agility with 15 m/s waypoint cruise, 12 m/s loiter speed, faster vertical climb/descent rates, and 35° lean angle.",
-        "icon": "⚡",
-        "params": {
-            "WPNAV_SPEED": 1500,      # 15.0 m/s horizontal waypoint speed
-            "WPNAV_SPEED_UP": 400,    # 4.0 m/s max climb rate
-            "WPNAV_SPEED_DN": 300,    # 3.0 m/s max descent rate
-            "LOIT_SPEED": 1200,       # 12.0 m/s max loiter speed
-            "LOIT_ACC_MAX": 350,      # 3.5 m/s^2 acceleration
-            "LOIT_BRK_ACCEL": 250,    # 2.5 m/s^2 braking acceleration
-            "ANGLE_MAX": 3500,        # 35.0 deg maximum pitch/roll lean angle
-            "PILOT_SPEED_UP": 250,    # 2.5 m/s pilot climb
-            "PILOT_SPEED_DN": 200     # 2.0 m/s pilot descent
-        }
-    },
-    "speed_cinematic": {
-        "id": "speed_cinematic",
-        "name": "Speed Control: Cinematic Mode (Smooth)",
-        "category": "Flight Performance",
-        "description": "Smooth gentle accelerations and dampened braking optimized for ultra-smooth video recording and stabilized photography.",
+        "description": "Restores the Solo's stock ArduCopter 4.7 flight feel: 20° max lean, 360°/s² tilt rate, 5 m/s loiter speed, gentle acceleration and braking, 1.33 m/s climb and descent. Use this to undo the Fast preset.",
         "icon": "🎬",
         "params": {
-            "WPNAV_SPEED": 500,       # 5.0 m/s smooth cruise
-            "WPNAV_SPEED_UP": 180,    # 1.8 m/s climb
-            "WPNAV_SPEED_DN": 120,    # 1.2 m/s descent
-            "LOIT_SPEED": 500,        # 5.0 m/s loiter speed
-            "LOIT_ACC_MAX": 150,      # Gentle acceleration
-            "LOIT_BRK_ACCEL": 120,    # Gentle braking
-            "LOIT_BRK_DELAY": 0.4,    # Smooth braking deceleration delay
-            "ANGLE_MAX": 2000         # 20.0 deg max lean angle
+            # Exactly the defaults of the CubeSolo / CubeGreen-solo ArduCopter 4.7 builds
+            # (board defaults.parm + the defaults embedded in the firmware)
+            "ATC_ANGLE_MAX": 20.0,    # deg max lean angle
+            "LOIT_ANG_MAX": 30.0,     # deg loiter lean limit (capped by ATC_ANGLE_MAX)
+            "ATC_INPUT_TC": 0.25,     # s stick response time (higher = softer)
+            "ATC_ACC_R_MAX": 360.0,   # deg/s^2 how fast roll can change
+            "ATC_ACC_P_MAX": 360.0,   # deg/s^2 how fast pitch can change
+            "ATC_ACC_Y_MAX": 70.0,    # deg/s^2 how fast yaw can change
+            "PSC_NE_JERK": 5.0,       # m/s^3 how fast Fly/Loiter builds up acceleration
+            "LOIT_BRK_JRK_M": 5.0,    # m/s^3 how fast the Loiter brake comes on / releases
+            "PHLD_BRK_RATE": 6.0,     # deg/s PosHold: how fast the brake lean builds and the stick lean unwinds
+            "PHLD_BRK_ANGLE": 25.0,   # deg PosHold: maximum lean used for braking
+            "LOIT_SPEED_MS": 5.0,     # m/s max loiter speed
+            "LOIT_ACC_MAX_M": 2.0,    # m/s^2 loiter acceleration
+            "LOIT_BRK_ACC_M": 1.75,   # m/s^2 braking when sticks are released
+            "LOIT_BRK_DELAY": 0.25,   # s delay before braking
+            "WP_SPD": 3.0,            # m/s waypoint (Auto mission) speed
+            "WP_SPD_UP": 3.2,         # m/s waypoint climb
+            "WP_SPD_DN": 2.4,         # m/s waypoint descent
+            "PILOT_SPD_UP": 1.33,     # m/s pilot climb
+            "PILOT_SPD_DN": 1.33      # m/s pilot descent
+        }
+    },
+    "speed_fast": {
+        "id": "speed_fast",
+        "name": "Flight Performance: Fast",
+        "category": "Flight Performance",
+        "description": "Much more responsive than Default: 2.5x faster tilt (900°/s²), quicker yaw, crisper sticks, 40° lean, quick starts and stops in Fly/Loiter (8 m/s top speed) and Position Hold (12°/s, 40° brake), 4 m/s climb and 3 m/s descent. Fly it in open space first.",
+        "icon": "⚡",
+        "params": {
+            "ATC_ANGLE_MAX": 40.0,    # deg max lean angle (Default 20)
+            "LOIT_ANG_MAX": 40.0,     # deg loiter lean limit (Default 30, which would cap Fly mode)
+            "ATC_INPUT_TC": 0.12,     # s crisper stick response (Default 0.25)
+            "ATC_ACC_R_MAX": 900.0,   # deg/s^2 roll rate of change (Default 360; ArduPilot generic 1100)
+            "ATC_ACC_P_MAX": 900.0,   # deg/s^2 pitch rate of change (Default 360; ArduPilot generic 1100)
+            "ATC_ACC_Y_MAX": 180.0,   # deg/s^2 yaw rate of change (Default 70; ArduPilot generic 270)
+            "PSC_NE_JERK": 10.0,      # m/s^3 Fly/Loiter acceleration build-up (Default 5)
+            "LOIT_BRK_JRK_M": 20.0,   # m/s^3 Loiter brake comes on / releases faster (Default 5)
+            "PHLD_BRK_RATE": 12.0,    # deg/s PosHold brake/stick-release rate, the maximum (Default 8)
+            "PHLD_BRK_ANGLE": 40.0,   # deg PosHold maximum brake lean (Default 30)
+            # Loiter speeds up / slows down with time constant LOIT_SPEED_MS / (g*tan(lean)):
+            # 8 m/s at 40 deg = 0.97 s (Default 1.4 s; 15 m/s at 35 deg was 2.2 s, i.e. laggy)
+            "LOIT_SPEED_MS": 8.0,     # m/s max loiter speed (Default 5)
+            "LOIT_ACC_MAX_M": 5.0,    # m/s^2 loiter acceleration (Default 2.0)
+            "LOIT_BRK_ACC_M": 2.5,    # m/s^2 braking (Default 1.75; 2.5 is the maximum)
+            "LOIT_BRK_DELAY": 0.1,    # s delay before the Loiter brake starts (Default 0.25)
+            "WP_SPD": 10.0,           # m/s waypoint and RTL speed (Default 3)
+            "WP_SPD_UP": 4.0,         # m/s waypoint climb (Default 3.2)
+            "WP_SPD_DN": 2.5,         # m/s waypoint descent (Default 2.4)
+            "PILOT_SPD_UP": 4.0,      # m/s pilot climb (Default 2.5)
+            "PILOT_SPD_DN": 3.0       # m/s pilot descent (Default follows climb, 2.5)
         }
     },
     "bait_drop": {

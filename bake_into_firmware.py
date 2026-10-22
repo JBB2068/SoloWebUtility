@@ -54,7 +54,8 @@ SKIP_DIRS = (
     "__pycache__", ".git", "firmware", "firmware_files", "cache_staging",
     "tmp_updates", "build", "dist", "docs", "scratch", "squashfs"
 )
-TEXT_EXTS = (".py", ".sh", ".json", ".html", ".css", ".js", ".txt", ".param", ".conf", ".md", ".yaml")
+TEXT_EXTS = (".py", ".sh", ".json", ".html", ".css", ".js", ".txt", ".param", ".conf", ".md", ".yaml",
+             ".apj")   # .apj is JSON: Git on Windows may check it out with CRLF
 
 # Must match SWU_LINE in tools/bake_squashfs.sh
 INITTAB_RESPAWN_ENTRY = "SWU:345:respawn:/usr/bin/python /usr/bin/SoloWebUtility2/solo_web_app.py >>/log/solowebutility.log 2>&1\n"

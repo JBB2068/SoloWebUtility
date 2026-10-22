@@ -681,15 +681,23 @@ class SoloApiHandler(BaseHTTPRequestHandler):
                 return
 
             ok, msg = param_mgr.mgr.set_batch_params(preset['params'])
+            result = getattr(param_mgr.mgr, "last_batch_result", None) or {}
             if ok:
                 self._send_json({
                     "success": True,
                     "message": "Preset '%s': %s" % (preset['name'], msg),
                     "preset_id": preset_id,
-                    "params": preset['params']
+                    # the values the Cube confirmed, under the names it actually has
+                    "params": result.get("confirmed", preset['params'])
                 })
             else:
-                self._send_error(msg, 400)
+                self._send_json({
+                    "error": True,
+                    "message": "Preset '%s': %s" % (preset['name'], msg),
+                    "preset_id": preset_id,
+                    "params": result.get("confirmed", {}),
+                    "failed": result.get("failed", {})
+                }, status_code=400)
             return
 
         if path == '/api/params/import':

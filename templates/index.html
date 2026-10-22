@@ -675,6 +675,36 @@
                 <div class="presets-grouped-container" id="presetsGrid">
                     <!-- Loaded dynamically grouped by category -->
                 </div>
+
+                <!-- Roll/Pitch Sensitivity: Mission Planner "Basic Tuning" style slider.
+                     Writes ATC_RAT_RLL_P/I and ATC_RAT_PIT_P/I (RATE_RLL/PIT_P/I on ArduCopter <= 3.3)
+                     to the same value through /api/params/save, only when the slider is released. -->
+                <div class="preset-group-block rps-block" id="rpsBlock">
+                    <div class="preset-group-header">
+                        <span class="preset-group-title" title="Simultaneously adjusts Roll &amp; Pitch Rate P and I gains (1:1 ratio).">🎚️ Roll/Pitch Sensitivity</span>
+                        <span class="preset-group-count" id="rpsNamesBadge">ATC_RAT_RLL/PIT P &amp; I</span>
+                        <span class="badge-warning rps-asym-badge" id="rpsAsymBadge" style="display:none;"
+                              title="Custom/Asymmetric PID values detected. Moving this slider will lock Roll &amp; Pitch Rate P/I to the same value.">⚠ Custom / Asymmetric</span>
+                    </div>
+                    <p class="preset-desc rps-subtitle">Simultaneously adjusts Roll &amp; Pitch Rate P and I gains (1:1 ratio). Higher feels more responsive but can oscillate; lower feels softer. The value is written to the Cube when you release the slider.</p>
+                    <div class="rps-warning" id="rpsAsymWarning" style="display:none;">
+                        ⚠ Custom/Asymmetric PID values detected. Moving this slider will lock Roll &amp; Pitch Rate P/I to the same value.
+                    </div>
+                    <div class="rps-row">
+                        <span class="rps-end">0.080</span>
+                        <input type="range" id="rpsSlider" class="rps-slider" min="0.080" max="0.400" step="0.005" value="0.135"
+                               aria-label="Roll/Pitch Sensitivity" disabled>
+                        <span class="rps-end">0.400</span>
+                        <input type="number" id="rpsNumber" class="param-input rps-number" min="0.080" max="0.400" step="0.005"
+                               value="0.135" aria-label="Roll/Pitch Sensitivity value" disabled>
+                    </div>
+                    <div class="rps-row rps-actions">
+                        <span class="rps-current" id="rpsCurrent">Waiting for parameters…</span>
+                        <button class="btn btn-secondary btn-sm" id="btnRpsDefault" disabled>↺ Reset to Default (0.135)</button>
+                        <button class="btn btn-secondary btn-sm" id="btnRpsSoloStock" disabled
+                                title="Restore the Solo's stock ArduCopter 4.7 rate tune (it is asymmetric: roll 0.091, pitch 0.103)">↺ Solo Stock Tune (R 0.091 / P 0.103)</button>
+                    </div>
+                </div>
             </div>
 
             <!-- Full Parameter Editor -->
@@ -1709,12 +1739,12 @@ The 3DR Solo Web Utility is a free, open-source on-board management console that
 <td>Gripper servo on Servo 8 with RC8 controller trigger (grab at 1000µs, release at 2000µs)</td>
 </tr>
 <tr>
-<td>Sport Mode (High Velocity)</td>
-<td>15 m/s cruise, 12 m/s loiter, 35° lean angle, and faster climb/descent rates</td>
+<td>Flight Performance: Default (Solo Stock)</td>
+<td>Restores the Solo's stock ArduCopter 4.7 flight feel (20° lean, 5 m/s loiter, gentle acceleration and braking). Use it to undo Fast</td>
 </tr>
 <tr>
-<td>Cinematic Mode (Smooth)</td>
-<td>Ultra-smooth accelerations and gentle braking for stabilized video and photography</td>
+<td>Flight Performance: Fast</td>
+<td>2.5× faster tilt (900°/s²), quicker yaw, crisper sticks, 40° lean, quick starts and stops in Fly/Loiter (8 m/s top speed) and Position Hold (12°/s, 40° brake), 4 m/s climb / 3 m/s descent</td>
 </tr>
 <tr>
 <td>Stock 4S LiPo Battery</td>

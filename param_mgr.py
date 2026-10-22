@@ -582,7 +582,100 @@ def fetch_all_params(mav, log=None, progress_callback=None):
             "message": msg, "missing": still_missing}
 
 
-def commit_param_mavlink(mav, name, value, max_retries=3, timeout_per_attempt=0.6):
+# MAVLink enum values (literal so this also works when pymavlink is a reduced build)
+MAV_TYPE_GCS = 6
+MAV_TYPE_GIMBAL = 26
+MAV_AUTOPILOT_INVALID = 8
+MAV_PARAM_TYPE_REAL32 = 9
+
+# Endpoints in the order calib_mgr uses on the Solo (proven to reach the Cube and get replies)
+SOLO_MAVLINK_ENDPOINTS = [
+    'udpout:10.1.1.10:14560',
+    'udpin:0.0.0.0:14560',
+    'udpin:127.0.0.1:14560',
+    'udpout:127.0.0.1:14560',
+    'udpin:0.0.0.0:14550',
+    'udpout:127.0.0.1:14550',
+    'udpout:10.1.1.10:14550'
+]
+
+# ArduCopter 4.7 renamed these (and moved them to SI units). Presets use the 4.7 names;
+# on a Cube that still runs 4.6 or older the old name is written instead, with
+# old_value = new_value * scale.   new name: (old name, scale)
+PARAM_ALIASES_PRE_4_7 = {
+    "ATC_ANGLE_MAX":  ("ANGLE_MAX", 100.0),        # deg      -> centidegrees
+    "WP_SPD":         ("WPNAV_SPEED", 100.0),      # m/s      -> cm/s
+    "WP_SPD_UP":      ("WPNAV_SPEED_UP", 100.0),   # m/s      -> cm/s
+    "WP_SPD_DN":      ("WPNAV_SPEED_DN", 100.0),   # m/s      -> cm/s
+    "LOIT_SPEED_MS":  ("LOIT_SPEED", 100.0),       # m/s      -> cm/s
+    "LOIT_ACC_MAX_M": ("LOIT_ACC_MAX", 100.0),     # m/s/s    -> cm/s/s
+    "LOIT_BRK_ACC_M": ("LOIT_BRK_ACCEL", 100.0),   # m/s/s    -> cm/s/s
+    "PILOT_SPD_UP":   ("PILOT_SPEED_UP", 100.0),   # m/s      -> cm/s
+    "PILOT_SPD_DN":   ("PILOT_SPEED_DN", 100.0),   # m/s      -> cm/s
+    "ATC_ACC_R_MAX":  ("ATC_ACCEL_R_MAX", 100.0),  # deg/s/s  -> cdeg/s/s
+    "ATC_ACC_P_MAX":  ("ATC_ACCEL_P_MAX", 100.0),  # deg/s/s  -> cdeg/s/s
+    "ATC_ACC_Y_MAX":  ("ATC_ACCEL_Y_MAX", 100.0),  # deg/s/s  -> cdeg/s/s
+    "PSC_NE_JERK":    ("PSC_JERK_XY", 1.0),        # m/s/s/s  (same unit)
+    "LOIT_BRK_JRK_M": ("LOIT_BRK_JERK", 100.0),    # m/s/s/s  -> cm/s/s/s
+    "PHLD_BRK_RATE":  ("PHLD_BRAKE_RATE", 1.0),    # deg/s    (same unit)
+    "PHLD_BRK_ANGLE": ("PHLD_BRAKE_ANGLE", 100.0), # deg      -> centidegrees
+}
+
+
+def _is_autopilot_heartbeat(hb):
+    """True only for the flight controller's heartbeat -- never a GCS / Solo Controller
+    (system 255) or the gimbal, which also send heartbeats on the Solo's MAVLink link."""
+    ap = getattr(hb, "autopilot", None)
+    typ = getattr(hb, "type", None)
+    if ap is None and typ is None:
+        return True   # unknown message shape (mocks): accept
+    return ap != MAV_AUTOPILOT_INVALID and typ not in (MAV_TYPE_GCS, MAV_TYPE_GIMBAL)
+
+
+def _targets(mav):
+    """(system, component) of the flight controller. ArduPilot's autopilot is always
+    component 1 (MAV_COMP_ID_AUTOPILOT1); 254/255 are this utility and the Solo Controller."""
+    target_sys = getattr(mav, "target_system", 1)
+    if not target_sys or target_sys in (254, 255):
+        target_sys = 1
+    return target_sys, 1
+
+
+def _name_bytes(pname):
+    return pname.encode("ascii") if sys.version_info[0] >= 3 else str(pname)
+
+
+def read_param_mavlink(mav, name, attempts=3, timeout_per_attempt=0.8):
+    """Ask the Cube for one parameter by name (PARAM_REQUEST_READ).
+    Returns (value, param_type) or None when the Cube does not answer -- i.e. it has no
+    parameter of that name (ArduPilot silently ignores unknown names)."""
+    pname = _clean_name(name).upper()
+    if mav is None or not pname:
+        return None
+    target_sys, target_comp = _targets(mav)
+    for _ in range(attempts):
+        try:
+            mav.mav.param_request_read_send(target_sys, target_comp, _name_bytes(pname), -1)
+        except Exception:
+            return None
+        deadline = time.time() + timeout_per_attempt
+        while time.time() < deadline:
+            msg = mav.recv_match(type="PARAM_VALUE", blocking=True, timeout=0.1)
+            if msg is not None and _clean_name(msg.param_id).upper() == pname:
+                return float(msg.param_value), getattr(msg, "param_type", MAV_PARAM_TYPE_REAL32)
+    return None
+
+
+def _write_order(names):
+    """Feature switches first (their sub-parameters only exist once the feature is enabled),
+    then everything else; deterministic on Python 2.7, whose dicts have no stable order."""
+    def key(n):
+        first = n.endswith("_ENABLE") or n.endswith("_TYPE") or n == "BATT_MONITOR"
+        return (0 if first else 1, n)
+    return sorted(names, key=key)
+
+
+def commit_param_mavlink(mav, name, value, max_retries=3, timeout_per_attempt=0.6, param_type=None):
     """Send PARAM_SET and wait for matching PARAM_VALUE confirmation from the autopilot.
 
     Returns (ok, confirmed_val, message).
@@ -599,15 +692,10 @@ def commit_param_mavlink(mav, name, value, max_retries=3, timeout_per_attempt=0.
     except (ValueError, TypeError) as e:
         return False, None, "Invalid numeric parameter value '%s': %s" % (str(value), str(e))
 
-    # Ensure target_system and target_component are valid autopilot IDs (typically 1, 1)
-    target_sys = getattr(mav, "target_system", 1)
-    if not target_sys or target_sys == 254:
-        target_sys = 1
-    target_comp = getattr(mav, "target_component", 1)
-    if not target_comp or target_comp == 254:
-        target_comp = 1
-
-    pname_bytes = pname.encode("ascii") if sys.version_info[0] >= 3 else str(pname)
+    # Always address the flight controller (never a GCS, the Solo Controller or the gimbal)
+    target_sys, target_comp = _targets(mav)
+    pname_bytes = _name_bytes(pname)
+    ptype = param_type if param_type else MAV_PARAM_TYPE_REAL32
 
     confirmed = False
     confirmed_val = None
@@ -619,7 +707,7 @@ def commit_param_mavlink(mav, name, value, max_retries=3, timeout_per_attempt=0.
                 target_comp,
                 pname_bytes,
                 val_f,
-                mavutil.mavlink.MAV_PARAM_TYPE_REAL32
+                ptype
             )
         except Exception as ex:
             return False, None, "Failed to send PARAM_SET for %s: %s" % (pname, str(ex))
@@ -653,32 +741,81 @@ def commit_param_mavlink(mav, name, value, max_retries=3, timeout_per_attempt=0.
         return False, None, "Pixhawk did not confirm parameter %s after %d attempt(s)." % (pname, max_retries)
 
 
-def commit_batch_mavlink(mav, param_dict, max_retries=3, timeout_per_attempt=0.6):
-    """Send PARAM_SET for multiple parameters and verify each against incoming PARAM_VALUE.
+def resolve_param_name(mav, name, value, prefer_old_names=False):
+    """Map a requested parameter to the name the connected Cube actually has.
+    prefer_old_names: the Cube already turned out to run pre-4.7 ArduCopter, so a renamed
+    parameter is looked up by its old name first (saves a timeout per parameter).
+    Returns (name_on_cube, value_to_write, param_type, note) or (None, None, None, reason)."""
+    pname = _clean_name(name).upper()
+    alias = PARAM_ALIASES_PRE_4_7.get(pname)
+    found = None
+    if not (alias and prefer_old_names):
+        found = read_param_mavlink(mav, pname)
+        if found is not None:
+            return pname, value, found[1], ""
+    if alias:
+        old_name, scale = alias
+        found = read_param_mavlink(mav, old_name)
+        if found is not None:
+            try:
+                old_val = float(value) * scale
+            except (TypeError, ValueError):
+                return None, None, None, "invalid value %r" % (value,)
+            return old_name, _clean_value(round(old_val, 6)), found[1], \
+                " (written as %s = %s for this ArduCopter version)" % (old_name, _clean_value(round(old_val, 6)))
+        if prefer_old_names:
+            # guessed wrong: the Cube does have the new name after all
+            found = read_param_mavlink(mav, pname)
+            if found is not None:
+                return pname, value, found[1], ""
+    return None, None, None, "%s does not exist on this Cube's ArduCopter version" % pname
 
-    Returns (all_ok, confirmed_dict, failed_dict, message).
+
+def commit_batch_mavlink(mav, param_dict, max_retries=3, timeout_per_attempt=0.6):
+    """Write several parameters and verify each one against the Cube's PARAM_VALUE reply.
+    Each name is first checked on the Cube (renamed pre-4.7 parameters are translated),
+    and feature switches (*_ENABLE, *_TYPE, BATT_MONITOR) are written first.
+
+    Returns (all_ok, confirmed_dict, failed_dict, message); confirmed_dict uses the names
+    actually written on the Cube.
     """
     confirmed = {}
     failed = {}
+    notes = []
 
+    requested = {}
     for k, v in param_dict.items():
-        ok, val, msg = commit_param_mavlink(mav, k, v, max_retries=max_retries, timeout_per_attempt=timeout_per_attempt)
-        pname = _clean_name(k).upper()
+        requested[_clean_name(k).upper()] = v
+
+    pre_4_7 = False
+    for pname in _write_order(list(requested.keys())):
+        cube_name, cube_val, ptype, note = resolve_param_name(mav, pname, requested[pname], prefer_old_names=pre_4_7)
+        if cube_name is not None and cube_name != pname:
+            pre_4_7 = True
+        if cube_name is None:
+            failed[pname] = note
+            continue
+        ok, val, msg = commit_param_mavlink(mav, cube_name, cube_val, max_retries=max_retries,
+                                            timeout_per_attempt=timeout_per_attempt, param_type=ptype)
         if ok:
-            confirmed[pname] = val
+            confirmed[cube_name] = val
+            if note:
+                notes.append(pname + note)
         else:
             failed[pname] = msg
         time.sleep(0.02)  # 20ms pacing between parameter writes
 
-    all_ok = (len(confirmed) == len(param_dict)) and (len(failed) == 0)
+    all_ok = (len(confirmed) == len(requested)) and (len(failed) == 0)
     if all_ok:
-        msg = "Successfully committed and confirmed %d parameter(s) on Pixhawk." % len(confirmed)
+        msg = "Saved and confirmed %d parameter(s) on the Cube." % len(confirmed)
     elif confirmed:
-        msg = "Confirmed %d parameter(s), but %d failed: %s" % (
-            len(confirmed), len(failed), ", ".join("%s: %s" % (p, failed[p]) for p in failed))
+        msg = "Saved %d parameter(s), but %d failed: %s" % (
+            len(confirmed), len(failed), "; ".join("%s: %s" % (p, failed[p]) for p in sorted(failed)))
     else:
-        msg = "Failed to commit parameters: autopilot did not confirm updates (%s)." % (
-            ", ".join("%s: %s" % (p, failed[p]) for p in failed))
+        msg = "No parameters were saved: %s" % (
+            "; ".join("%s: %s" % (p, failed[p]) for p in sorted(failed)))
+    if notes:
+        msg += " Note: " + "; ".join(notes) + "."
 
     return all_ok, confirmed, failed, msg
 
@@ -689,6 +826,7 @@ def commit_batch_mavlink(mav, param_dict, max_retries=3, timeout_per_attempt=0.6
 class ParameterManager(object):
     def __init__(self):
         self.params = {}
+        self.last_batch_result = {"confirmed": {}, "failed": {}}
         self.load_initial_params()
 
     def load_initial_params(self):
@@ -891,18 +1029,8 @@ class ParameterManager(object):
         """Establish safe UDP MAVLink connection without touching raw serial ports."""
         if mavutil is None:
             return None
-        # Primary telemetry endpoints: 14560 is telem_forwarder on Solo, 14550 is fallback
-        endpoints = [
-            'udpin:127.0.0.1:14560',
-            'udpin:0.0.0.0:14560',
-            'udpout:127.0.0.1:14560',
-            'udpout:10.1.1.10:14560',
-            'udpin:127.0.0.1:14550',
-            'udpin:0.0.0.0:14550',
-            'udpout:127.0.0.1:14550',
-            'udpout:10.1.1.10:14550'
-        ]
-        for ep in endpoints:
+        # Same endpoints, in the same order, as calib_mgr on the Solo
+        for ep in SOLO_MAVLINK_ENDPOINTS:
             try:
                 # Do NOT pass source_component (incompatible with embedded pymavlink on Solo)
                 # Use source_system=254 to avoid colliding with Solo Controller (system 255)
@@ -920,7 +1048,10 @@ class ParameterManager(object):
                     except Exception:
                         pass
                     hb = mav.recv_match(type='HEARTBEAT', blocking=True, timeout=0.4)
-                    if hb and hb.get_srcSystem() != 254:
+                    # Lock on to the flight controller only. The first heartbeat is often the
+                    # Solo Controller / app (system 255) or the gimbal; addressing PARAM_SET to
+                    # them made the Cube ignore every write.
+                    if hb and hb.get_srcSystem() != 254 and _is_autopilot_heartbeat(hb):
                         mav.target_system = hb.get_srcSystem()
                         mav.target_component = hb.get_srcComponent()
                         return mav
@@ -1025,6 +1156,7 @@ class ParameterManager(object):
                 return False, "Could not connect to Pixhawk MAVLink (timeout waiting for heartbeat). Parameters were not saved."
             try:
                 all_ok, confirmed, failed, msg = commit_batch_mavlink(mav, cleaned_dict)
+                self.last_batch_result = {"confirmed": confirmed, "failed": failed}
             finally:
                 try:
                     mav.close()
@@ -1043,6 +1175,7 @@ class ParameterManager(object):
         else:
             self.params.update(cleaned_dict)
             self.save_to_file(DEFAULT_PARAM_FILE)
+            self.last_batch_result = {"confirmed": dict(cleaned_dict), "failed": {}}
             return True, "Saved %d parameter(s) locally." % len(cleaned_dict)
 
     def search_params(self, query=""):
