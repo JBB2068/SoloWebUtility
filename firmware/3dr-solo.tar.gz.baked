@@ -1,4 +1,4 @@
-image 287c88644d5b1ea0da4e7ddb3295173a
+image c874d2968aa3c63c8e5b1746cc97c97a
 ecbd052cf4cf20692fa8b09b3769b8ab  (recipe) tools/bake_squashfs.sh
 2baed77a8919d189bdc48c784f618dbf  app.py
 456e45a4a98a5d615a8e809228e2785d  arducopter_builder.py
@@ -11,12 +11,12 @@ e377ee917663f6636541005d66dcad39  calib_mgr.py
 41da7b9717062d22a63883f4f85e3307  cockpit_mgr.py
 f0e5f52ffc2e83218f5e2460ebfa48d0  compat.py
 05f7f0e5dfaff09161af85b769f34706  controller_mgr.py
-dada00aa1df54f5e6f6a5e4943b42d58  firmware/Solo.param
-6b0518d5a193853b0cdce45c4ae4ce1b  firmware/SoloGreen.param
-e7efd0cfa52fb29f6933c51f6edbff0c  firmware/arducopter_CubeGreen_4.7.2.apj
-3bc4501639007c1c5537b86d295b99e3  firmware/arducopter_CubeSolo_4.7.2.apj
-0129064eb001c17c02874c3d18b4fe5e  firmware/previous/arducopter_CubeGreen_4.7.1.apj
-65cdb2252512c7f56a2673fd9acbcb33  firmware/previous/arducopter_CubeSolo_4.7.1.apj
+edac6a2523f3ed886211287057127594  firmware/Solo.param
+45944b51ddd69b271a50dbd56061fa5d  firmware/SoloGreen.param
+50fa933e463b986ca451ff11e4298ebd  firmware/arducopter_CubeGreen_4.7.2.apj
+e6ab00678c0805d606e396eef93b2c3f  firmware/arducopter_CubeSolo_4.7.2.apj
+1d3551b160b16420862086b37449191f  firmware/previous/arducopter_CubeGreen_4.7.1.apj
+171936cbf291f836921742d16f9a69e4  firmware/previous/arducopter_CubeSolo_4.7.1.apj
 983faaec81bd094442d94ea19096fd98  firmware/solocustombuild.yaml
 9c31086e8883e873ddca743d95548f83  flash_mgr.py
 a232e546eb38e1f8992c0e52c38f7c8d  modules/__init__.py
@@ -44,14 +44,14 @@ d7f76dd75c19ffd78619845a103d376a  static/3DR_Solo_User_Manual_Updated_2026.pdf
 21234c04940ace24a31ce82ae61d1db7  static/app.js
 d0deb7f900dc60e596600ae90a6e8699  static/cockpit.css
 8286b555618f8d2960b43ceaa93bfa73  static/cockpit.js
-91fea46fd06f19e117465dac1ba66ff1  static/index.html
+5fae1d0aef6423b34f54876891a4faae  static/index.html
 075c6c464b218fa88d56eb974bdd98e6  static/jmuxer.min.js
 2aab2ca4000237c0e20058323469f6b9  static/manual.html
-a9a712b7f620cc2e14694348246170c6  static/solo_drone_manual.html
+b20f1d8a567e215f5d6169d259b433b7  static/solo_drone_manual.html
 d022df64c87d6939a0203ab09a50b4ba  static/solo_icon.png
 d4c5749deda789b47c7e72a46bfd0e61  static/solo_icon_512.png
 c6a70306cd23dfd8a8750a3cbb03be13  static/style.css
-91fea46fd06f19e117465dac1ba66ff1  templates/index.html
+5fae1d0aef6423b34f54876891a4faae  templates/index.html
 9ba0e69ed82438d5b621c2d6f7de2149  templates/updates.html
 8af3e84ddd963b2bb5917485ae28447d  version.json
 ba65e63da86b93d1ed42e0132ae649d5  version_mgr.py
