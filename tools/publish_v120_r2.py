@@ -9,45 +9,25 @@ import time
 import subprocess
 
 DIST_DIR = r"C:\Users\User\Documents\SoloWebUtility2\release\dist"
-EXE_FILE = os.path.join(DIST_DIR, "Solo Web Utility v1.2.0.exe")
-APK_FILE = os.path.join(DIST_DIR, "Solo Web Utility v1.2.0.apk")
+EXE_NAME = "Solo Web Utility v1.2.0 Installer.exe"
+APK_NAME = "Solo Web Utility v1.2.0 Installer.apk"
+EXE_FILE = os.path.join(DIST_DIR, EXE_NAME)
+APK_FILE = os.path.join(DIST_DIR, APK_NAME)
 
+# The site serves exactly these two objects; older download names are redirected
+# to them by worker/index.js, so nothing else is uploaded.
 UPLOADS = [
     {
-        "key": "Solo Web Utility v1.2.0.exe",
+        "key": EXE_NAME,
         "file": EXE_FILE,
         "content_type": "application/octet-stream",
-        "disposition": 'attachment; filename="Solo Web Utility v1.2.0.exe"'
+        "disposition": 'attachment; filename="%s"' % EXE_NAME
     },
     {
-        "key": "Solo Web Utility Installer.exe",
-        "file": EXE_FILE,
-        "content_type": "application/octet-stream",
-        "disposition": 'attachment; filename="Solo Web Utility Installer.exe"'
-    },
-    {
-        "key": "Solo Web Utility v1.2.0.apk",
+        "key": APK_NAME,
         "file": APK_FILE,
         "content_type": "application/vnd.android.package-archive",
-        "disposition": 'attachment; filename="Solo Web Utility v1.2.0.apk"'
-    },
-    {
-        "key": "Solo Web Utility Installer.apk",
-        "file": APK_FILE,
-        "content_type": "application/vnd.android.package-archive",
-        "disposition": 'attachment; filename="Solo Web Utility Installer.apk"'
-    },
-    {
-        "key": "deploy_to_solo.exe",
-        "file": EXE_FILE,
-        "content_type": "application/octet-stream",
-        "disposition": 'attachment; filename="Solo Web Utility Installer.exe"'
-    },
-    {
-        "key": "sololink_viewer.apk",
-        "file": APK_FILE,
-        "content_type": "application/vnd.android.package-archive",
-        "disposition": 'attachment; filename="Solo Web Utility Installer.apk"'
+        "disposition": 'attachment; filename="%s"' % APK_NAME
     },
 ]
 

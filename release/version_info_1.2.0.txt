@@ -24,7 +24,7 @@ VSVersionInfo(
             StringStruct('FileVersion', '1.2.0.0'),
             StringStruct('InternalName', 'SoloWebUtility'),
             StringStruct('LegalCopyright', 'Copyright (C) 2026 Open Solo Community. Free and open-source.'),
-            StringStruct('OriginalFilename', 'Solo Web Utility v1.2.0.exe'),
+            StringStruct('OriginalFilename', 'Solo Web Utility v1.2.0 Installer.exe'),
             StringStruct('ProductName', '3DR Solo Web Utility'),
             StringStruct('ProductVersion', '1.2.0.0'),
             StringStruct('Comments', 'Installs Solo Web Utility v1.2.0 and its firmware on a 3DR Solo over SoloLink Wi-Fi.')

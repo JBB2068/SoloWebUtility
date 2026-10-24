@@ -1625,15 +1625,15 @@ The 3DR Solo Web Utility is a free, open-source on-board management console that
 </ul>
 <p><strong>Installation steps:</strong></p>
 <ol>
-<li>Download <strong>Solo Web Utility Installer.exe</strong> from open-solo.com (approximately 160 MB standalone executable).</li>
+<li>Download <strong>Solo Web Utility v1.2.0 Installer.exe</strong> from open-solo.com (approximately 160 MB standalone executable).</li>
 <li>Power on Solo and the Controller and connect your PC to the SoloLink Wi-Fi network as you normally would.</li>
-<li>Double-click <code>Solo Web Utility Installer.exe</code>. The installer automatically connects to Solo via SSH at 10.1.1.10, uploads all application files and firmware images, verifies file integrity, configures persistent boot startup via <code>/etc/rc.local</code>, and starts the web server on port 80.</li>
+<li>Double-click <code>Solo Web Utility v1.2.0 Installer.exe</code>. The installer automatically connects to Solo via SSH at 10.1.1.10, uploads all application files and firmware images, verifies file integrity, configures persistent boot startup via <code>/etc/rc.local</code>, and starts the web server on port 80.</li>
 <li>When the installer completes, open any browser on any device connected to SoloLink and navigate to <strong>http://10.1.1.10</strong>. The utility is live and will persist across all future power cycles without reinstallation.</li>
 </ol>
 <blockquote>
 <p>The installer uses SSH/SFTP to transfer files. It uses unpipelined synchronous transfers to prevent the Solo's embedded OpenSSH server buffer from overflowing over Wi-Fi. If a transfer is interrupted, the installer automatically resumes from the exact byte offset on the next run.</p>
 </blockquote>
-<p><strong>Android APK:</strong> A lightweight Android application (<code>Solo Web Utility Installer.apk</code>, approximately 296 MB) is also available from open-solo.com for Android users who prefer a native app interface for initial setup and direct web console access.</p>
+<p><strong>Android APK:</strong> A lightweight Android application (<code>Solo Web Utility v1.2.0 Installer.apk</code>, approximately 296 MB) is also available from open-solo.com for Android users who prefer a native app interface for initial setup and direct web console access.</p>
 <h3 id="283-automated-preflight-update-firmware">2.8.3 Automated Preflight Update (Firmware)</h3>
 <blockquote>
 <p><strong>Updated — 2026:</strong> The Solo Web Utility provides the most complete and automated path to resolving the "Preflight Update Required" prompt following the retirement of 3DR's original cloud update servers. All firmware images are stored permanently on Solo's internal storage. With a single click in the browser, the utility stages and flashes the complete drone stack.</p>

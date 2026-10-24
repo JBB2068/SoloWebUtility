@@ -57,43 +57,39 @@ export default {
       });
     }
 
-    // Windows Installer EXE (v1.2.0 and canonical aliases)
+    // Installers: one file each in R2, served under its own name
+    const EXE_NAME = 'Solo Web Utility v1.2.0 Installer.exe';
+    const APK_NAME = 'Solo Web Utility v1.2.0 Installer.apk';
+
+    if (decodedPath === '/' + EXE_NAME) {
+      return await handleR2Request(request, env, EXE_NAME, 'application/octet-stream', 'attachment', EXE_NAME);
+    }
+    if (decodedPath === '/' + APK_NAME) {
+      return await handleR2Request(request, env, APK_NAME, 'application/vnd.android.package-archive', 'attachment', APK_NAME);
+    }
+
+    // Old installer links (earlier names) redirect to the current files
     if (
       decodedPath === '/Solo Web Utility v1.2.0.exe' ||
       decodedPath === '/Solo Web Utility Installer.exe' ||
       url.pathname === '/deploy_to_solo.exe'
     ) {
-      const r2Key = (decodedPath === '/Solo Web Utility v1.2.0.exe')
-        ? 'Solo Web Utility v1.2.0.exe'
-        : (decodedPath === '/Solo Web Utility Installer.exe' ? 'Solo Web Utility Installer.exe' : 'deploy_to_solo.exe');
-      const filename = (decodedPath === '/Solo Web Utility v1.2.0.exe')
-        ? 'Solo Web Utility v1.2.0.exe'
-        : 'Solo Web Utility Installer.exe';
-      return await handleR2Request(
-        request, env, r2Key,
-        'application/octet-stream',
-        'attachment',
-        filename
-      );
+      return Response.redirect(new URL('/' + encodeURIComponent(EXE_NAME), url).toString(), 301);
     }
-
-    // Android APK (v1.2.0 and canonical aliases)
     if (
       decodedPath === '/Solo Web Utility v1.2.0.apk' ||
-      decodedPath === '/Solo Web Utility Installer.apk' ||
-      url.pathname === '/sololink_viewer.apk'
+      decodedPath === '/Solo Web Utility Installer.apk'
     ) {
-      const r2Key = (decodedPath === '/Solo Web Utility v1.2.0.apk')
-        ? 'Solo Web Utility v1.2.0.apk'
-        : (decodedPath === '/Solo Web Utility Installer.apk' ? 'Solo Web Utility Installer.apk' : 'sololink_viewer.apk');
-      const filename = (decodedPath === '/Solo Web Utility v1.2.0.apk')
-        ? 'Solo Web Utility v1.2.0.apk'
-        : 'Solo Web Utility Installer.apk';
+      return Response.redirect(new URL('/' + encodeURIComponent(APK_NAME), url).toString(), 301);
+    }
+
+    // SoloLink Viewer app (separate app, not the installer)
+    if (url.pathname === '/sololink_viewer.apk') {
       return await handleR2Request(
-        request, env, r2Key,
+        request, env, 'sololink_viewer.apk',
         'application/vnd.android.package-archive',
         'attachment',
-        filename
+        'sololink_viewer.apk'
       );
     }
 
