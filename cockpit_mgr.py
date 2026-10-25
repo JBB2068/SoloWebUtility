@@ -74,8 +74,31 @@ GPS_FIX_TYPES = {
 HEARTBEAT_CRC_EXTRA = 50
 AUTOPILOT_VERSION_MSGID = 148
 AUTOPILOT_VERSION_CRC_EXTRA = 178
+STATUSTEXT_MSGID = 253
+STATUSTEXT_CRC_EXTRA = 83
 # Messages whose content we act on are only accepted with a valid CRC
-CHECKED_CRC_EXTRA = {0: HEARTBEAT_CRC_EXTRA, AUTOPILOT_VERSION_MSGID: AUTOPILOT_VERSION_CRC_EXTRA}
+# (STATUSTEXT too: a random 0xFE/0xFD byte must never put garbage text on the OSD bar)
+CHECKED_CRC_EXTRA = {0: HEARTBEAT_CRC_EXTRA, AUTOPILOT_VERSION_MSGID: AUTOPILOT_VERSION_CRC_EXTRA,
+                     STATUSTEXT_MSGID: STATUSTEXT_CRC_EXTRA}
+
+# OSD messages bar: only real vehicle STATUSTEXT messages (never the utility's own notes)
+OSD_HISTORY_MAX = 20      # kept on the server
+OSD_HISTORY_SENT = 15     # sent to the browser with each telemetry poll
+MAV_SEVERITY_NAMES = {0: "EMERGENCY", 1: "ALERT", 2: "CRITICAL", 3: "ERROR",
+                      4: "WARNING", 5: "NOTICE", 6: "INFO", 7: "DEBUG"}
+
+
+def clean_statustext(raw):
+    """STATUSTEXT text field (bytes/str, up to 50 chars, NUL padded) -> clean text."""
+    if not isinstance(raw, str):
+        raw = raw.decode('ascii', 'ignore')       # Python 3 bytes
+    else:
+        try:
+            raw = raw.decode('ascii', 'ignore')   # Python 2 str -> unicode
+        except AttributeError:
+            pass                                  # Python 3 str
+    text = raw.split('\x00', 1)[0]               # text ends at the first NUL
+    return ' '.join(text.split())                 # trim and collapse whitespace
 _ARDUCOPTER_BANNER = re.compile(r"ArduCopter V(\d+\.\d+(?:\.\d+)?)")
 
 
@@ -130,6 +153,11 @@ class TelemetryState(object):
         self.mavlink_messages = [
             {"time": time.strftime("%H:%M:%S"), "text": "Listening for Solo MAVLink...", "severity": 6}
         ]
+        # OSD messages bar (vehicle STATUSTEXT only). session changes when the utility
+        # restarts, so the browser knows ids started over.
+        self.osd_session = "%d" % int(time.time() * 1000)
+        self.osd_seq = 0
+        self.osd_messages = []
         
         # Attitude (Degrees)
         self.pitch = 0.0
@@ -193,6 +221,39 @@ class TelemetryState(object):
         self.mavlink_messages.append(entry)
         if len(self.mavlink_messages) > 100:
             self.mavlink_messages = self.mavlink_messages[-100:]
+
+    def add_osd_message(self, text, severity, now=None):
+        """Record one vehicle STATUSTEXT for the OSD bar. Caller holds self.lock."""
+        try:
+            severity = int(severity)
+        except (TypeError, ValueError):
+            severity = 6
+        severity = min(max(severity, 0), 7)
+        if now is None:
+            now = time.time()
+        self.osd_seq += 1
+        entry = {
+            "id": self.osd_seq,
+            "text": text,
+            "severity": severity,
+            "severity_name": MAV_SEVERITY_NAMES[severity],
+            "timestamp": round(now, 3),
+            "time": time.strftime("%H:%M:%S", time.localtime(now)),
+        }
+        self.osd_messages.append(entry)
+        if len(self.osd_messages) > OSD_HISTORY_MAX:
+            self.osd_messages = self.osd_messages[-OSD_HISTORY_MAX:]
+        return entry
+
+    def osd_payload(self):
+        """OSD bar data for the telemetry JSON. Caller holds self.lock."""
+        recent = [dict(m) for m in self.osd_messages[-OSD_HISTORY_SENT:]]
+        return {
+            "session": self.osd_session,
+            "seq": self.osd_seq,
+            "latest": recent[-1] if recent else None,
+            "messages": recent,
+        }
 
     def update_distance_bearing(self):
         """Compute range and bearing to home waypoint if fix available."""
@@ -334,6 +395,7 @@ class TelemetryState(object):
                     "messages": self.mavlink_messages[-50:]
                 },
                 "messages": self.mavlink_messages[-50:],
+                "osd": self.osd_payload(),
                 "video": vid_status
             }
 
@@ -664,12 +726,13 @@ class LiveMAVLinkClient(threading.Thread):
                     rname = res_map.get(result, "CODE_%d" % result)
                     self.state.add_message("ACK: %s -> %s" % (cname, rname), 4 if result != 0 else 6)
 
-                # STATUSTEXT (253)
-                elif msgid == 253 and len(payload) >= 2:
+                # STATUSTEXT (253): goes to the message log AND the OSD bar
+                elif msgid == STATUSTEXT_MSGID and len(payload) >= 2:
                     sev = ord(payload[0:1]) if sys.version_info[0] < 3 else payload[0]
-                    raw_text = payload[1:min(len(payload), 51)].decode('ascii', errors='ignore').rstrip('\x00').strip()
+                    raw_text = clean_statustext(payload[1:min(len(payload), 51)])
                     if raw_text:
                         self.state.add_message(raw_text, sev)
+                        self.state.add_osd_message(raw_text, sev, now)
                         m = _ARDUCOPTER_BANNER.search(raw_text)
                         if m and compid == 1:
                             self.state.cube_version = m.group(1)

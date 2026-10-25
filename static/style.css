@@ -116,7 +116,7 @@ body {
     font-weight: 700;
 }
 
-/* "Viewer App" download link in the top bar: looks like a tab but is a plain link */
+/* "Viewer for Android" download link in the top bar: looks like a tab but is a plain link */
 .nav-download {
     color: var(--accent-cyan, #22d3ee);
     padding: 8px 16px;

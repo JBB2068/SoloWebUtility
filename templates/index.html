@@ -45,7 +45,7 @@
             <!-- Not a tab: downloads the SoloLink Viewer Android app served by the utility -->
             <a class="nav-download" id="navDownloadViewer" href="/sololink_viewer.apk" download="sololink_viewer.apk"
                title="Download the SoloLink Viewer Android app">
-                <span class="tab-icon">📥</span> Viewer App
+                <span class="tab-icon">📥</span> Viewer for Android
             </a>
         </nav>
 
@@ -1053,6 +1053,20 @@
                     <!-- Primary Flight Display HUD Canvas Overlay -->
                     <canvas id="pfdCanvas"></canvas>
                 </main>
+
+                <!-- MAVLink OSD messages bar: latest vehicle STATUSTEXT over the video.
+                     Click it for the recent message history. -->
+                <div id="osdMsgBar" class="osd-msg-bar osd-empty">
+                    <button id="osdMsgMain" class="osd-msg-main" type="button"
+                            title="Vehicle messages (click for recent history)"
+                            aria-expanded="false" aria-controls="osdMsgHistory">
+                        <span id="osdMsgSev" class="osd-msg-sev">MSG</span>
+                        <span id="osdMsgText" class="osd-msg-text" role="status" aria-live="polite">No vehicle messages yet</span>
+                        <span id="osdMsgAge" class="osd-msg-age"></span>
+                        <span class="osd-msg-caret" aria-hidden="true">▾</span>
+                    </button>
+                    <div id="osdMsgHistory" class="osd-msg-history" hidden></div>
+                </div>
 
 <!-- 2. FLOATING LEFT HUD OVERLAY (Compass, GPS, MAVLink Messages) -->
                 <aside id="leftHud" class="hud-panel left">

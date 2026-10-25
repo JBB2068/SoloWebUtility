@@ -17,6 +17,13 @@
     let lastSpokenLowBat = false;
     let lastSpokenCritBat = false;
     let lastRenderedMsgKey = "";
+    // OSD messages bar state
+    let osdSession = null;
+    let osdLastId = 0;
+    let osdNewTimer = null;
+    let osdLayoutKey = '';
+    const OSD_ACTIVE_SECS_INFO = 10;    // notice / info / debug: bright for 10 s, then dimmed
+    const OSD_ACTIVE_SECS_ALERT = 30;   // warning and worse (PreArm, failsafe...): bright for 30 s
 
     // DOM Elements
     const pfdCanvas = document.getElementById('pfdCanvas');
@@ -834,6 +841,160 @@
     // =========================================================================
     // UI Update & DOM Sync
     // =========================================================================
+    // =========================================================================
+    // MAVLink OSD Messages Bar
+    // =========================================================================
+    const osdBar = document.getElementById('osdMsgBar');
+    const osdMain = document.getElementById('osdMsgMain');
+    const osdSev = document.getElementById('osdMsgSev');
+    const osdText = document.getElementById('osdMsgText');
+    const osdAge = document.getElementById('osdMsgAge');
+    const osdHistory = document.getElementById('osdMsgHistory');
+    const osdViewport = document.getElementById('pfdViewport');
+    const OSD_DEFAULT_TOP = 32;   // px below the top of the video: just under the heading tape
+    const OSD_SEV_LABELS = ['EMERG', 'ALERT', 'CRIT', 'ERROR', 'WARN', 'NOTICE', 'INFO', 'DEBUG'];
+
+    function osdSevClass(sev) {
+        if (sev <= 3) return 'osd-sev-crit';
+        if (sev === 4) return 'osd-sev-warn';
+        if (sev >= 7) return 'osd-sev-debug';
+        return 'osd-sev-info';
+    }
+
+    function osdAgeText(secs) {
+        if (secs < 2) return 'now';
+        if (secs < 60) return Math.floor(secs) + 's';
+        if (secs < 3600) return Math.floor(secs / 60) + 'm';
+        return Math.floor(secs / 3600) + 'h';
+    }
+
+    // Keep the bar between the speed and altitude tapes (they move when the HUD panels hide)
+    function layoutOsdBar() {
+        if (!osdBar || !osdViewport) return;
+        const w = osdViewport.clientWidth || 0;
+        let left = hudVisible ? 280 : 64;           // panel + speed tape + gap
+        let right = hudVisible ? 288 : 82;          // panel + altitude tape + VSI + gap
+        if (w - left - right < 260) {               // narrow screens: use the full width
+            left = 8;
+            right = 8;
+        }
+        // Default spot is just under the heading tape. If the cockpit's own control buttons
+        // (they wrap onto extra lines on narrow screens) would cover it, go below them.
+        let top = OSD_DEFAULT_TOP;
+        const vp = osdViewport.getBoundingClientRect();
+        const barRect = osdMain ? osdMain.getBoundingClientRect() : null;
+        const barH = barRect && barRect.height ? barRect.height : 28;
+        const barL = vp.left + left, barR = vp.right - right;
+        const btns = document.querySelectorAll('#tab-cockpit .top-bar .btn-ctrl');
+        let below = 0;
+        for (let i = 0; i < btns.length; i++) {
+            const r = btns[i].getBoundingClientRect();
+            if (!r.width || !r.height) continue;
+            const overlapX = r.left < barR && r.right > barL;
+            const overlapY = r.top < vp.top + OSD_DEFAULT_TOP + barH && r.bottom > vp.top + OSD_DEFAULT_TOP;
+            if (overlapX && overlapY) below = Math.max(below, r.bottom - vp.top + 4);
+        }
+        if (below) top = Math.round(below);
+        const key = left + '_' + right + '_' + top;
+        if (key !== osdLayoutKey) {
+            osdLayoutKey = key;
+            osdBar.style.left = left + 'px';
+            osdBar.style.right = right + 'px';
+            osdBar.style.top = top + 'px';
+        }
+    }
+
+    function renderOsdHistory(list) {
+        if (!osdHistory) return;
+        if (!list.length) {
+            osdHistory.innerHTML = '<div class="osd-hist-empty">No vehicle messages yet.</div>';
+            return;
+        }
+        let html = '';
+        for (let i = list.length - 1; i >= 0; i--) {          // newest first
+            const m = list[i];
+            const sev = (typeof m.severity === 'number') ? m.severity : 6;
+            html += '<div class="osd-hist-row ' + osdSevClass(sev) + '">' +
+                '<span class="osd-hist-time">' + escapeHtml(m.time || '') + '</span>' +
+                '<span class="osd-hist-sev">' + (OSD_SEV_LABELS[sev] || 'INFO') + '</span>' +
+                '<span class="osd-hist-text">' + escapeHtml(m.text || '') + '</span></div>';
+        }
+        osdHistory.innerHTML = html;
+    }
+
+    function updateOsdBar(telem) {
+        if (!osdBar) return;
+        layoutOsdBar();
+        const osd = telem.osd || {};
+        const list = Array.isArray(osd.messages) ? osd.messages : [];
+        const latest = osd.latest || (list.length ? list[list.length - 1] : null);
+
+        // The utility restarted: message ids start over
+        if (osd.session && osd.session !== osdSession) {
+            osdSession = osd.session;
+            osdLastId = 0;
+        }
+
+        if (!latest) {
+            osdBar.className = 'osd-msg-bar osd-empty';
+            osdSev.textContent = 'MSG';
+            osdText.textContent = 'No vehicle messages yet';
+            osdAge.textContent = '';
+            if (osdBar.classList.contains('osd-open')) renderOsdHistory(list);
+            return;
+        }
+
+        const sev = (typeof latest.severity === 'number') ? latest.severity : 6;
+        const isNew = latest.id !== osdLastId;
+        // Age from the Solo's own clock, so a phone with a different clock still fades correctly
+        const serverNow = (typeof telem.server_time === 'number') ? telem.server_time : (Date.now() / 1000);
+        const age = Math.max(0, serverNow - (latest.timestamp || serverNow));
+        const activeSecs = sev <= 4 ? OSD_ACTIVE_SECS_ALERT : OSD_ACTIVE_SECS_INFO;
+        const open = osdBar.classList.contains('osd-open');
+
+        let cls = 'osd-msg-bar ' + osdSevClass(sev);
+        if (age > activeSecs) cls += ' osd-idle';
+        if (open) cls += ' osd-open';
+        if (isNew && osdLastId !== 0 && age < activeSecs) {
+            cls += ' osd-new';
+            if (osdNewTimer) clearTimeout(osdNewTimer);
+            osdNewTimer = setTimeout(function() { osdBar.classList.remove('osd-new'); }, 950);
+        } else if (osdBar.classList.contains('osd-new')) {
+            cls += ' osd-new';
+        }
+        if (osdBar.className !== cls) osdBar.className = cls;
+
+        if (isNew) {
+            osdLastId = latest.id;
+            osdSev.textContent = OSD_SEV_LABELS[sev] || 'INFO';
+            osdText.textContent = latest.text || '';
+            osdMain.title = (latest.time ? '[' + latest.time + '] ' : '') + (latest.text || '') + '  (click for recent messages)';
+            if (open) renderOsdHistory(list);
+        }
+        osdAge.textContent = osdAgeText(age);
+    }
+
+    if (osdMain) {
+        osdMain.addEventListener('click', function(e) {
+            e.stopPropagation();
+            const open = osdBar.classList.toggle('osd-open');
+            osdMain.setAttribute('aria-expanded', open ? 'true' : 'false');
+            osdHistory.hidden = !open;
+            if (open) {
+                const osd = (currentTelem && currentTelem.osd) || {};
+                renderOsdHistory(Array.isArray(osd.messages) ? osd.messages : []);
+            }
+        });
+        // Clicking anywhere else closes the history
+        document.addEventListener('click', function(e) {
+            if (osdBar.classList.contains('osd-open') && !osdBar.contains(e.target)) {
+                osdBar.classList.remove('osd-open');
+                osdMain.setAttribute('aria-expanded', 'false');
+                osdHistory.hidden = true;
+            }
+        });
+    }
+
     function updateDOM(telem) {
         if (!telem) return;
         try {
@@ -952,6 +1113,9 @@
                     }
                 }
             }
+
+            // MAVLink OSD messages bar (vehicle STATUSTEXT)
+            updateOsdBar(telem);
 
             // Right HUD Battery
             batVoltsBig.textContent = rawV.toFixed(2) + ' V';

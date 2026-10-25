@@ -1742,7 +1742,7 @@ class TestSoloWebUtility(unittest.TestCase):
             self.assertIn('href="/sololink_viewer.apk"', f.read())
         import bake_into_firmware as _b
         self.assertFalse("sololink_viewer.apk.bin".endswith(_b.SKIP_EXTS))
-        # Top bar: "Viewer App" download link right after the User Manual tab. It must not be a
+        # Top bar: "Viewer for Android" download link right after the User Manual tab. It must not be a
         # .nav-tab (the tab code would treat it as a tab and blank the page).
         for page in (("static", "index.html"), ("templates", "index.html")):
             with open(os.path.join(BASE_DIR, *page), "r", encoding="utf-8") as f:
@@ -1751,7 +1751,97 @@ class TestSoloWebUtility(unittest.TestCase):
             link = re.search(r'<a class="nav-download" id="navDownloadViewer"[^>]*>', nav).group(0)
             self.assertIn('href="/sololink_viewer.apk"', link)
             self.assertNotIn("nav-tab", link)
+            self.assertIn("Viewer for Android", nav[nav.index('id="navDownloadViewer"'):])
             self.assertLess(nav.index('id="navTabManual"'), nav.index('id="navDownloadViewer"'))
+
+    def test_25_osd_statustext_messages_bar(self):
+        """STATUSTEXT from the Cube reaches the telemetry JSON for the OSD messages bar: cleaned text,
+        severity, unique id per message (even repeats), timestamp, rolling buffer; bad CRC rejected;
+        the existing message log still gets every message; the HUD page has the bar wired up."""
+        import re
+        import struct
+        import json as _json
+        import cockpit_mgr as cm
+
+        def frame(sev, text, v2=False, sysid=1, seq=1):
+            payload = struct.pack('<B50s', sev, text.encode('ascii'))
+            if v2:
+                payload = payload.rstrip(b'\x00')        # MAVLink 2 trims trailing zeros
+                hdr = struct.pack('<BBBBBBBBBB', 0xfd, len(payload), 0, 0, seq, sysid, 1, 253, 0, 0)
+            else:
+                hdr = struct.pack('<BBBBBB', 0xfe, len(payload), seq, sysid, 1, 253)
+            crc = cm.calc_x25_crc(bytearray(hdr[1:]) + bytearray(payload) + bytearray([83]))
+            return hdr + payload + struct.pack('<H', crc)
+
+        st = cm.TelemetryState()
+        cl = cm.LiveMAVLinkClient(st)
+        d = st.to_dict()
+        self.assertEqual(d["osd"]["messages"], [])
+        self.assertIsNone(d["osd"]["latest"])
+
+        cl.parse_mavlink_bytes(frame(3, "PreArm: Need 3D Fix"))
+        cl.parse_mavlink_bytes(frame(6, "EKF2 IMU0 is using GPS", v2=True))
+        cl.parse_mavlink_bytes(frame(4, "  Low   Battery \x00junk"))
+        bad = bytearray(frame(2, "Crash: Disarming"))
+        bad[12] ^= 0xFF
+        cl.parse_mavlink_bytes(bytes(bad))                      # corrupted frame: ignored
+        cl.parse_mavlink_bytes(frame(6, "own GCS text", sysid=254))   # our own sysid: ignored
+        cl.parse_mavlink_bytes(frame(3, "PreArm: Need 3D Fix"))  # same text again = new message
+
+        d = st.to_dict()
+        _json.dumps(d)
+        osd = d["osd"]
+        texts = [m["text"] for m in osd["messages"]]
+        self.assertEqual(texts, ["PreArm: Need 3D Fix", "EKF2 IMU0 is using GPS", "Low Battery", "PreArm: Need 3D Fix"])
+        self.assertEqual([m["severity"] for m in osd["messages"]], [3, 6, 4, 3])
+        self.assertEqual([m["severity_name"] for m in osd["messages"]], ["ERROR", "INFO", "WARNING", "ERROR"])
+        ids = [m["id"] for m in osd["messages"]]
+        self.assertEqual(ids, sorted(set(ids)))                  # unique and increasing
+        self.assertEqual(osd["latest"]["id"], ids[-1])
+        self.assertEqual(osd["seq"], ids[-1])
+        self.assertTrue(osd["session"])
+        for m in osd["messages"]:
+            self.assertIsInstance(m["timestamp"], float)
+            self.assertLessEqual(abs(m["timestamp"] - time.time()), 5)
+            self.assertNotIn("\x00", m["text"])
+        # the existing MAVLink message log still receives every STATUSTEXT
+        log = [m["text"] for m in d["mavlink_messages"]]
+        self.assertEqual(log.count("PreArm: Need 3D Fix"), 2)
+        self.assertIn("EKF2 IMU0 is using GPS", log)
+        # the utility's own notes stay out of the OSD bar
+        self.assertNotIn("Listening for Solo MAVLink...", texts)
+        self.assertFalse(any(t.startswith("Connected to Solo MAVLink") for t in texts))
+
+        # rolling buffer: 20 kept, 15 sent; out-of-range severity is clamped
+        for i in range(30):
+            st.add_osd_message("m%d" % i, 9)
+        d = st.to_dict()
+        self.assertEqual(len(st.osd_messages), cm.OSD_HISTORY_MAX)
+        self.assertEqual(len(d["osd"]["messages"]), cm.OSD_HISTORY_SENT)
+        self.assertEqual(d["osd"]["latest"]["text"], "m29")
+        self.assertEqual(d["osd"]["latest"]["severity"], 7)
+
+        # Python 2.7 rules for the Solo (no f-strings in the new code)
+        with open(os.path.join(BASE_DIR, "cockpit_mgr.py"), "r", encoding="utf-8") as f:
+            src = f.read()
+        self.assertIsNone(re.search(r'\bf"|\bf\'', src))
+
+        # Frontend: bar on the video, wired to telemetry.osd, closes history on outside click
+        for page in (("static", "index.html"), ("templates", "index.html")):
+            with open(os.path.join(BASE_DIR, *page), "r", encoding="utf-8") as f:
+                html = f.read()
+            body = html[html.index('<div class="cockpit-body">'):html.index('<aside id="leftHud"')]
+            for el_id in ("osdMsgBar", "osdMsgMain", "osdMsgSev", "osdMsgText", "osdMsgHistory"):
+                self.assertIn('id="%s"' % el_id, body)
+        with open(os.path.join(BASE_DIR, "static", "cockpit.js"), "r", encoding="utf-8") as f:
+            js = f.read()
+        self.assertIn("updateOsdBar(telem);", js)
+        self.assertIn("telem.osd", js)
+        self.assertIn("osdText.textContent = latest.text", js)      # text set safely, never as HTML
+        with open(os.path.join(BASE_DIR, "static", "cockpit.css"), "r", encoding="utf-8") as f:
+            css = f.read()
+        for cls in (".osd-sev-crit", ".osd-sev-warn", ".osd-sev-info", ".osd-idle"):
+            self.assertIn(cls, css)
 
 if __name__ == "__main__":
     suite = unittest.TestLoader().loadTestsFromTestCase(TestSoloWebUtility)

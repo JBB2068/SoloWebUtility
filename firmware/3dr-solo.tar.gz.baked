@@ -1,4 +1,4 @@
-image 2121297cbaa4e2ed97318223be7ff300
+image 442ca9f78c10b332140b33bc2608d3fe
 ecbd052cf4cf20692fa8b09b3769b8ab  (recipe) tools/bake_squashfs.sh
 2baed77a8919d189bdc48c784f618dbf  app.py
 456e45a4a98a5d615a8e809228e2785d  arducopter_builder.py
@@ -8,7 +8,7 @@ c63da67f0e13ab5ff519a0f88467256f  auth.py
 6571f4ec8ac1eff07f768d1b8256a0cf  bin/uploader.py
 e377ee917663f6636541005d66dcad39  calib_mgr.py
 4b865d86eb34df1667ed7e40345bc8a6  change_password.py
-41da7b9717062d22a63883f4f85e3307  cockpit_mgr.py
+83d9a6b65a0e48026a80686a347abed1  cockpit_mgr.py
 f0e5f52ffc2e83218f5e2460ebfa48d0  compat.py
 05f7f0e5dfaff09161af85b769f34706  controller_mgr.py
 edac6a2523f3ed886211287057127594  firmware/Solo.param
@@ -42,17 +42,17 @@ fea81e213a30e7d920ea5ce05c689500  solo_web_app.py
 d7f76dd75c19ffd78619845a103d376a  static/3DR_Solo_User_Manual_Updated_2026.pdf
 07c148881ce2708ad85ddfc5ffe9dc92  static/Solo_Web_Utility_Owners_Manual.pdf
 21234c04940ace24a31ce82ae61d1db7  static/app.js
-d0deb7f900dc60e596600ae90a6e8699  static/cockpit.css
-8286b555618f8d2960b43ceaa93bfa73  static/cockpit.js
-9eb83f9b4de4a091aa42b12d09cd7380  static/index.html
+c4534c1cc3dc0769fdbcafe5d1c80d4b  static/cockpit.css
+953e94d6cbf82e2fcb71426874ed1c09  static/cockpit.js
+dedb3c6fa9846b233fcb3abc138cfd9a  static/index.html
 075c6c464b218fa88d56eb974bdd98e6  static/jmuxer.min.js
 2aab2ca4000237c0e20058323469f6b9  static/manual.html
 1f04f6c3bd64b1807c79333ce1ccbe4f  static/solo_drone_manual.html
 d022df64c87d6939a0203ab09a50b4ba  static/solo_icon.png
 d4c5749deda789b47c7e72a46bfd0e61  static/solo_icon_512.png
 9f7d1a45d236f7bca97dc257591de8d7  static/sololink_viewer.apk.bin
-4ea712dd9a29aac8c222f10b954ff394  static/style.css
-9eb83f9b4de4a091aa42b12d09cd7380  templates/index.html
+3492d090c2740dd409810f6571940d51  static/style.css
+dedb3c6fa9846b233fcb3abc138cfd9a  templates/index.html
 9ba0e69ed82438d5b621c2d6f7de2149  templates/updates.html
 8af3e84ddd963b2bb5917485ae28447d  version.json
 ba65e63da86b93d1ed42e0132ae649d5  version_mgr.py
