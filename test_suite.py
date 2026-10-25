@@ -1720,6 +1720,39 @@ class TestSoloWebUtility(unittest.TestCase):
         self.assertNotIn("modifiedParams[k] = res.params[k]", block)
         self.assertIn("delete modifiedParams[k]", block)
 
+    def test_24_sololink_viewer_download(self):
+        """The manual's /sololink_viewer.apk links work on the Solo: the viewer app ships inside the
+        utility as static/sololink_viewer.apk.bin (packaging skips *.apk) and is served as an APK."""
+        import re
+        import zipfile
+        apk = os.path.join(BASE_DIR, "static", "sololink_viewer.apk.bin")
+        self.assertTrue(os.path.isfile(apk))
+        self.assertTrue(zipfile.is_zipfile(apk))
+        names = zipfile.ZipFile(apk).namelist()
+        self.assertIn("AndroidManifest.xml", names)
+        self.assertIn("classes.dex", names)
+        self.assertLess(os.path.getsize(apk), 1024 * 1024)   # the small viewer, never the installer
+        with open(os.path.join(BASE_DIR, "solo_web_app.py"), "r", encoding="utf-8") as f:
+            swa = f.read()
+        self.assertIn('VIEWER_APK_URL = "/sololink_viewer.apk"', swa)
+        self.assertIn('"sololink_viewer.apk.bin"', swa)
+        self.assertIn("application/vnd.android.package-archive", swa)
+        self.assertLess(swa.index("if path == VIEWER_APK_URL:"), swa.index("self._serve_static(path)\n            return"))
+        with open(os.path.join(BASE_DIR, "static", "manual.html"), "r", encoding="utf-8") as f:
+            self.assertIn('href="/sololink_viewer.apk"', f.read())
+        import bake_into_firmware as _b
+        self.assertFalse("sololink_viewer.apk.bin".endswith(_b.SKIP_EXTS))
+        # Top bar: "Viewer App" download link right after the User Manual tab. It must not be a
+        # .nav-tab (the tab code would treat it as a tab and blank the page).
+        for page in (("static", "index.html"), ("templates", "index.html")):
+            with open(os.path.join(BASE_DIR, *page), "r", encoding="utf-8") as f:
+                html = f.read()
+            nav = html[html.index('<nav class="nav-tabs" id="navTabs">'):html.index("</nav>")]
+            link = re.search(r'<a class="nav-download" id="navDownloadViewer"[^>]*>', nav).group(0)
+            self.assertIn('href="/sololink_viewer.apk"', link)
+            self.assertNotIn("nav-tab", link)
+            self.assertLess(nav.index('id="navTabManual"'), nav.index('id="navDownloadViewer"'))
+
 if __name__ == "__main__":
     suite = unittest.TestLoader().loadTestsFromTestCase(TestSoloWebUtility)
     runner = unittest.TextTestRunner(stream=sys.stdout, verbosity=2)

@@ -65,6 +65,8 @@ import pair_mgr
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
+VIEWER_APK_URL = "/sololink_viewer.apk"
+VIEWER_APK_FILE = os.path.join(STATIC_DIR, "sololink_viewer.apk.bin")
 
 PORT = 80  # Default HTTP port (falls back to 8080 if 80 is occupied or restricted)
 
@@ -259,6 +261,12 @@ class SoloApiHandler(BaseHTTPRequestHandler):
         # Captive portal automatic browser detection
         if path.lower() in CAPTIVE_PORTAL_PATHS:
             self._handle_captive_portal(path)
+            return
+
+        # SoloLink Viewer app download. Stored as static/sololink_viewer.apk.bin because
+        # every packaging step (image bake, installers, git) deliberately skips *.apk files.
+        if path == VIEWER_APK_URL:
+            self._serve_viewer_apk()
             return
 
         # 1. Static Files
@@ -738,6 +746,21 @@ class SoloApiHandler(BaseHTTPRequestHandler):
             return
 
         self._send_error("Endpoint not found", 404)
+
+    def _serve_viewer_apk(self):
+        try:
+            with open(VIEWER_APK_FILE, 'rb') as f:
+                content = f.read()
+        except Exception:
+            self._send_error("SoloLink Viewer app is not included in this installation.", 404)
+            return
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/vnd.android.package-archive')
+        self.send_header('Content-Disposition', 'attachment; filename="sololink_viewer.apk"')
+        self.send_header('Content-Length', str(len(content)))
+        self.send_header('Cache-Control', 'no-cache')
+        self.end_headers()
+        self.wfile.write(content)
 
     def _serve_static(self, path):
         if path in ['/', '']:
