@@ -12,6 +12,7 @@ import hashlib
 import binascii
 import time
 import uuid
+import threading
 
 AUTH_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "auth.json")
 DEFAULT_PASSWORD = "sololink"
@@ -118,8 +119,7 @@ def change_password(old_password, new_password):
         "is_default": (new_password == DEFAULT_PASSWORD)
     }
     save_auth_data(auth_data)
-    _active_sessions.clear()  # Invalidate all active sessions
-    _save_sessions()
+    clear_sessions()  # every browser must log in with the new password
     return True, "Password changed successfully."
 
 
@@ -136,33 +136,57 @@ def force_set_password(new_password):
         "is_default": (new_password == DEFAULT_PASSWORD)
     }
     save_auth_data(auth_data)
-    _active_sessions.clear()
-    _save_sessions()
+    clear_sessions()
     return True, "Password updated successfully."
 
 
-def get_master_token():
-    """Generate deterministic signature token derived from the current password hash."""
-    auth_data = get_auth_data()
-    stored_hash = auth_data.get("password_hash", "")
-    salt = auth_data.get("salt", "")
-    data = _to_bytes(stored_hash) + b":" + _to_bytes(salt) + b":3drsolo"
-    return hashlib.sha256(data).hexdigest()
+def is_default_password():
+    """True while the password is still the factory default ('sololink')."""
+    try:
+        return bool(get_auth_data().get("is_default", True))
+    except Exception:
+        return True
 
 
+# ---------------------------------------------------------------------------
+# Sessions: a new random token per login, kept in memory (fast enough for the
+# Cockpit's 10 Hz polling), expiring after SESSION_TIMEOUT_SEC without use and
+# revoked by logout or a password change. Persisted to disk so a restart of the
+# utility doesn't log everyone out (written on login/logout and at most every
+# few minutes otherwise, to spare the Solo's flash storage).
+# ---------------------------------------------------------------------------
 SESSION_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "solo_sessions.json")
+SESSION_PERSIST_SEC = 600
+
+_sessions_lock = threading.Lock()
+_sessions_loaded = [False]
+_last_persist = [0.0]
+
+
+def _new_token():
+    raw = binascii.hexlify(os.urandom(24))
+    return raw.decode('ascii') if hasattr(raw, 'decode') else raw
 
 
 def _load_sessions():
-    """Load persistent sessions from disk."""
-    global _active_sessions
+    """Load persisted sessions once (only well-formed random tokens are accepted)."""
+    if _sessions_loaded[0]:
+        return
+    _sessions_loaded[0] = True
     if os.path.exists(SESSION_FILE):
         try:
             with open(SESSION_FILE, "r") as f:
                 data = json.load(f)
-                if isinstance(data, dict):
-                    for k, v in data.items():
-                        _active_sessions[str(k).strip()] = float(v)
+            if isinstance(data, dict):
+                now = time.time()
+                for k, v in data.items():
+                    k = str(k).strip()
+                    try:
+                        last = float(v)
+                    except (TypeError, ValueError):
+                        continue
+                    if len(k) == 48 and now - last < SESSION_TIMEOUT_SEC:
+                        _active_sessions[k] = last
         except Exception:
             pass
 
@@ -170,66 +194,55 @@ def _load_sessions():
 def _save_sessions():
     """Write active sessions to disk."""
     try:
-        with open(SESSION_FILE, "w") as f:
+        tmp = SESSION_FILE + ".tmp"
+        with open(tmp, "w") as f:
             json.dump(_active_sessions, f)
+        if os.name == 'nt' and os.path.exists(SESSION_FILE):
+            os.remove(SESSION_FILE)          # Windows can't rename over a file
+        os.rename(tmp, SESSION_FILE)
+        _last_persist[0] = time.time()
     except Exception:
         pass
 
 
+def _prune(now):
+    for k in [k for k, v in _active_sessions.items() if now - v >= SESSION_TIMEOUT_SEC]:
+        _active_sessions.pop(k, None)
+
+
 def create_session():
-    """Create and return a new session token."""
-    token = get_master_token()
-    _active_sessions[token] = time.time()
-    _save_sessions()
+    """Create and return a new random session token."""
+    token = _new_token()
+    now = time.time()
+    with _sessions_lock:
+        _load_sessions()
+        _prune(now)
+        _active_sessions[token] = now
+        _save_sessions()
     return token
 
 
 def validate_session(token):
-    """Validate if a session token is active and valid."""
+    """True if token is a live session (refreshes its idle timer)."""
     if not token:
         return False
-    
     t = str(token).strip()
     if not t:
         return False
-
-    # 1. Deterministic master token check (matches current password hash)
-    try:
-        master = get_master_token()
-        if t == master:
-            return True
-    except Exception:
-        pass
-
-    # 2. Default password hash / plain check if on default settings
-    try:
-        auth_data = get_auth_data()
-        if auth_data.get("is_default", True):
-            def_hash = hashlib.sha256(_to_bytes(DEFAULT_PASSWORD)).hexdigest()
-            if t == DEFAULT_PASSWORD or t == def_hash:
-                return True
-    except Exception:
-        pass
-
-    # 3. Check memory sessions
-    if t in _active_sessions:
-        return True
-    for k in list(_active_sessions.keys()):
-        if str(k).strip() == t:
-            return True
-
-    # 4. Check disk sessions
-    try:
+    now = time.time()
+    with _sessions_lock:
         _load_sessions()
-        if t in _active_sessions:
-            return True
-        for k in list(_active_sessions.keys()):
-            if str(k).strip() == t:
-                return True
-    except Exception:
-        pass
-
-    return False
+        last = _active_sessions.get(t)
+        if last is None:
+            return False
+        if now - last >= SESSION_TIMEOUT_SEC:
+            _active_sessions.pop(t, None)
+            _save_sessions()
+            return False
+        _active_sessions[t] = now
+        if now - _last_persist[0] > SESSION_PERSIST_SEC:
+            _save_sessions()
+    return True
 
 
 def invalidate_session(token):
@@ -237,6 +250,55 @@ def invalidate_session(token):
     if not token:
         return
     t = str(token).strip()
-    _load_sessions()
-    _active_sessions.pop(t, None)
-    _save_sessions()
+    with _sessions_lock:
+        _load_sessions()
+        _active_sessions.pop(t, None)
+        _save_sessions()
+
+
+def clear_sessions():
+    """Log every browser out (password change)."""
+    with _sessions_lock:
+        _sessions_loaded[0] = True
+        _active_sessions.clear()
+        _save_sessions()
+
+
+# ---------------------------------------------------------------------------
+# Login throttling: after LOGIN_MAX_FAILURES wrong passwords from one address
+# within LOGIN_WINDOW_SEC, that address must wait (doubling, up to 5 minutes).
+# ---------------------------------------------------------------------------
+LOGIN_MAX_FAILURES = 5
+LOGIN_WINDOW_SEC = 300
+LOGIN_BASE_LOCK_SEC = 30
+LOGIN_MAX_LOCK_SEC = 300
+_login_failures = {}      # ip -> {"times": [...], "locked_until": t, "locks": n}
+_login_lock = threading.Lock()
+
+
+def login_wait_seconds(ip):
+    """Seconds this address must still wait before trying again (0 = allowed)."""
+    with _login_lock:
+        rec = _login_failures.get(ip)
+        if not rec:
+            return 0
+        return max(0, int(round(rec.get("locked_until", 0) - time.time())))
+
+
+def record_login_failure(ip):
+    now = time.time()
+    with _login_lock:
+        rec = _login_failures.setdefault(ip, {"times": [], "locked_until": 0, "locks": 0})
+        rec["times"] = [t for t in rec["times"] if now - t < LOGIN_WINDOW_SEC] + [now]
+        if len(rec["times"]) >= LOGIN_MAX_FAILURES:
+            rec["locks"] += 1
+            rec["locked_until"] = now + min(LOGIN_MAX_LOCK_SEC, LOGIN_BASE_LOCK_SEC * (2 ** (rec["locks"] - 1)))
+            rec["times"] = []
+        if len(_login_failures) > 200:          # bound memory
+            for k in list(_login_failures.keys())[:100]:
+                _login_failures.pop(k, None)
+
+
+def record_login_success(ip):
+    with _login_lock:
+        _login_failures.pop(ip, None)

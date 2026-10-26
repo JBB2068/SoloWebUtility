@@ -28,6 +28,16 @@ except ImportError:
 IS_ON_SOLO = os.path.exists("/etc/sololink.conf") or os.path.exists("/firmware")
 SOLO_COPTER_IP = "127.0.0.1" if IS_ON_SOLO else "10.1.1.10"
 SOLO_COPTER_PORT = 14560
+# telem_forwarder's local client ("inject") port on the Solo -- the same endpoint Open Solo's
+# own shot manager uses (udpout:127.0.0.1:14560). Every local client gets its own copy of
+# every MAVLink packet, so nothing is taken from Solex or anyone else. NEVER send to the
+# Controller's 10.1.1.1:14550 from here: its telem_ctrl takes any sender with the Solo's IP
+# as "the Solo's new address" and routes Solex's uplink (parameter requests) to us instead
+# of the Pixhawk -- that is what left Solex stuck at "Reading Vehicle Parameters".
+# Port 14550 on the Solo carries traffic *down* to the Controller/GCS, so not that either.
+SOLO_TELEM_INJECT = ('127.0.0.1', 14560)
+MAVLINK_IDLE_SECS = 10.0        # no browser for this long: close the MAVLink socket entirely
+STREAM_MISSING_SECS = 3.0       # only ask for telemetry streams when ATTITUDE is really missing
 SOLO_CONTROLLER_IP = "10.1.1.1"
 SOLO_VIDEO_TCP_PORT = 5502
 SOLO_VIDEO_UDP_PORT = 5600
@@ -137,6 +147,9 @@ class TelemetryState(object):
         self.packet_count = 0
         self.packet_rate = 0.0
         self.mavlink_connected = False
+        self.mavlink_idle = True          # socket closed because no browser is using telemetry
+        self.last_msg_time = {}           # msgid -> last time seen
+        self.last_vehicle_heartbeat = 0.0
         self.copter_ip = SOLO_COPTER_IP
         self.copter_port = SOLO_COPTER_PORT
         
@@ -153,6 +166,7 @@ class TelemetryState(object):
         self.mavlink_messages = [
             {"time": time.strftime("%H:%M:%S"), "text": "Listening for Solo MAVLink...", "severity": 6}
         ]
+        self.msg_seq = 0              # bumps on every new log message (lets clients skip the log)
         # OSD messages bar (vehicle STATUSTEXT only). session changes when the utility
         # restarts, so the browser knows ids started over.
         self.osd_session = "%d" % int(time.time() * 1000)
@@ -219,6 +233,7 @@ class TelemetryState(object):
         self.last_status_text = text
         self.status_severity = severity
         self.mavlink_messages.append(entry)
+        self.msg_seq += 1
         if len(self.mavlink_messages) > 100:
             self.mavlink_messages = self.mavlink_messages[-100:]
 
@@ -299,6 +314,7 @@ class TelemetryState(object):
             return {
                 # High-level link status
                 "source": self.source,
+                "mavlink_idle": self.mavlink_idle,
                 "connected": is_alive,
                 "mavlink_online": is_alive,
                 "mavlink_connected": is_alive,
@@ -395,6 +411,7 @@ class TelemetryState(object):
                     "messages": self.mavlink_messages[-50:]
                 },
                 "messages": self.mavlink_messages[-50:],
+                "messages_seq": self.msg_seq,
                 "osd": self.osd_payload(),
                 "video": vid_status
             }
@@ -434,14 +451,7 @@ class LiveMAVLinkClient(threading.Thread):
         s = self.get_socket()
         if not s:
             return
-        targets = [
-            (self.host, self.port),
-            ('127.0.0.1', 14550),
-            ('127.0.0.1', 14560),
-            ('10.1.1.10', 14550),
-            ('10.1.1.1', 14550)
-        ]
-        for dest in targets:
+        for dest in (SOLO_TELEM_INJECT,):
             try:
                 s.sendto(packet_bytes, dest)
             except Exception:
@@ -488,9 +498,33 @@ class LiveMAVLinkClient(threading.Thread):
         pkt = self.build_mavlink_v1_packet(11, payload, 89)
         self.send_packet(pkt)
 
+    def _close_socket(self):
+        if self.sock is not None:
+            try:
+                self.sock.close()
+            except Exception:
+                pass
+            self.sock = None
+
     def run(self):
         self.running = True
         while self.running:
+            if not mavlink_wanted():
+                # Nobody is using the web utility: no socket, no heartbeats, no requests.
+                # telem_forwarder drops us as a client and Solex has the link to itself.
+                if self.sock is not None or not self.state.mavlink_idle:
+                    self._close_socket()
+                    with self.state.lock:
+                        self.state.mavlink_connected = False
+                        self.state.mavlink_idle = True
+                    self.last_heartbeat_sent = 0.0
+                    self.last_stream_req_sent = 0.0
+                    self.last_version_req_sent = 0.0
+                time.sleep(0.2)
+                continue
+            if self.state.mavlink_idle:
+                with self.state.lock:
+                    self.state.mavlink_idle = False
             if getattr(self, 'paused', False):
                 # Telemetry hold released (e.g. during native calibration)
                 if self.sock is not None:
@@ -513,8 +547,11 @@ class LiveMAVLinkClient(threading.Thread):
                 self.send_gcs_heartbeat()
                 self.last_heartbeat_sent = now
 
-            # Stream request every 5 seconds
-            if now - self.last_stream_req_sent >= 5.0:
+            # Ask for telemetry streams only if ATTITUDE isn't arriving already (normally the
+            # Controller/Solex have set the rates; overriding them would disturb Solex).
+            if now - self.last_stream_req_sent >= 5.0 and \
+                    now - self.state.last_msg_time.get(30, 0.0) > STREAM_MISSING_SECS and \
+                    now - self.state.last_vehicle_heartbeat < STREAM_MISSING_SECS:
                 self.request_data_streams()
                 self.last_stream_req_sent = now
 
@@ -616,6 +653,7 @@ class LiveMAVLinkClient(threading.Thread):
             
             self.state.last_packet_time = now
             self.state.mavlink_connected = True
+            self.state.last_msg_time[msgid] = now
 
             try:
                 # HEARTBEAT (0)
@@ -629,6 +667,7 @@ class LiveMAVLinkClient(threading.Thread):
                             self.state.flight_mode = new_mode
                             self.state.custom_mode = custom_mode
                         
+                        self.state.last_vehicle_heartbeat = now
                         is_armed = bool(base_mode & 128)
                         if self.state.armed != is_armed:
                             try:
@@ -757,7 +796,8 @@ class LiveMAVLinkClient(threading.Thread):
 
 
 def parse_rtp_h264(data, fu_buffer):
-    """RFC 6184 H.264 RTP depacketizer for raw Annex-B NAL units."""
+    """RFC 6184 H.264 RTP depacketizer for raw Annex-B NAL units (no loss handling;
+    kept for compatibility -- the live pipeline uses RtpH264Depacketizer)."""
     if len(data) < 12:
         return [], fu_buffer
     payload = data[12:]
@@ -802,13 +842,265 @@ def parse_rtp_h264(data, fu_buffer):
     return nals, fu_buffer
 
 
+def _byte(buf, i):
+    return ord(buf[i:i + 1]) if sys.version_info[0] < 3 else buf[i]
+
+
+RTP_MAX_LOSS_GAP = 500               # a bigger forward jump is a stream restart, not loss
+RTP_RESYNC_LATE_RUN = 8              # this many 'late' packets in a row = the stream restarted
+
+
+class RtpH264Depacketizer(object):
+    """RFC 6184 depacketizer that checks RTP sequence numbers.
+
+    A fragmented NAL (FU-A) that lost any packet is dropped instead of being glued
+    together from the pieces that did arrive: a truncated or merged slice is worse for
+    the browser's decoder than a missing one. Later frames still go through (the
+    decoder conceals the gap until the next keyframe), so the picture keeps moving."""
+
+    def __init__(self):
+        self.expected_seq = None
+        self.ssrc = None
+        self.fu_parts = None          # list of byte strings for the FU-A being rebuilt
+        self.lost_packets = 0
+        self.dropped_nals = 0
+        self.late_packets = 0
+        self.late_run = 0             # late packets in a row (a restarted stream looks like this)
+        self.stream_restarts = 0
+
+    def _restart(self):
+        self.stream_restarts += 1
+        self.late_run = 0
+        if self.fu_parts is not None:
+            self.fu_parts = None
+            self.dropped_nals += 1
+
+    def feed(self, data):
+        """One RTP packet in -> list of complete Annex-B NAL units out."""
+        if len(data) < 12:
+            return []
+        b0 = _byte(data, 0)
+        if (b0 >> 6) != 2:                       # not RTP version 2
+            return []
+        seq = struct.unpack('>H', data[2:4])[0]
+        hdr_len = 12 + 4 * (b0 & 0x0F)           # CSRC list
+        if b0 & 0x10 and len(data) >= hdr_len + 4:   # header extension
+            ext_words = struct.unpack('>H', data[hdr_len + 2:hdr_len + 4])[0]
+            hdr_len += 4 + 4 * ext_words
+        payload = data[hdr_len:]
+        if b0 & 0x20 and payload:                # padding
+            pad = _byte(payload, len(payload) - 1)
+            payload = payload[:len(payload) - pad] if pad <= len(payload) else b''
+
+        ssrc = struct.unpack('>I', data[8:12])[0]
+        if ssrc != self.ssrc:
+            # The Solo restarted its encoder (new SSRC and a random new sequence number):
+            # follow the new stream instead of treating it as loss or as late packets.
+            if self.ssrc is not None:
+                self._restart()
+            self.ssrc = ssrc
+            self.expected_seq = None
+        if self.expected_seq is not None and seq != self.expected_seq:
+            gap = (seq - self.expected_seq) & 0xFFFF
+            if gap < 0x8000 and gap <= RTP_MAX_LOSS_GAP:   # packets went missing
+                self.lost_packets += gap
+                self.late_run = 0
+                if self.fu_parts is not None:
+                    self.fu_parts = None
+                    self.dropped_nals += 1
+            elif gap < 0x8000:                    # far ahead: the stream jumped, resync
+                self._restart()
+            else:                                 # late / duplicate packet: ignore it ...
+                self.late_packets += 1
+                self.late_run += 1
+                if self.late_run < RTP_RESYNC_LATE_RUN:
+                    return []
+                self._restart()                   # ... unless they keep coming: resync
+        else:
+            self.late_run = 0
+        self.expected_seq = (seq + 1) & 0xFFFF
+
+        if not payload:
+            return []
+        nal_header = _byte(payload, 0)
+        nal_type = nal_header & 0x1F
+        out = []
+        if 1 <= nal_type <= 23:
+            if self.fu_parts is not None:        # FU-A never finished
+                self.fu_parts = None
+                self.dropped_nals += 1
+            out.append(b'\x00\x00\x00\x01' + payload)
+        elif nal_type == 24:                     # STAP-A
+            idx = 1
+            while idx + 2 <= len(payload):
+                nsize = struct.unpack('>H', payload[idx:idx + 2])[0]
+                idx += 2
+                if nsize and idx + nsize <= len(payload):
+                    out.append(b'\x00\x00\x00\x01' + payload[idx:idx + nsize])
+                idx += nsize
+        elif nal_type == 28 and len(payload) >= 2:   # FU-A
+            fu_header = _byte(payload, 1)
+            if fu_header & 0x80:                 # start
+                if self.fu_parts is not None:
+                    self.dropped_nals += 1
+                rebuilt = struct.pack('B', (nal_header & 0xE0) | (fu_header & 0x1F))
+                self.fu_parts = [b'\x00\x00\x00\x01', rebuilt, payload[2:]]
+            elif self.fu_parts is not None:
+                self.fu_parts.append(payload[2:])
+            # (a middle/end piece without its start is simply discarded)
+            if fu_header & 0x40 and self.fu_parts is not None:
+                out.append(b''.join(self.fu_parts))
+                self.fu_parts = None
+        return out
+
+
+def _read_ue(bits, pos):
+    """Exp-Golomb ue(v) from a '0'/'1' string. Returns (value, new_pos) or (None, pos)."""
+    zeros = 0
+    while pos < len(bits) and bits[pos] == '0':
+        zeros += 1
+        pos += 1
+    if pos >= len(bits) or zeros > 16:
+        return None, pos
+    pos += 1
+    if pos + zeros > len(bits):
+        return None, pos
+    rest = int(bits[pos:pos + zeros], 2) if zeros else 0
+    return (1 << zeros) - 1 + rest, pos + zeros
+
+
+def slice_is_intra(nal):
+    """True for an I (or SI) slice. nal = Annex-B NAL with its 4-byte start code."""
+    head = bytearray(nal[5:17])
+    raw = bytearray()
+    zeros = 0
+    for b in head:                      # undo emulation prevention (00 00 03)
+        if zeros >= 2 and b == 3:
+            zeros = 0
+            continue
+        raw.append(b)
+        zeros = zeros + 1 if b == 0 else 0
+    bits = ''.join(format(b, '08b') for b in raw)
+    first_mb, pos = _read_ue(bits, 0)
+    if first_mb is None:
+        return False
+    slice_type, pos = _read_ue(bits, pos)
+    return slice_type is not None and slice_type % 5 in (2, 4)
+
+
+def relabel_as_idr(nal):
+    """Mark a slice as IDR so the browser's muxer (JMuxer) treats it as a sync frame.
+    This is what the utility always did for a viewer's first frame; it is now only
+    used for I-slices and as the fallback when no keyframe arrives in time."""
+    hdr = _byte(nal, 4)
+    new = (hdr & 0xE0) | 5
+    return nal[:4] + (chr(new) if sys.version_info[0] < 3 else bytes([new])) + nal[5:]
+
+
+# Per-viewer buffering: a viewer that falls further behind than this is skipped
+# forward to the next keyframe instead of building up delay.
+VIEWER_MAX_BACKLOG_FRAMES = 8          # ~1/3 s at the Solo's 24 fps
+GOP_CACHE_MAX_FRAMES = 72              # ~3 s; longer keyframe intervals just aren't cached
+GOP_CACHE_FRESH_SECS = 0.5             # the cache is dropped after a gap in the video
+KEYFRAME_WAIT_SECS = 1.0               # a viewer waits this long for an IDR/I-frame, then starts anyway
+VIDEO_SOCKET_SNDBUF = 32768            # kernel send buffer per viewer (Linux doubles it)
+VIDEO_SOCKET_TIMEOUT = 5.0             # a viewer that accepts nothing for this long is dropped
+VIDEO_IP_TOS = 0x80                    # DSCP CS4 -> Wi-Fi WMM "video" access category
+
+
+class VideoViewer(object):
+    """One browser's video feed: a small frame-aware buffer filled by the receiver
+    thread and drained by that browser's HTTP thread."""
+
+    def __init__(self):
+        self.cond = threading.Condition()
+        self.chunks = []              # Annex-B NAL units waiting to be sent
+        self.frames = 0               # slices (= frames on the Solo) in self.chunks
+        self.waiting_idr = True       # start (and restart after a skip) on a keyframe
+        self.waiting_since = time.time()
+        self.skips = 0
+        self.legacy_starts = 0
+        self.closed = False
+
+    def push(self, nal, nal_type, sps, pps, intra=False):
+        """nal_type 1/5 = slice; intra = I-slice. Keyframe = IDR or I-slice."""
+        with self.cond:
+            if self.closed:
+                return
+            is_slice = nal_type in (1, 5)
+            keyframe = nal_type == 5 or (nal_type == 1 and intra)
+            if self.waiting_idr:
+                if not is_slice:
+                    return
+                if not keyframe and time.time() - self.waiting_since < KEYFRAME_WAIT_SECS:
+                    return            # wait briefly for a keyframe ...
+                if not keyframe:
+                    self.legacy_starts += 1   # ... the Solo sends few: start the old way
+                self.waiting_idr = False
+                self.chunks = []
+                self.frames = 0
+                if nal_type != 5:
+                    nal = relabel_as_idr(nal)
+                nal_type = 5
+            elif is_slice and self.frames >= VIEWER_MAX_BACKLOG_FRAMES:
+                # Too far behind (slow Wi-Fi, stalled tab): throw the backlog away and
+                # resume at the next keyframe, so the delay never builds up.
+                self.chunks = []
+                self.frames = 0
+                self.skips += 1
+                if not keyframe:
+                    self.waiting_idr = True
+                    self.waiting_since = time.time()
+                    return
+                if nal_type != 5:
+                    nal = relabel_as_idr(nal)
+                nal_type = 5
+            if nal_type == 5:
+                # Every keyframe goes out with the current SPS/PPS, so a resolution
+                # change (Solo varStreamRes) or a fresh decoder always has them.
+                if sps:
+                    self.chunks.append(sps)
+                if pps:
+                    self.chunks.append(pps)
+            self.chunks.append(nal)
+            if is_slice:
+                self.frames += 1
+            self.cond.notify()
+
+    def preload(self, chunks):
+        """Start a new viewer from the cached keyframe group (instant picture)."""
+        with self.cond:
+            self.chunks = list(chunks)
+            self.frames = sum(1 for c in chunks if (_byte(c, 4) & 0x1F) in (1, 5))
+            self.waiting_idr = False
+            self.cond.notify()
+
+    def take(self, timeout):
+        """Everything queued, as one buffer (fewer, larger writes). None on timeout."""
+        with self.cond:
+            if not self.chunks and not self.closed:
+                self.cond.wait(timeout)
+            if not self.chunks:
+                return None
+            data = b''.join(self.chunks)
+            self.chunks = []
+            self.frames = 0
+            return data
+
+    def close(self):
+        with self.cond:
+            self.closed = True
+            self.cond.notify()
+
+
 class SoloVideoManager(threading.Thread):
     """
     Manages the 3DR Solo HDMI live video pipeline.
     1. Keeps a TCP keepalive to 10.1.1.1:5502 to register client IP for video.
     2. Binds UDP port 5600 for incoming RTP H.264 video packets.
-    3. Depacketizes RTP packets into Annex-B H.264 NAL units (SPS, PPS, IDR, slices).
-    4. Caches SPS/PPS parameter sets and fans out live H.264 stream to browser clients.
+    3. Depacketizes RTP into Annex-B H.264 NAL units, dropping damaged fragments.
+    4. Caches SPS/PPS and the current keyframe group, and fans the stream out to
+       browser viewers, each with a small frame-aware buffer.
     """
     def __init__(self, controller_ip=SOLO_CONTROLLER_IP, tcp_port=SOLO_VIDEO_TCP_PORT, udp_port=SOLO_VIDEO_UDP_PORT):
         super(SoloVideoManager, self).__init__()
@@ -817,11 +1109,24 @@ class SoloVideoManager(threading.Thread):
         self.tcp_port = tcp_port
         self.udp_port = udp_port
         self.running = False
+        self.force_reconnect_flag = False
         
         self.lock = threading.Lock()
         self.subscribers = []
         self.sps = None
         self.pps = None
+        self.gop = []                 # NAL units since the last keyframe (for instant start)
+        self.last_frame_time = 0.0
+        # keyframe diagnostics (shown in /api/video/status)
+        self.nal_type_counts = {}
+        self.keyframes_idr = 0
+        self.keyframes_islice = 0
+        self.last_key_time = 0.0
+        self.frames_since_key = 0
+        self.key_interval_frames = None
+        self.total_skips = 0
+        self.total_legacy_starts = 0
+        self.depacketizer = RtpH264Depacketizer()
         
         # Diagnostics
         self.handshake_connected = False
@@ -834,54 +1139,80 @@ class SoloVideoManager(threading.Thread):
         self._rate_calc_bytes = 0
 
     def subscribe(self):
-        """Register a new HTTP/browser consumer for live H.264 NAL units."""
-        q = queue.Queue(maxsize=80)
-        q.needs_idr = True
+        """Register a new HTTP/browser viewer. Returns its VideoViewer."""
+        viewer = VideoViewer()
         with self.lock:
-            if self.sps:
-                q.put(self.sps)
-            if self.pps:
-                q.put(self.pps)
-            self.subscribers.append(q)
-        return q
+            # Only a live keyframe group is useful; after a gap it would just be old video
+            fresh = time.time() - self.last_frame_time < GOP_CACHE_FRESH_SECS
+            if self.gop and self.sps and self.pps and fresh:
+                viewer.preload([self.sps, self.pps] + self.gop)
+            self.subscribers.append(viewer)
+        return viewer
 
-    def unsubscribe(self, q):
-        """Unregister an HTTP/browser consumer."""
+    def unsubscribe(self, viewer):
+        """Unregister an HTTP/browser viewer."""
         with self.lock:
-            if q in self.subscribers:
-                self.subscribers.remove(q)
+            if viewer in self.subscribers:
+                self.subscribers.remove(viewer)
+                self.total_skips += getattr(viewer, 'skips', 0)
+                self.total_legacy_starts += getattr(viewer, 'legacy_starts', 0)
+        try:
+            viewer.close()
+        except Exception:
+            pass
+
+    def request_reconnect(self):
+        """RESTART VIDEO: re-register with the Controller and start viewers on a fresh keyframe."""
+        self.force_reconnect_flag = True
+        with self.lock:
+            self.gop = []
+            for v in self.subscribers:
+                with v.cond:
+                    v.chunks = []
+                    v.frames = 0
+                    v.waiting_idr = True
+                    v.waiting_since = time.time()
 
     def broadcast_nal(self, nal_data):
-        """Distribute a completed NAL unit to all active browser subscriber queues."""
-        nal_header = ord(nal_data[4:5]) if sys.version_info[0] < 3 else nal_data[4]
-        nal_type = nal_header & 0x1F
-        
+        """Distribute a completed NAL unit to all viewers."""
+        if len(nal_data) < 5:
+            return
+        nal_type = _byte(nal_data, 4) & 0x1F
+        intra = nal_type == 1 and slice_is_intra(nal_data)
         with self.lock:
+            self.nal_type_counts[nal_type] = self.nal_type_counts.get(nal_type, 0) + 1
             if nal_type == 7:
                 self.sps = nal_data
-            elif nal_type == 8:
+                return
+            if nal_type == 8:
                 self.pps = nal_data
-
-            for q in list(self.subscribers):
-                try:
-                    data_to_send = nal_data
-                    if getattr(q, 'needs_idr', False) and (nal_type == 1 or nal_type == 5):
-                        if sys.version_info[0] < 3:
-                            spoofed_header = chr((nal_header & 0xE0) | 5)
-                            data_to_send = nal_data[:4] + spoofed_header + nal_data[5:]
-                        else:
-                            spoofed_header = bytes([(nal_header & 0xE0) | 5])
-                            data_to_send = nal_data[:4] + spoofed_header + nal_data[5:]
-                        q.needs_idr = False
-                        
-                    if q.full():
-                        try:
-                            q.get_nowait()
-                        except queue.Empty:
-                            pass
-                    q.put_nowait(data_to_send)
-                except Exception:
-                    pass
+                return
+            now = time.time()
+            if now - self.last_frame_time > GOP_CACHE_FRESH_SECS:
+                self.gop = []             # stream paused: cached frames are stale
+            self.last_frame_time = now
+            if nal_type in (1, 5):
+                self.frames_since_key += 1
+            if nal_type == 5 or intra:
+                self.keyframes_idr += nal_type == 5
+                self.keyframes_islice += intra
+                if self.last_key_time:
+                    self.key_interval_frames = self.frames_since_key
+                self.last_key_time = now
+                self.frames_since_key = 0
+                self.gop = [nal_data if nal_type == 5 else relabel_as_idr(nal_data)]
+            elif self.gop:
+                if len(self.gop) >= GOP_CACHE_MAX_FRAMES:
+                    self.gop = []
+                else:
+                    self.gop.append(nal_data)
+            viewers = list(self.subscribers)
+            sps, pps = self.sps, self.pps
+        for v in viewers:
+            try:
+                v.push(nal_data, nal_type, sps, pps, intra)
+            except Exception:
+                pass
 
     def get_status(self):
         """Return video diagnostics dictionary."""
@@ -893,6 +1224,17 @@ class SoloVideoManager(threading.Thread):
             "packet_count": self.packet_count,
             "kbps": round(self.kbps, 1),
             "subscribers": len(self.subscribers),
+            "lost_packets": self.depacketizer.lost_packets,
+            "dropped_nals": self.depacketizer.dropped_nals,
+            "late_packets": self.depacketizer.late_packets,
+            "stream_restarts": self.depacketizer.stream_restarts,
+            "viewer_skips": self.total_skips + sum(getattr(v, 'skips', 0) for v in list(self.subscribers)),
+            "viewer_fallback_starts": self.total_legacy_starts + sum(getattr(v, 'legacy_starts', 0) for v in list(self.subscribers)),
+            "keyframes_idr": self.keyframes_idr,
+            "keyframes_islice": self.keyframes_islice,
+            "keyframe_interval_frames": self.key_interval_frames,
+            "last_keyframe_sec_ago": round(now - self.last_key_time, 1) if self.last_key_time else None,
+            "nal_types": dict((str(k), v) for k, v in self.nal_type_counts.items()),
             "last_packet_sec_ago": round(now - self.last_packet_time, 1) if self.last_packet_time > 0 else None
         }
 
@@ -978,8 +1320,6 @@ class SoloVideoManager(threading.Thread):
             print("[!] Could not bind UDP %d for video: %s" % (self.udp_port, e))
             return
 
-        fu_buffer = b''
-
         while self.running:
             try:
                 data, addr = udp_sock.recvfrom(65536)
@@ -1004,8 +1344,7 @@ class SoloVideoManager(threading.Thread):
                 self._rate_calc_bytes = 0
                 self._rate_calc_time = now
 
-            nals, fu_buffer = parse_rtp_h264(data, fu_buffer)
-            for nal in nals:
+            for nal in self.depacketizer.feed(data):
                 self.broadcast_nal(nal)
 
         try:
@@ -1021,6 +1360,33 @@ video_manager = SoloVideoManager()
 _started = False
 
 
+_last_demand = [0.0]
+_keepalive_fns = []
+
+
+def note_demand():
+    """A browser is using telemetry (called by /api/telemetry, /api/status, actions)."""
+    _last_demand[0] = time.time()
+
+
+def add_keepalive(fn):
+    """fn() -> True keeps the MAVLink link up without a browser (e.g. the home Wi-Fi arm
+    interlock must keep seeing the armed state while the Controller is on home Wi-Fi)."""
+    _keepalive_fns.append(fn)
+
+
+def mavlink_wanted():
+    if time.time() - _last_demand[0] < MAVLINK_IDLE_SECS:
+        return True
+    for fn in list(_keepalive_fns):
+        try:
+            if fn():
+                return True
+        except Exception:
+            pass
+    return False
+
+
 def start_services():
     """Start telemetry and video receiver background threads."""
     global _started
@@ -1030,9 +1396,18 @@ def start_services():
         _started = True
 
 
-def get_telemetry_dict():
-    """Return dictionary of current telemetry values."""
-    return telemetry.to_dict()
+def get_telemetry_dict(msgs_since=None):
+    """Current telemetry. msgs_since=None: legacy payload (message log included 3x).
+    msgs_since=<int>: the log is sent once, as mavlink_messages, and only when it changed
+    since that messages_seq (null otherwise) -- what the Cockpit HUD's 10 Hz poll uses."""
+    d = telemetry.to_dict()
+    if msgs_since is not None:
+        log = d.pop("mavlink_messages", None)
+        d.pop("messages", None)
+        d.get("status", {}).pop("messages", None)
+        changed = msgs_since != 'none' and msgs_since != d.get("messages_seq")
+        d["mavlink_messages"] = log if changed else None
+    return d
 
 
 def get_video_status():
@@ -1112,12 +1487,24 @@ def get_cube_version():
     return ""
 
 
-def is_vehicle_armed():
-    """Return True if the vehicle is currently armed (thread-safe)."""
+def is_vehicle_armed(wake=True, wait=2.5):
+    """Return True if the vehicle is currently armed (thread-safe).
+    wake=True (safety checks before flashing, calibration, Wi-Fi changes): if the link was
+    idle, bring it up and wait briefly for a fresh heartbeat so the answer isn't stale.
+    wake=False (background interlock): just report the last known state."""
     try:
-        if 'telemetry' in globals() and telemetry:
-            with telemetry.lock:
-                return bool(telemetry.armed)
+        if 'telemetry' not in globals() or not telemetry:
+            return False
+        if wake:
+            was_idle = telemetry.mavlink_idle
+            note_demand()
+            # only right after waking from idle (not when the Cube is simply offline)
+            if was_idle and _started and time.time() - telemetry.last_vehicle_heartbeat > 3.0:
+                deadline = time.time() + wait
+                while time.time() < deadline and time.time() - telemetry.last_vehicle_heartbeat > 3.0:
+                    time.sleep(0.1)
+        with telemetry.lock:
+            return bool(telemetry.armed)
     except Exception:
         pass
     return False
@@ -1144,7 +1531,7 @@ def handle_action(action, custom_mode=None):
             mav_client.send_set_mode_command(mode_id)
             try:
                 from pymavlink import mavutil
-                for ep in ['udpout:127.0.0.1:14550', 'udpout:127.0.0.1:14560', 'udpout:10.1.1.1:14550']:
+                for ep in ['udpout:%s:%d' % SOLO_TELEM_INJECT]:
                     try:
                         m = mavutil.mavlink_connection(ep, source_system=254)
                         m.mav.set_mode_send(1, mavutil.mavlink.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED, mode_id)

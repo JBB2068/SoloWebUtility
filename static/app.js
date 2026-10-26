@@ -232,6 +232,7 @@ function setUploadProgressVisible(visible) {
                 showLoginModal(false);
                 showToast('Welcome to 3DR Solo Web Utility!');
                 initAppData();
+                if (data.default_password) { promptDefaultPassword(); }
             } else {
                 loginErrorMsg.textContent = data.message || 'Invalid password.';
                 loginErrorMsg.style.display = 'block';
@@ -252,7 +253,45 @@ function setUploadProgressVisible(visible) {
     btnOpenPasswordModal.addEventListener('click', function () {
         changePasswordErrorMsg.style.display = 'none';
         formChangePassword.reset();
+        var notice = el('passwordDefaultNotice');
+        if (notice) { notice.style.display = 'none'; }
+        var cancel = el('btnCancelPasswordModal');
+        if (cancel) { cancel.textContent = 'Cancel'; }
         passwordModal.style.display = 'flex';
+    });
+
+    // Still on the factory password: ask for a new one after every login until it's changed.
+    function promptDefaultPassword() {
+        try { if (sessionStorage.getItem('solo_keep_default_pw') === '1') { return; } } catch (e) {}
+        changePasswordErrorMsg.style.display = 'none';
+        formChangePassword.reset();
+        var notice = el('passwordDefaultNotice');
+        if (notice) { notice.style.display = 'block'; }
+        var cancel = el('btnCancelPasswordModal');
+        if (cancel) { cancel.textContent = 'Keep Default Password for Now'; }
+        passwordModal.style.display = 'flex';
+    }
+
+    // Cancel / Keep default: close without changing anything. When it was the factory-password
+    // reminder, don't ask again until this browser session ends.
+    var btnCancelPasswordModal = el('btnCancelPasswordModal');
+    if (btnCancelPasswordModal) {
+        btnCancelPasswordModal.addEventListener('click', function () {
+            var notice = el('passwordDefaultNotice');
+            if (notice && notice.style.display !== 'none') {
+                try { sessionStorage.setItem('solo_keep_default_pw', '1'); } catch (e) {}
+                showToast('Keeping the default password. You can change it any time with the 🔒 button.');
+            }
+            passwordModal.style.display = 'none';
+        });
+    }
+
+    // The Cockpit (cockpit.js) asks for the login box when the server answers 401.
+    window.addEventListener('solo-auth-required', function () {
+        if (loginModal.style.display === 'flex') { return; }
+        authToken = null;
+        localStorage.removeItem('solo_auth_token');
+        showLoginModal(true);
     });
     btnClosePasswordModal.addEventListener('click', function () {
         passwordModal.style.display = 'none';
@@ -2430,7 +2469,8 @@ function setUploadProgressVisible(visible) {
     }
 
     function pollArmedSafety() {
-        fetch('/api/telemetry')
+        if (!authToken || document.hidden) { return; }
+        fetch('/api/telemetry?msgs_since=none', { headers: { 'X-Auth-Token': authToken } })
             .then(function (r) { return r.json(); })
             .then(function (telem) {
                 var armed = false;
@@ -2445,6 +2485,9 @@ function setUploadProgressVisible(visible) {
     }
 
     function checkSystemStatus() {
+        // Page hidden: don't keep the Solo busy (its MAVLink link idles), except while an
+        // install countdown is waiting for the Solo to come back.
+        if (document.hidden && !installationInProgress) { return; }
         fetch('/api/status').then(function (r) { return r.json(); })
             .then(function (status) {
                 var copterIsOnline = (status && status.copter_online === true);
@@ -3243,7 +3286,17 @@ function setUploadProgressVisible(visible) {
     // =========================================================================
     // Initialization
     // =========================================================================
+    var appDataStarted = false;
     function initAppData() {
+        if (appDataStarted) {
+            // Logged in again (e.g. session expired): refresh data, don't start the timers twice
+            loadPresets();
+            loadParams();
+            refreshWifiStatus();
+            loadFirmwareChoices();
+            return;
+        }
+        appDataStarted = true;
         loadVersionInfo();
         checkSystemStatus();
         setInterval(checkSystemStatus, 1000);
@@ -3317,10 +3370,22 @@ function setUploadProgressVisible(visible) {
         } catch (e) {}
     }
 
-    // On page load: check auth
+    // On page load: use a saved login only if the Solo still accepts it
     if (authToken) {
         showLoginModal(false);
-        initAppData();
+        fetch('/api/auth/check', { headers: { 'X-Auth-Token': authToken }, cache: 'no-store' })
+            .then(function (r) { return r.json(); })
+            .then(function (res) {
+                if (res && res.authenticated) {
+                    initAppData();
+                    if (res.default_password) { promptDefaultPassword(); }
+                } else {
+                    authToken = null;
+                    localStorage.removeItem('solo_auth_token');
+                    showLoginModal(true);
+                }
+            })
+            .catch(function () { initAppData(); });   // Solo not reachable yet: carry on as before
     } else {
         showLoginModal(true);
     }

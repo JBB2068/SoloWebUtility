@@ -3173,6 +3173,10 @@ The Solo system has been tested to ensure compliance with IC-mandated limits for
                 <h2>🔒 Change Web Portal Password</h2>
                 <button class="modal-close" id="btnClosePasswordModal">&times;</button>
             </div>
+            <div id="passwordDefaultNotice" style="display: none; margin: 0 0 14px; padding: 10px 12px; border-radius: 8px; border: 1px solid rgba(245, 158, 11, 0.6); background: rgba(245, 158, 11, 0.12); color: #fde68a; font-size: 13px; line-height: 1.5;">
+                ⚠️ You're still using the factory password <strong>sololink</strong>. It's also the factory SoloLink Wi-Fi password, so anyone in range who joins the Solo's Wi-Fi could log in here and control the drone. Please choose a new password now (current password: <strong>sololink</strong>).
+                Changing the SoloLink Wi-Fi password is recommended too.
+            </div>
             <form id="formChangePassword">
                 <div class="form-group">
                     <label class="form-label">Current Password:</label>
@@ -3188,6 +3192,7 @@ The Solo system has been tested to ensure compliance with IC-mandated limits for
                 </div>
                 <div class="error-msg" id="changePasswordErrorMsg" style="display: none;"></div>
                 <button type="submit" class="btn btn-primary btn-block">Update Password</button>
+                <button type="button" class="btn btn-secondary btn-block" id="btnCancelPasswordModal" style="margin-top: 8px;">Cancel</button>
             </form>
         </div>
     </div>

@@ -17,6 +17,35 @@
     let lastSpokenLowBat = false;
     let lastSpokenCritBat = false;
     let lastRenderedMsgKey = "";
+    // Login token (saved by the main page at login). Every Cockpit request sends it in a
+    // header; on 401 the main page shows its login box.
+    function authHeaders(extra) {
+        const h = extra || {};
+        try {
+            const t = localStorage.getItem('solo_auth_token');
+            if (t) h['X-Auth-Token'] = t;
+        } catch (e) {}
+        return h;
+    }
+    function authRequired() {
+        try { window.dispatchEvent(new Event('solo-auth-required')); } catch (e) {}
+    }
+    function postAction(body) {
+        return fetch('/api/action', {
+            method: 'POST',
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify(body)
+        }).then(function(r) {
+            if (r.status === 401) { authRequired(); throw new Error('Login required'); }
+            return r.json();
+        });
+    }
+
+    let msgLog = [];                // cached MAVLink message log (telemetry sends it only when it changes)
+    let msgLogSeq = -1;
+    let hudDirty = true;            // redraw the HUD canvas only when something changed
+    const VIDEO_FPS = 24;           // Solo HDMI encoder frame rate
+    const VIDEO_MAX_LAG_S = 0.5;    // jump to the newest frame when playback falls further behind
     // OSD messages bar state
     let osdSession = null;
     let osdLastId = 0;
@@ -154,6 +183,7 @@
 
     btnUnitToggle.addEventListener('click', function() {
         unitSystem = (unitSystem === 'metric') ? 'imperial' : 'metric';
+        hudDirty = true;
         localStorage.setItem('solo_unit_pref', unitSystem);
         updateUnitButtonLabel();
         if (currentTelem) updateDOM(currentTelem);
@@ -165,6 +195,7 @@
     // Responsive Canvas Resizing
     // =========================================================================
     function resizeCanvases() {
+        hudDirty = true;
         const dpr = window.devicePixelRatio || 1;
         const pfdRect = pfdCanvas.parentElement.getBoundingClientRect();
         
@@ -219,6 +250,7 @@
     if (btnToggleHud) {
         btnToggleHud.addEventListener('click', function() {
             hudVisible = !hudVisible;
+            hudDirty = true;
             this.classList.toggle('active', hudVisible);
             if (leftHud) leftHud.classList.toggle('collapsed', !hudVisible);
             if (rightHud) rightHud.classList.toggle('collapsed', !hudVisible);
@@ -232,8 +264,8 @@
             e.stopPropagation();
             this.textContent = '⏳ RESTARTING...';
             this.classList.add('active');
-            fetch('/api/video/restart', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
-                .then(r => r.json())
+            fetch('/api/video/restart', { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: '{}' })
+                .then(r => { if (r.status === 401) { authRequired(); } return r.json(); })
                 .then(() => {
                     setTimeout(() => {
                         btnRestartVideo.textContent = '🔄 RESTART VIDEO';
@@ -294,6 +326,7 @@
         btnVideoToggle.addEventListener('click', function(e) {
             e.stopPropagation();
             videoModeActive = !videoModeActive;
+            hudDirty = true;
             this.classList.toggle('active', videoModeActive);
             this.textContent = videoModeActive ? '📹 VIDEO' : '🧭 HORIZON';
             if (liveVideoFeed) {
@@ -1089,7 +1122,7 @@
             gpsHdopVal.textContent = hdopVal.toFixed(2);
 
             // MAVLink Messages Box
-            const msgs = status.messages || telem.mavlink_messages || telem.messages || [];
+            const msgs = msgLog;
             if (msgCountBadge) {
                 msgCountBadge.textContent = msgs.length + ' MSGS';
             }
@@ -1215,16 +1248,29 @@
 
         function pollTelemetry() {
             if (isPolling) return;
+            // Page hidden (e.g. switched to Solex): stop polling so the Solo's MAVLink link
+            // goes idle and Solex has it to itself.
+            if (document.visibilityState === 'hidden') {
+                setTimeout(pollTelemetry, 1000);
+                return;
+            }
             isPolling = true;
 
-            fetch('/api/telemetry')
+            // The message log is only sent when it changed since msgLogSeq (saves ~1 Mbit/s of Wi-Fi)
+            fetch('/api/telemetry?msgs_since=' + msgLogSeq, { cache: 'no-store', headers: authHeaders() })
                 .then(r => {
+                    if (r.status === 401) { authRequired(); throw new Error('Login required'); }
                     if (!r.ok) throw new Error('HTTP ' + r.status);
                     return r.json();
                 })
                 .then(data => {
                     isPolling = false;
+                    if (Array.isArray(data.mavlink_messages)) {
+                        msgLog = data.mavlink_messages;
+                        msgLogSeq = (typeof data.messages_seq === 'number') ? data.messages_seq : -1;
+                    }
                     currentTelem = data;
+                    hudDirty = true;
                     try {
                         updateDOM(data);
                     } catch (domErr) {
@@ -1232,9 +1278,9 @@
                     }
                     setTimeout(pollTelemetry, 100);
                 })
-                .catch(() => {
+                .catch((err) => {
                     isPolling = false;
-                    setTimeout(pollTelemetry, 600);
+                    setTimeout(pollTelemetry, (err && err.message === 'Login required') ? 2000 : 600);
                 });
         }
 
@@ -1275,7 +1321,8 @@
                 mode: 'video',
                 flushingTime: 0,
                 clearBuffer: false,
-                fps: 30,
+                fps: VIDEO_FPS,          // the Solo encodes at 24 fps (sololink.conf videoMinFR/MaxFR)
+                maxDelay: 500,
                 debug: false,
                 onError: function(data) {
                     console.warn('[Video] JMuxer buffer error:', data);
@@ -1290,10 +1337,42 @@
         }
     }
 
+    // Video is only pulled while the Cockpit tab is showing and the page is visible:
+    // a backgrounded phone tab or another utility tab costs the Solo nothing.
+    function videoWanted() {
+        const cockpit = document.getElementById('tab-cockpit');
+        return document.visibilityState === 'visible' && !!cockpit && cockpit.classList.contains('active');
+    }
+
+    let videoAbort = null;          // AbortController of the running /api/video/h264 fetch
+    let lastVideoByteTime = 0;
+    const VIDEO_STALL_MS = 3000;    // no bytes for this long: drop the connection and reconnect
+
+    function stopVideoFetch() {
+        if (videoAbort) {
+            try { videoAbort.abort(); } catch (e) {}
+            videoAbort = null;
+        }
+    }
+
     async function startH264Stream() {
         while (true) {
+            if (!videoWanted()) {
+                await new Promise(r => setTimeout(r, 400));
+                continue;
+            }
+            const ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+            videoAbort = ctrl;
+            lastVideoByteTime = Date.now();
             try {
-                const response = await fetch('/api/video/h264');
+                const vopts = { cache: 'no-store', headers: authHeaders() };
+                if (ctrl) vopts.signal = ctrl.signal;
+                const response = await fetch('/api/video/h264', vopts);
+                if (response.status === 401) {
+                    authRequired();
+                    await new Promise(r => setTimeout(r, 3000));
+                    continue;
+                }
                 if (!response.body) {
                     await new Promise(r => setTimeout(r, 1500));
                     continue;
@@ -1303,18 +1382,61 @@
                     const { value, done } = await reader.read();
                     if (done) break;
                     if (value && value.length > 0) {
+                        lastVideoByteTime = Date.now();
                         if (jmuxer) {
                             jmuxer.feed({ video: value });
                         }
                         onVideoPacketReceived();
                     }
                 }
+                await new Promise(r => setTimeout(r, 300));
             } catch (err) {
-                console.warn('[Video] Stream fetch error, reconnecting...', err);
-                await new Promise(r => setTimeout(r, 1500));
+                if (!(err && err.name === 'AbortError')) {
+                    console.warn('[Video] Stream fetch error, reconnecting...', err);
+                }
+                await new Promise(r => setTimeout(r, 1000));
+            } finally {
+                if (videoAbort === ctrl) videoAbort = null;
             }
         }
     }
+
+    // Stall watchdog: a half-dead Wi-Fi connection can hang a fetch indefinitely
+    setInterval(function() {
+        if (!videoAbort) return;
+        if (!videoWanted()) {
+            stopVideoFetch();                       // tab hidden / left the Cockpit
+        } else if (Date.now() - lastVideoByteTime > VIDEO_STALL_MS) {
+            console.warn('[Video] No data for ' + VIDEO_STALL_MS + ' ms, reconnecting');
+            stopVideoFetch();
+        }
+    }, 1000);
+
+    // Live-edge control: always play the newest video. JMuxer's own check only looks at the
+    // first buffered range, so after a reconnect gap the video could stay seconds behind.
+    let liveEdgeJumps = 0;
+    setInterval(function() {
+        const v = liveVideoFeed;
+        if (!v || !v.buffered || v.buffered.length === 0 || v.seeking) return;
+        const last = v.buffered.length - 1;
+        const end = v.buffered.end(last);
+        const lag = end - v.currentTime;
+        if (lag > VIDEO_MAX_LAG_S || v.currentTime < v.buffered.start(last)) {
+            try {
+                v.currentTime = Math.max(v.buffered.start(last), end - 0.05);
+                liveEdgeJumps++;
+            } catch (e) {}
+            if (v.paused && videoWanted()) v.play().catch(function() {});
+        }
+    }, 500);
+
+    document.addEventListener('visibilitychange', function() {
+        if (!videoWanted()) {
+            stopVideoFetch();
+        } else if (liveVideoFeed && liveVideoFeed.paused) {
+            liveVideoFeed.play().catch(function() {});
+        }
+    });
 
     function onVideoPacketReceived() {
         lastVideoPacketTime = Date.now();
@@ -1353,7 +1475,8 @@
     // =========================================================================
     function animLoop() {
         try {
-            if (currentTelem) {
+            if (currentTelem && hudDirty) {
+                hudDirty = false;
                 drawPFD(currentTelem);
                 drawMiniHSI(currentTelem);
             }
@@ -1407,11 +1530,7 @@
     // =========================================================================
     window.sendFlightMode = function(mode) {
         if (typeof speak === 'function') speak("Mode " + mode);
-        fetch('/api/action', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'set_mode', mode: mode, custom_mode: mode })
-        }).then(function(r) { return r.json(); }).then(function(data) {
+        postAction({ action: 'set_mode', mode: mode, custom_mode: mode }).then(function(data) {
             console.log('[Cockpit] set_mode response:', data);
         }).catch(function(err) {
             console.error('[Cockpit] set_mode failed:', err);
@@ -1430,11 +1549,7 @@
     window.sendArmToggle = function() {
         // If already confirmed ARMED, disarm immediately (Emergency stop should never be delayed)
         if (currentTelem && currentTelem.status && currentTelem.status.armed) {
-            fetch('/api/action', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'disarm' })
-            });
+            postAction({ action: 'disarm' }).catch(function() {});
             speak("Disarming motors");
             return;
         }
@@ -1469,11 +1584,7 @@
 
     window.executeArmMotors = function() {
         window.cancelArming();
-        fetch('/api/action', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'arm' })
-        });
+        postAction({ action: 'arm' }).catch(function() {});
         speak("Arm command dispatched");
     };
 

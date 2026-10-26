@@ -1843,6 +1843,359 @@ class TestSoloWebUtility(unittest.TestCase):
         for cls in (".osd-sev-crit", ".osd-sev-warn", ".osd-sev-info", ".osd-idle"):
             self.assertIn(cls, css)
 
+    def test_26_video_latency_and_loss_resilience(self):
+        """Live video: RTP loss never produces glued/truncated slices; slow viewers skip to the next
+        keyframe instead of building delay; viewers start on a real keyframe (no P-frame relabelling)
+        with SPS/PPS; stale keyframe cache isn't replayed; RESTART VIDEO works; telemetry can skip
+        the message log; stream sockets get low-latency options; the HUD page controls latency."""
+        import re
+        import struct
+        import cockpit_mgr as cm
+
+        def rtp(seq, payload):
+            return struct.pack('!BBHII', 0x80, 96, seq & 0xFFFF, 0, 1) + payload
+
+        def fu(nal, size=1000):
+            hdr, body, out, pos = nal[0], nal[1:], [], 0
+            while pos < len(body):
+                part = body[pos:pos + size]
+                fh = (hdr & 0x1F) | (0x80 if pos == 0 else 0) | (0x40 if pos + size >= len(body) else 0)
+                out.append(bytes([(hdr & 0xE0) | 28, fh]) + part)
+                pos += size
+            return out
+
+        idr = bytes([0x65]) + b'\x11' * 2500
+        p_slice = bytes([0x41]) + b'\x22' * 2500
+
+        # 1) complete FU-A is rebuilt exactly; a lost middle fragment drops the whole NAL
+        d = cm.RtpH264Depacketizer()
+        out = []
+        for i, pl in enumerate(fu(idr)):
+            out += d.feed(rtp(100 + i, pl))
+        self.assertEqual(out, [b'\x00\x00\x00\x01' + idr])
+        frags = fu(p_slice)
+        out = []
+        seq = 200
+        for i, pl in enumerate(frags):
+            if i == 1:
+                seq += 1          # packet lost
+                continue
+            out += d.feed(rtp(seq, pl))
+            seq += 1
+        self.assertEqual(out, [])
+        self.assertGreaterEqual(d.lost_packets, 1)
+        self.assertGreaterEqual(d.dropped_nals, 1)
+        out = d.feed(rtp(seq, bytes([0x41]) + b'\x33' * 50))      # next single-NAL packet is fine
+        self.assertEqual(out, [b'\x00\x00\x00\x01' + bytes([0x41]) + b'\x33' * 50])
+        self.assertEqual(d.feed(rtp(seq - 5, bytes([0x41]))), [])   # late duplicate ignored
+
+        # 2) fan-out: new viewer waits for a real keyframe and gets SPS/PPS with it
+        vm = cm.SoloVideoManager()
+        sps = b'\x00\x00\x00\x01\x67\x42'
+        pps = b'\x00\x00\x00\x01\x68\xce'
+        IDR = b'\x00\x00\x00\x01' + idr
+        P = b'\x00\x00\x00\x01' + p_slice
+        vm.broadcast_nal(sps)
+        vm.broadcast_nal(pps)
+        v = vm.subscribe()
+        vm.broadcast_nal(P)
+        self.assertIsNone(v.take(0.05))                        # a P-frame is never relabelled/sent first
+        vm.broadcast_nal(IDR)
+        self.assertEqual(v.take(0.05), sps + pps + IDR)
+        self.assertNotIn(b'\x00\x00\x00\x01\x45', P)            # (sanity: no relabel trick remains)
+        self.assertNotIn("spoofed_header", open(os.path.join(BASE_DIR, "cockpit_mgr.py"), encoding="utf-8").read())
+
+        # 3) a viewer that falls behind is skipped to the next keyframe (bounded delay)
+        for _ in range(cm.VIEWER_MAX_BACKLOG_FRAMES + 5):
+            vm.broadcast_nal(P)
+        self.assertTrue(v.waiting_idr)
+        self.assertEqual(v.skips, 1)
+        self.assertLessEqual(v.frames, cm.VIEWER_MAX_BACKLOG_FRAMES)
+        vm.broadcast_nal(IDR)
+        self.assertTrue(v.take(0.05).startswith(sps + pps + IDR))
+
+        # 4) a second viewer starts instantly from the fresh keyframe group...
+        vm.broadcast_nal(P)
+        v2 = vm.subscribe()
+        self.assertEqual(v2.take(0.05), sps + pps + IDR + P)
+        # ...but a stale group (video paused) is not replayed
+        vm.last_frame_time -= 5
+        v3 = vm.subscribe()
+        self.assertIsNone(v3.take(0.05))
+        self.assertTrue(v3.waiting_idr)
+
+        # 4b) Solo encoders may send IDRs rarely (or only at start): a viewer must never wait
+        #     forever (black screen). Non-IDR I-slices count as keyframes; otherwise after
+        #     KEYFRAME_WAIT_SECS the next frame starts the stream (relabelled, the old behaviour).
+        i_slice = b'\x00\x00\x00\x01' + bytes([0x41, 0x88]) + b'\x44' * 300     # nal 1, slice_type 7 (I)
+        p_hdr = b'\x00\x00\x00\x01' + bytes([0x41, 0x98]) + b'\x55' * 300      # nal 1, slice_type 5 (P)
+        self.assertTrue(cm.slice_is_intra(i_slice))
+        self.assertFalse(cm.slice_is_intra(p_hdr))
+        vm2 = cm.SoloVideoManager()
+        vm2.broadcast_nal(sps)
+        vm2.broadcast_nal(pps)
+        w = vm2.subscribe()
+        vm2.broadcast_nal(i_slice)
+        got = w.take(0.05)
+        self.assertEqual(got, sps + pps + cm.relabel_as_idr(i_slice))
+        self.assertEqual(vm2.get_status()["keyframes_islice"], 1)
+        w2 = vm2.subscribe()                       # starts from the cached I-frame group
+        self.assertTrue(w2.take(0.05).startswith(sps + pps + cm.relabel_as_idr(i_slice)))
+        vm2.gop = []
+        w3 = vm2.subscribe()
+        vm2.broadcast_nal(p_hdr)
+        self.assertIsNone(w3.take(0.05))           # waits briefly for a keyframe...
+        w3.waiting_since -= cm.KEYFRAME_WAIT_SECS + 0.1
+        vm2.broadcast_nal(p_hdr)
+        self.assertEqual(w3.take(0.05), sps + pps + cm.relabel_as_idr(p_hdr))   # ...then starts anyway
+        self.assertEqual(w3.legacy_starts, 1)
+        for x in (w, w2, w3):
+            vm2.unsubscribe(x)
+        self.assertEqual(vm2.get_status()["viewer_fallback_starts"], 1)
+
+        # 5) RESTART VIDEO really reconnects (old bug: flag set on the module, read on the instance)
+        vm.request_reconnect()
+        self.assertTrue(vm.force_reconnect_flag)
+        self.assertTrue(v.waiting_idr and v2.waiting_idr)
+        for viewer in (v, v2, v3):
+            vm.unsubscribe(viewer)
+        self.assertEqual(vm.subscribers, [])
+
+        with open(os.path.join(BASE_DIR, "solo_web_app.py"), "r", encoding="utf-8") as f:
+            swa = f.read()
+        self.assertIn("cockpit_mgr.video_manager.request_reconnect()", swa)
+        self.assertNotIn("setattr(cockpit_mgr, 'force_reconnect_flag'", swa)
+        r0 = swa.index("if path == '/api/video/h264':")
+        route = swa[r0:swa.index("\n        if path == ", r0 + 10)]
+        for needle in ("TCP_NODELAY", "SO_SNDBUF", "IP_TOS", "settimeout", "unsubscribe(viewer)"):
+            self.assertIn(needle, route)
+
+        # 6) telemetry: the message log is sent once, and only when it changed
+        st = cm.telemetry
+        full = cm.get_telemetry_dict()
+        self.assertIn("messages", full)                         # legacy payload unchanged
+        seq = full["messages_seq"]
+        slim = cm.get_telemetry_dict(seq)
+        self.assertIsNone(slim["mavlink_messages"])
+        self.assertNotIn("messages", slim)
+        self.assertNotIn("messages", slim["status"])
+        changed = cm.get_telemetry_dict(seq - 1)
+        self.assertIsInstance(changed["mavlink_messages"], list)
+        self.assertIsNone(cm.get_telemetry_dict('none')["mavlink_messages"])
+        self.assertIn("osd", slim)
+
+        # 7) HUD page: real frame rate, live-edge control, stall watchdog, background stop
+        with open(os.path.join(BASE_DIR, "static", "cockpit.js"), "r", encoding="utf-8") as f:
+            js = f.read()
+        self.assertIn("const VIDEO_FPS = 24;", js)
+        self.assertIn("fps: VIDEO_FPS", js)
+        self.assertIsNone(re.search(r"fps:\s*30", js))
+        self.assertIn("v.buffered.end(last)", js)               # newest range, not end(0)
+        self.assertIn("VIDEO_STALL_MS", js)
+        self.assertIn("visibilitychange", js)
+        self.assertIn("function videoWanted()", js)
+        self.assertIn("/api/telemetry?msgs_since=", js)
+        self.assertIn("if (currentTelem && hudDirty)", js)
+        with open(os.path.join(BASE_DIR, "static", "app.js"), "r", encoding="utf-8") as f:
+            self.assertIn("/api/telemetry?msgs_since=none", f.read())
+
+    def test_27_login_hardening(self):
+        """Random per-login tokens (expire, revocable), no default-password-as-token, login
+        throttling, Cockpit routes (telemetry, video, arm/mode) behind login, changes need the
+        token in a header (not just the cookie), pages send the token and prompt on default."""
+        import re
+        import hashlib
+        # tokens: random, distinct, revocable, expiring
+        t1 = auth.create_session()
+        t2 = auth.create_session()
+        self.assertNotEqual(t1, t2)
+        self.assertEqual(len(t1), 48)
+        self.assertTrue(auth.validate_session(t1))
+        auth.invalidate_session(t1)
+        self.assertFalse(auth.validate_session(t1))
+        self.assertTrue(auth.validate_session(t2))
+        auth._active_sessions[t2] -= auth.SESSION_TIMEOUT_SEC + 1
+        self.assertFalse(auth.validate_session(t2))
+        # the factory password (or its hash) is never a token, and there is no fixed master token
+        self.assertTrue(auth.is_default_password())
+        self.assertFalse(auth.validate_session("sololink"))
+        self.assertFalse(auth.validate_session(hashlib.sha256(b"sololink").hexdigest()))
+        self.assertFalse(hasattr(auth, "get_master_token"))
+        # a password change logs every session out
+        t3 = auth.create_session()
+        ok, _ = auth.change_password("sololink", "Another2026")
+        self.assertTrue(ok)
+        self.assertFalse(auth.validate_session(t3))
+        self.assertFalse(auth.is_default_password())
+        auth.force_set_password("sololink")
+        # throttling: 5 wrong passwords -> wait
+        ip = "10.1.1.99"
+        auth.record_login_success(ip)
+        for _ in range(auth.LOGIN_MAX_FAILURES - 1):
+            auth.record_login_failure(ip)
+        self.assertEqual(auth.login_wait_seconds(ip), 0)
+        auth.record_login_failure(ip)
+        self.assertGreater(auth.login_wait_seconds(ip), 0)
+        auth.record_login_success(ip)
+        self.assertEqual(auth.login_wait_seconds(ip), 0)
+
+        # server routes: cockpit endpoints only after the login check
+        with open(os.path.join(BASE_DIR, "solo_web_app.py"), "r", encoding="utf-8") as f:
+            swa = f.read()
+        get_part = swa[swa.index("    def do_GET(self):"):swa.index("    def do_POST(self):")]
+        post_part = swa[swa.index("    def do_POST(self):"):]
+        g_check = get_part.index("# Require Auth for all other API endpoints")
+        for route in ("'/api/telemetry'", "'/api/video/status'", "'/api/video/h264'"):
+            self.assertGreater(get_part.index("if path == %s" % route), g_check, route)
+        p_check = post_part.index("# Protected Endpoints Check")
+        self.assertIn("self._is_authenticated(allow_cookie=False)", post_part[p_check:p_check + 200])
+        for route in ("'/api/action'", "'/api/video/restart'"):
+            self.assertGreater(post_part.index("if path == %s" % route), p_check, route)
+        self.assertIn("SameSite=Strict", swa)
+        self.assertIn("auth.login_wait_seconds(ip)", swa)
+        self.assertIn('"default_password": auth.is_default_password()', swa)
+
+        # pages send the token and handle 401 / default password
+        with open(os.path.join(BASE_DIR, "static", "cockpit.js"), "r", encoding="utf-8") as f:
+            js = f.read()
+        self.assertIn("function authHeaders(", js)
+        self.assertIn("headers: authHeaders()", js)
+        self.assertNotIn("fetch('/api/action'", js.replace("return fetch('/api/action'", ""))
+        self.assertIn("solo-auth-required", js)
+        with open(os.path.join(BASE_DIR, "static", "app.js"), "r", encoding="utf-8") as f:
+            app = f.read()
+        self.assertIn("solo-auth-required", app)
+        self.assertIn("promptDefaultPassword()", app)
+        self.assertIn("fetch('/api/auth/check'", app)
+        self.assertIn("if (appDataStarted)", app)
+        for page in (("static", "index.html"), ("templates", "index.html")):
+            with open(os.path.join(BASE_DIR, *page), "r", encoding="utf-8") as f:
+                self.assertIn('id="passwordDefaultNotice"', f.read())
+
+    def test_28_mavlink_coexists_with_solex(self):
+        """The utility must never redirect MAVLink away from Solex: it talks only to telem_forwarder's
+        local client port (127.0.0.1:14560, like Open Solo's shot manager), never to the Controller's
+        10.1.1.1:14550 (telem_ctrl would route Solex's parameter requests to us) or the Solo's
+        down-link port 14550; it doesn't override stream rates while data flows; it goes idle with no
+        browser; and the factory-password prompt can be dismissed."""
+        import time as _time
+        import cockpit_mgr as cm
+
+        class FakeSock(object):
+            def __init__(self):
+                self.sent = []
+            def sendto(self, data, dest):
+                self.sent.append(dest)
+        st = cm.TelemetryState()
+        cl = cm.LiveMAVLinkClient(st)
+        cl.sock = FakeSock()
+        cl.send_gcs_heartbeat()
+        cl.request_data_streams()
+        cl.send_arm_command(False)
+        cl.send_set_mode_command(5)
+        self.assertEqual(set(cl.sock.sent), {('127.0.0.1', 14560)})
+        self.assertEqual(cm.SOLO_TELEM_INJECT, ('127.0.0.1', 14560))
+        src = open(os.path.join(BASE_DIR, "cockpit_mgr.py"), encoding="utf-8").read()
+        code = "\n".join(l for l in src.splitlines() if not l.strip().startswith("#"))
+        self.assertNotIn("('10.1.1.1', 14550)", code)
+        self.assertNotIn("udpout:10.1.1.1:14550", code)
+        self.assertNotIn("udpout:127.0.0.1:14550", code)
+
+        # idle: no browser demand and no keepalive -> link not wanted; demand wakes it
+        saved = (cm._last_demand[0], list(cm._keepalive_fns))
+        try:
+            del cm._keepalive_fns[:]
+            cm._last_demand[0] = _time.time() - cm.MAVLINK_IDLE_SECS - 1
+            self.assertFalse(cm.mavlink_wanted())
+            cm.note_demand()
+            self.assertTrue(cm.mavlink_wanted())
+            cm._last_demand[0] = 0
+            cm.add_keepalive(lambda: True)            # home Wi-Fi interlock keeps it up
+            self.assertTrue(cm.mavlink_wanted())
+            del cm._keepalive_fns[:]
+            cm._last_demand[0] = 0
+            cm.is_vehicle_armed(wake=False)           # the background interlock must not wake it
+            self.assertFalse(cm.mavlink_wanted())
+        finally:
+            cm._last_demand[0] = saved[0]
+            cm._keepalive_fns[:] = saved[1]
+
+        # stream rates are only requested when ATTITUDE is missing
+        self.assertIn("now - self.state.last_msg_time.get(30, 0.0) > STREAM_MISSING_SECS", src)
+
+        with open(os.path.join(BASE_DIR, "solo_web_app.py"), encoding="utf-8") as f:
+            swa = f.read()
+        self.assertIn("cockpit_mgr.note_demand()", swa)
+        self.assertIn("cockpit_mgr.is_vehicle_armed(wake=False)", swa)
+        self.assertIn("cockpit_mgr.add_keepalive(", swa)
+        # hidden pages stop polling so the link can idle
+        with open(os.path.join(BASE_DIR, "static", "cockpit.js"), encoding="utf-8") as f:
+            self.assertIn("document.visibilityState === 'hidden'", f.read())
+        with open(os.path.join(BASE_DIR, "static", "app.js"), encoding="utf-8") as f:
+            app = f.read()
+        self.assertIn("if (document.hidden && !installationInProgress) { return; }", app)
+        # Cancel / keep default on the password prompt
+        self.assertIn("btnCancelPasswordModal", app)
+        self.assertIn("solo_keep_default_pw", app)
+        for page in (("static", "index.html"), ("templates", "index.html")):
+            with open(os.path.join(BASE_DIR, *page), encoding="utf-8") as f:
+                self.assertIn('id="btnCancelPasswordModal"', f.read())
+
+    def test_29_video_follows_encoder_restarts(self):
+        """When the Solo restarts its video encoder (new SSRC / random new RTP sequence number,
+        e.g. on a resolution change) the depacketizer follows the new stream at once instead of
+        discarding it as 'late' packets or counting a huge fake loss."""
+        import struct
+        import cockpit_mgr as cm
+
+        def rtp(seq, payload, ssrc=1):
+            return struct.pack('!BBHII', 0x80, 96, seq & 0xFFFF, 0, ssrc) + payload
+
+        def nal(n):
+            return bytes([0x41]) + bytes([n & 0xFF]) * 20
+
+        # 1) restart with a new SSRC and a sequence number "behind" the old one
+        d = cm.RtpH264Depacketizer()
+        for i in range(50):
+            d.feed(rtp(40000 + i, nal(i)))
+        out = d.feed(rtp(1000, nal(99), ssrc=2))
+        self.assertEqual(out, [b'\x00\x00\x00\x01' + nal(99)])
+        self.assertEqual(d.stream_restarts, 1)
+        self.assertEqual(d.lost_packets, 0)
+        self.assertEqual(d.feed(rtp(1001, nal(100), ssrc=2)), [b'\x00\x00\x00\x01' + nal(100)])
+
+        # 2) same SSRC but the sequence number jumps far ahead: resync, no fake loss
+        d = cm.RtpH264Depacketizer()
+        for i in range(10):
+            d.feed(rtp(100 + i, nal(i)))
+        self.assertEqual(len(d.feed(rtp(20000, nal(1)))), 1)
+        self.assertEqual(d.lost_packets, 0)
+        self.assertEqual(d.stream_restarts, 1)
+
+        # 3) same SSRC, sequence jumps "behind": a few packets are dropped, then it resyncs
+        d = cm.RtpH264Depacketizer()
+        for i in range(10):
+            d.feed(rtp(30000 + i, nal(i)))
+        got = []
+        for i in range(30):
+            got += d.feed(rtp(5 + i, nal(i)))
+        self.assertGreaterEqual(len(got), 30 - cm.RTP_RESYNC_LATE_RUN)
+        self.assertEqual(d.stream_restarts, 1)
+
+        # 4) ordinary small loss is still counted, and a single reordered packet is still ignored
+        d = cm.RtpH264Depacketizer()
+        d.feed(rtp(10, nal(1)))
+        d.feed(rtp(13, nal(2)))
+        self.assertEqual(d.lost_packets, 2)
+        self.assertEqual(d.feed(rtp(12, nal(3))), [])
+        self.assertEqual(len(d.feed(rtp(14, nal(4)))), 1)
+        self.assertEqual(d.stream_restarts, 0)
+
+        # 5) the counters are in /api/video/status
+        st = cm.SoloVideoManager().get_status()
+        self.assertIn('stream_restarts', st)
+        self.assertIn('late_packets', st)
+
 if __name__ == "__main__":
     suite = unittest.TestLoader().loadTestsFromTestCase(TestSoloWebUtility)
     runner = unittest.TextTestRunner(stream=sys.stdout, verbosity=2)

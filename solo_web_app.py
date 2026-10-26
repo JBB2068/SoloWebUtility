@@ -10,6 +10,7 @@ import os
 import sys
 import json
 import time
+import threading
 import socket
 import signal
 import shutil
@@ -151,7 +152,7 @@ class SoloApiHandler(BaseHTTPRequestHandler):
     def _send_error(self, message, status_code=400):
         self._send_json({"error": True, "message": message}, status_code=status_code)
 
-    def _get_auth_token(self):
+    def _get_auth_token(self, allow_cookie=True):
         token = None
         # 1. Check query string first (?token=...)
         if hasattr(self, 'path') and 'token=' in self.path:
@@ -186,8 +187,9 @@ class SoloApiHandler(BaseHTTPRequestHandler):
         if token and token.lower().startswith('bearer '):
             token = token[7:].strip()
 
-        # 3. Check Cookie (solo_session=...)
-        if not token and hasattr(self, 'headers'):
+        # 3. Check Cookie (solo_session=...) -- reads only. Changes (POST) must carry the
+        #    token explicitly, so another web page can't trigger them through the cookie.
+        if not token and allow_cookie and hasattr(self, 'headers'):
             cookie_str = None
             if hasattr(self.headers, 'getheader'):
                 cookie_str = self.headers.getheader('Cookie') or self.headers.getheader('cookie')
@@ -202,8 +204,8 @@ class SoloApiHandler(BaseHTTPRequestHandler):
 
         return token.strip() if token else None
 
-    def _is_authenticated(self):
-        token = self._get_auth_token()
+    def _is_authenticated(self, allow_cookie=True):
+        token = self._get_auth_token(allow_cookie)
         return auth.validate_session(token)
 
     def _read_json_body(self):
@@ -292,7 +294,9 @@ class SoloApiHandler(BaseHTTPRequestHandler):
             return
 
         if path == '/api/auth/check':
-            self._send_json({"authenticated": self._is_authenticated()})
+            ok = self._is_authenticated()
+            self._send_json({"authenticated": ok,
+                             "default_password": auth.is_default_password() if ok else None})
             return
 
         # Firmware Update & APJ Builder API
@@ -309,9 +313,28 @@ class SoloApiHandler(BaseHTTPRequestHandler):
             self._send_json(arducopter_builder.update_engine.get_state())
             return
 
+        # Require Auth for all other API endpoints
+        if not self._is_authenticated():
+            self._send_error("Authentication required.", 401)
+            return
+
         # Cockpit Telemetry & Live Video API
         if path == '/api/telemetry':
-            self._send_json(cockpit_mgr.get_telemetry_dict())
+            # ?msgs_since=<messages_seq>: the message log is only sent when it changed
+            # (the Cockpit HUD polls this 10x a second). Without it: the full legacy payload.
+            # ?msgs_since=none: never include the log (status-only pollers).
+            msgs_since = None
+            if 'msgs_since' in query:
+                raw = query['msgs_since'][0]
+                if raw == 'none':
+                    msgs_since = 'none'
+                else:
+                    try:
+                        msgs_since = int(raw)
+                    except (ValueError, TypeError):
+                        msgs_since = -1
+            cockpit_mgr.note_demand()          # keeps the MAVLink link up while a page is open
+            self._send_json(cockpit_mgr.get_telemetry_dict(msgs_since))
             return
 
         if path == '/api/video/status':
@@ -319,31 +342,46 @@ class SoloApiHandler(BaseHTTPRequestHandler):
             return
 
         if path == '/api/video/h264':
-            q = cockpit_mgr.video_manager.subscribe()
-            self.send_response(200)
-            self.send_header('Content-Type', 'video/mp4; codecs="avc1.42E01E"')
-            self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
-            self.send_header('Connection', 'close')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.end_headers()
+            viewer = cockpit_mgr.video_manager.subscribe()
+            conn = self.connection
+            # Low latency: no Nagle delay, a small kernel buffer (so delay can't hide there),
+            # a send timeout (a vanished phone can't hold a thread for minutes) and the
+            # Wi-Fi "video" priority class.
+            for level, opt, val in ((socket.IPPROTO_TCP, socket.TCP_NODELAY, 1),
+                                    (socket.SOL_SOCKET, socket.SO_SNDBUF, cockpit_mgr.VIDEO_SOCKET_SNDBUF),
+                                    (socket.IPPROTO_IP, getattr(socket, 'IP_TOS', 1), cockpit_mgr.VIDEO_IP_TOS)):
+                try:
+                    conn.setsockopt(level, opt, val)
+                except Exception:
+                    pass
             try:
+                conn.settimeout(cockpit_mgr.VIDEO_SOCKET_TIMEOUT)
+            except Exception:
+                pass
+            try:
+                self.send_response(200)
+                self.send_header('Content-Type', 'video/h264')
+                self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
+                self.send_header('Connection', 'close')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                idle = 0
                 while True:
-                    try:
-                        chunk = q.get(timeout=2.0)
-                        self.wfile.write(chunk)
-                        self.wfile.flush()
-                    except Exception:
-                        break
+                    data = viewer.take(1.0)
+                    if data is None:
+                        idle += 1
+                        if idle >= 2:          # no video for 2 s: end; the browser reconnects
+                            break
+                        continue
+                    idle = 0
+                    self.wfile.write(data)
+                    self.wfile.flush()
             except Exception:
                 pass
             finally:
-                cockpit_mgr.video_manager.unsubscribe(q)
+                cockpit_mgr.video_manager.unsubscribe(viewer)
             return
 
-        # Require Auth for all other API endpoints
-        if not self._is_authenticated():
-            self._send_error("Authentication required.", 401)
-            return
 
         # 3. Flashing State & Logs
         if path == '/api/flash/status':
@@ -425,15 +463,23 @@ class SoloApiHandler(BaseHTTPRequestHandler):
 
         # 1. Login Endpoint (Public)
         if path == '/api/auth/login':
+            ip = self.client_address[0] if self.client_address else '?'
+            wait = auth.login_wait_seconds(ip)
+            if wait > 0:
+                self._send_error("Too many wrong passwords. Try again in %d seconds." % wait, 429)
+                return
             pwd = body.get('password', '')
             if auth.verify_password(pwd):
+                auth.record_login_success(ip)
                 token = auth.create_session()
                 self._send_json({
                     "success": True,
                     "token": token,
+                    "default_password": auth.is_default_password(),
                     "message": "Login successful."
-                }, cookie='solo_session=%s; Path=/; Max-Age=86400' % token)
+                }, cookie='solo_session=%s; Path=/; Max-Age=86400; HttpOnly; SameSite=Strict' % token)
             else:
+                auth.record_login_failure(ip)
                 self._send_error("Invalid password.", 401)
             return
 
@@ -447,24 +493,26 @@ class SoloApiHandler(BaseHTTPRequestHandler):
                 self._send_error(msg, 400)
             return
 
+        # Protected Endpoints Check (token must be sent explicitly; the cookie alone is not enough)
+        if not self._is_authenticated(allow_cookie=False):
+            self._send_error("Authentication required.", 401)
+            return
+
         # Cockpit Action (Mode Change / Disarm / Arm)
         
         if path == '/api/video/restart':
-            setattr(cockpit_mgr, 'force_reconnect_flag', True)
+            cockpit_mgr.video_manager.request_reconnect()
             self._send_json({"success": True, "message": "Video stream reconnecting..."})
             return
 
         if path == '/api/action':
+            cockpit_mgr.note_demand()
             action = body.get('action', '')
             mode = body.get('mode', body.get('custom_mode', None))
             res = cockpit_mgr.handle_action(action, mode)
             self._send_json(res)
             return
 
-        # Protected Endpoints Check
-        if not self._is_authenticated():
-            self._send_error("Authentication required.", 401)
-            return
 
         # 2. Auth Endpoints
         if path == '/api/auth/logout':
@@ -828,7 +876,28 @@ def run_server(port=PORT):
 
     # Safety: drop the Controller's home Wi-Fi link as soon as the vehicle arms
     try:
-        wifi_mgr.start_arm_interlock(cockpit_mgr.is_vehicle_armed)
+        # The interlock must see the armed state while the Controller is on home Wi-Fi,
+        # even with no browser open; otherwise the MAVLink link may go idle.
+        cockpit_mgr.add_keepalive(lambda: bool(getattr(wifi_mgr, '_STATION_MAYBE_ACTIVE', False)))
+        wifi_mgr.start_arm_interlock(lambda: cockpit_mgr.is_vehicle_armed(wake=False))
+
+        # After a restart wifi_mgr assumes the Controller *might* be on home Wi-Fi (safe for
+        # the interlock) until it has looked. Look once in the background, so the MAVLink link
+        # can go idle when nobody is using the utility.
+        def _resolve_station_state():
+            for delay in (20, 40, 120, 300):
+                time.sleep(delay)
+                try:
+                    if not getattr(wifi_mgr, '_STATION_MAYBE_ACTIVE', False):
+                        return
+                    st = wifi_mgr.get_wifi_status()
+                    if st.get("controller_online", True) is not False:
+                        return
+                except Exception:
+                    pass
+        t = threading.Thread(target=_resolve_station_state)
+        t.daemon = True
+        t.start()
     except Exception as e:
         print("[!] Warning: Could not start Wi-Fi arm interlock: %s" % e)
 
