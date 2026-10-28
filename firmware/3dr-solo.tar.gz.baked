@@ -1,4 +1,4 @@
-image 9b756f5a6ed1ec9f04b270b16e85bb21
+image 944c0870fdc1dd99fec1ba7d57aa6ce2
 ecbd052cf4cf20692fa8b09b3769b8ab  (recipe) tools/bake_squashfs.sh
 2baed77a8919d189bdc48c784f618dbf  app.py
 456e45a4a98a5d615a8e809228e2785d  arducopter_builder.py
@@ -19,12 +19,12 @@ e377ee917663f6636541005d66dcad39  calib_mgr.py
 80df24da88b96cf91ad029480179de27  cockpit_mgr.py
 f0e5f52ffc2e83218f5e2460ebfa48d0  compat.py
 05f7f0e5dfaff09161af85b769f34706  controller_mgr.py
-982d6bd04edec27bfcbb50ba04de1f07  firmware/Solo.param
-bc0b551b7bac50fe6957413bf56f5696  firmware/SoloGreen.param
-12f12704b876f63d569925b3fdfc274f  firmware/arducopter_CubeGreen_4.7.2.apj
-a072febdc07296b3406c0e64b4cc0785  firmware/arducopter_CubeSolo_4.7.2.apj
-8c43215f5381cd70b525382ffb040de5  firmware/previous/arducopter_CubeGreen_4.7.1.apj
-fad35e11c4eeec11b99feb09819f5e87  firmware/previous/arducopter_CubeSolo_4.7.1.apj
+6b116278690caf341f8026d88e529b8e  firmware/Solo.param
+274980bd6536720389b80280164cd85e  firmware/SoloGreen.param
+82041446dee1e3a5d5351a689075b846  firmware/arducopter_CubeGreen_4.7.2.apj
+a34c0af87aded146acf6a867608b22ff  firmware/arducopter_CubeSolo_4.7.2.apj
+1873fa632b9e5fbc4e10f5fc7a88f322  firmware/previous/arducopter_CubeGreen_4.7.1.apj
+3da170d81845f20b7914787a75f2f80e  firmware/previous/arducopter_CubeSolo_4.7.1.apj
 983faaec81bd094442d94ea19096fd98  firmware/solocustombuild.yaml
 9c31086e8883e873ddca743d95548f83  flash_mgr.py
 a232e546eb38e1f8992c0e52c38f7c8d  modules/__init__.py

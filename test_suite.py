@@ -2428,6 +2428,29 @@ class TestSoloWebUtility(unittest.TestCase):
         pdf = open(os.path.join(root, "static", "BMSOne-User-Manual.pdf"), "rb").read()
         self.assertTrue(pdf.startswith(b"%PDF"))
 
+    def test_33_fence_margin_zero(self):
+        """FENCE_MARGIN 0 stays in the Solo defaults: ArduCopter 4.7's default margin is 2 m, which fails
+        arming with "Circle FENCE_MARGIN is greater than FENCE_RADIUS" on Solos that carry FENCE_RADIUS 0.
+        Both .param files (used for every new build from Check for Updates) and every shipped .apj must have it."""
+        import glob
+        root = os.path.dirname(os.path.abspath(__file__))
+        fw = os.path.join(root, "firmware")
+        for name in ("Solo.param", "SoloGreen.param"):
+            lines = [l.split() for l in open(os.path.join(fw, name)).read().splitlines() if l.strip()]
+            vals = dict((l[0], l[1]) for l in lines if len(l) >= 2)
+            self.assertIn("FENCE_MARGIN", vals, name)
+            self.assertEqual(float(vals["FENCE_MARGIN"]), 0.0, name)
+        sys.path.insert(0, os.path.join(root, "bin"))
+        import apj_tool
+        apjs = glob.glob(os.path.join(fw, "*.apj")) + glob.glob(os.path.join(fw, "previous", "*.apj"))
+        self.assertTrue(apjs)
+        for apj in apjs:
+            d = apj_tool.embedded_defaults(apj)
+            self.assertTrue(d.find(), apj)
+            txt = apj_tool.to_ascii(d.contents())
+            vals = dict(l.split()[:2] for l in txt.splitlines() if len(l.split()) >= 2)
+            self.assertEqual(float(vals.get("FENCE_MARGIN", "nan")), 0.0, apj)
+
 
 def _struct_float(b4):
     """Pack 4 signed bytes into the float the gimbal sends as GMB_SWVER."""
