@@ -65,6 +65,28 @@ import arducopter_builder
 import pair_mgr
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Gimbal firmware update (bin/gimbal_update/): a detached runner plus its status file
+sys.path.insert(0, os.path.join(BASE_DIR, "bin", "gimbal_update"))
+try:
+    import gimbal_update
+except Exception as _e:
+    gimbal_update = None
+    print("[!] Gimbal update tool unavailable: %s" % _e)
+
+# Endpoints that use the Cube or its USB link and must wait while the gimbal update runs
+GIMBAL_BUSY_BLOCKS = (
+    '/api/flash/start', '/api/firmware/update', '/api/calib/imu/start', '/api/calib/compass/start',
+    '/api/calib/reboot', '/api/calib/start', '/api/params/fetch-live', '/api/params/save',
+    '/api/params/apply-preset', '/api/params/import',
+)
+
+
+def gimbal_update_running():
+    try:
+        return gimbal_update is not None and gimbal_update.running_pid() is not None
+    except Exception:
+        return False
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 VIEWER_APK_URL = "/sololink_viewer.apk"
 VIEWER_APK_FILE = os.path.join(STATIC_DIR, "sololink_viewer.apk.bin")
@@ -399,6 +421,14 @@ class SoloApiHandler(BaseHTTPRequestHandler):
                 self._send_error("Could not list firmware files: %s" % e, 500)
             return
 
+        # Gimbal firmware update status (polled by the Firmware Update tab)
+        if path == '/api/gimbal/status':
+            if gimbal_update is None:
+                self._send_error("Gimbal update tool is not installed.", 404)
+                return
+            self._send_json(gimbal_update.get_status())
+            return
+
         # Calibration State & Logs
         if path == '/api/calib/status':
             self._send_json(calib_mgr.calib_engine.get_state())
@@ -456,6 +486,59 @@ class SoloApiHandler(BaseHTTPRequestHandler):
 
         self._send_error("Endpoint not found", 404)
 
+    def _handle_gimbal_post(self, path, body):
+        if gimbal_update is None:
+            self._send_error("Gimbal update tool is not installed.", 404)
+            return
+        if path == '/api/gimbal/start':
+            try:
+                if cockpit_mgr.is_vehicle_armed():
+                    self._send_error("SAFETY INTERLOCK: the gimbal cannot be updated while the vehicle is ARMED!", 403)
+                    return
+            except Exception:
+                pass
+            if flash_mgr.flash_engine.is_flashing:
+                self._send_error("Firmware flashing is in progress. Wait until it has finished.", 409)
+                return
+            try:
+                if calib_mgr.calib_engine.is_running:
+                    self._send_error("A calibration is running. Wait until it has finished.", 409)
+                    return
+            except Exception:
+                pass
+            ok, msg = gimbal_update.start(force=bool(body.get('force')))
+            print("[gimbal] start requested (force=%s): %s" % (bool(body.get('force')), msg))
+            if ok:
+                self._send_json({"success": True, "message": msg})
+            else:
+                self._send_error(msg, 409)
+            return
+        if path == '/api/gimbal/reset':
+            if gimbal_update.reset_status():
+                self._send_json({"success": True, "message": "Gimbal update status cleared."})
+            else:
+                self._send_error("The gimbal update is still running.", 409)
+            return
+        # /api/gimbal/boot-updater: install / restore the time-limited boot-time updater
+        if gimbal_update_running():
+            self._send_error("A gimbal firmware update is running. Wait until it has finished.", 409)
+            return
+        action = body.get('action', '')
+        try:
+            if action == 'install':
+                res = gimbal_update.install_boot_updater()
+            elif action == 'restore':
+                res = gimbal_update.restore_boot_updater()
+            else:
+                self._send_error("Unknown action.", 400)
+                return
+        except Exception as e:
+            self._send_error("Could not change the boot updater: %s" % e, 500)
+            return
+        print("[gimbal] boot updater %s: %s" % (action, res))
+        self._send_json({"success": True, "message": "Boot updater: %s" % res,
+                         "boot_updater": gimbal_update.boot_updater_state()})
+
     def do_POST(self):
         parsed = urlparse(self.path)
         path = parsed.path
@@ -496,6 +579,16 @@ class SoloApiHandler(BaseHTTPRequestHandler):
         # Protected Endpoints Check (token must be sent explicitly; the cookie alone is not enough)
         if not self._is_authenticated(allow_cookie=False):
             self._send_error("Authentication required.", 401)
+            return
+
+        # The gimbal update reboots the Cube and uses its USB link: keep other Cube work out
+        if path in GIMBAL_BUSY_BLOCKS and gimbal_update_running():
+            self._send_error("A gimbal firmware update is running. Wait until it has finished.", 409)
+            return
+
+        # Gimbal firmware update
+        if path in ('/api/gimbal/start', '/api/gimbal/reset', '/api/gimbal/boot-updater'):
+            self._handle_gimbal_post(path, body)
             return
 
         # Cockpit Action (Mode Change / Disarm / Arm)
@@ -873,6 +966,13 @@ def run_server(port=PORT):
         cockpit_mgr.start_services()
     except Exception as e:
         print("[!] Warning: Could not start cockpit services: %s" % e)
+
+    # A gimbal update that died (power loss, crash) may have left the Cube's gimbal driver off
+    try:
+        if gimbal_update is not None and gimbal_update.recover_on_startup():
+            print("[gimbal] unfinished gimbal update found: putting MNT1_TYPE back in the background")
+    except Exception as e:
+        print("[!] Warning: gimbal update recovery check failed: %s" % e)
 
     # Safety: drop the Controller's home Wi-Fi link as soon as the vehicle arms
     try:

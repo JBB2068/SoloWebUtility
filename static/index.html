@@ -489,6 +489,78 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Gimbal firmware update (bin/gimbal_update/gimbal_update.py) -->
+            <div class="card card-full" id="gimbalUpdateCard" style="margin-top: 20px;">
+                <div class="card-header">
+                    <h2>🎥 Update Gimbal Firmware</h2>
+                    <span class="badge" id="gimbalStatusBadge">Ready</span>
+                </div>
+                <p class="card-desc">
+                    Updates the 3DR Solo gimbal to the firmware that ships with Open Solo. On ArduCopter 4.x the Solo's own boot-time
+                    updater can no longer reach the gimbal, so a replacement gimbal can be stuck on old firmware (no GoPro controls,
+                    or no tilt). This tool reboots only the Cube a few times to open a path to the gimbal, flashes it, and then puts the
+                    gimbal driver back. It takes about 5 minutes.
+                </p>
+                <div class="info-alert" style="margin-bottom: 14px;">
+                    <strong>Before you start:</strong> props off and the Solo on the ground. <strong>Do not power off the Solo</strong>
+                    until this has finished. The gimbal will not respond to the tilt paddle while it runs, and the Cube restarts
+                    several times. If the power is lost, run the update again: it puts the gimbal driver back and recovers the gimbal.
+                </div>
+                <div style="display: flex; flex-wrap: wrap; gap: 18px; font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">
+                    <span>Firmware on the Solo: <strong id="gimbalFwVersion" style="color: var(--text-main);">…</strong></span>
+                    <span>Last installed by the Solo: <strong id="gimbalInstalledVersion" style="color: var(--text-main);">…</strong></span>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 14px;">
+                    <label style="font-size: 13px; color: var(--text-main); display: flex; align-items: center; gap: 8px;">
+                        <input type="checkbox" id="chkGimbalForce"> Reflash even if the gimbal already runs this version
+                    </label>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="btn btn-primary" id="btnStartGimbalUpdate">▶ Update Gimbal Firmware</button>
+                        <button class="btn btn-secondary" id="btnClearGimbalUpdate" style="display: none;">Clear</button>
+                    </div>
+                </div>
+                <div class="progress-wrap" style="margin-bottom: 14px;">
+                    <div class="progress-bar-bg" style="height: 8px; background: rgba(255,255,255,0.1); border-radius: 4px; overflow: hidden;">
+                        <div id="gimbalProgressBar" style="width: 0%; height: 100%; background: var(--accent-blue); transition: width 0.3s ease;"></div>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 11px; margin-top: 6px; color: var(--text-muted);">
+                        <span id="gimbalStageLabel">Ready</span>
+                        <span id="gimbalPercentLabel">0%</span>
+                    </div>
+                </div>
+                <div class="calib-callout-banner success" id="gimbalDoneBanner" style="display: none;">
+                    <strong id="gimbalDoneTitle">✅ Gimbal firmware updated</strong>
+                    <div id="gimbalDoneText"></div>
+                    <div style="margin-top: 6px;">Please check: the gimbal levels the camera, it follows the tilt paddle, and the GoPro controls work in your app.</div>
+                </div>
+                <div class="calib-callout-banner reboot-needed" id="gimbalFailBanner" style="display: none;">
+                    <strong>⚠️ Gimbal update did not finish</strong>
+                    <div id="gimbalFailText"></div>
+                </div>
+                <div class="terminal-box" style="margin-top: 12px;">
+                    <div class="terminal-header">
+                        <span>GIMBAL UPDATE CONSOLE</span>
+                    </div>
+                    <div class="terminal-body" id="gimbalTerminal" style="height: 180px; overflow-y: auto; background: #0c0f14; border: 1px solid var(--border-color); border-radius: 6px; padding: 10px; font-family: monospace; font-size: 11px; color: #a3e635;">
+                        <div style="color: var(--text-muted);">[System] Gimbal update ready.</div>
+                    </div>
+                </div>
+                <div style="margin-top: 14px; padding: 14px; background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 8px;">
+                    <h3 style="margin: 0 0 4px 0; font-size: 14px; color: var(--text-main);">Boot-time gimbal updater</h3>
+                    <p style="margin: 0 0 10px 0; font-size: 12px; color: var(--text-muted);">
+                        Open Solo checks the gimbal at every boot. If a gimbal flash is ever interrupted, the original updater retries it
+                        with no time limit and can hold up the Solo's startup (no SSH, no pairing) until it is power-cycled. The
+                        replacement adds time limits and a log (<code>/log/gimbal_update.log</code>). It has <strong>not yet been tested
+                        on a drone</strong>; the original is kept and can be put back.
+                        Status: <strong id="gimbalBootUpdaterState" style="color: var(--text-main);">…</strong>
+                    </p>
+                    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                        <button class="btn btn-secondary" id="btnInstallGimbalBootUpdater">Install time-limited updater</button>
+                        <button class="btn btn-secondary" id="btnRestoreGimbalBootUpdater">Restore original updater</button>
+                    </div>
+                </div>
+            </div>
         </section>
 
 

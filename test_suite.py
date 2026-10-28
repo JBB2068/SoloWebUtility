@@ -2196,6 +2196,188 @@ class TestSoloWebUtility(unittest.TestCase):
         self.assertIn('stream_restarts', st)
         self.assertIn('late_packets', st)
 
+    def test_30_gimbal_firmware_update_tool(self):
+        """Update gimbal firmware (bin/gimbal_update): runs the verified MNT1_TYPE / Cube-only-reboot
+        procedure, always puts MNT1_TYPE back (also after a power loss), flashes with a time limit and one
+        retry, skips a current gimbal unless forced, installs the fixed 3DR tools with LF endings and a
+        .orig backup, and the web server exposes it behind login and blocks other Cube work meanwhile."""
+        import json as _json
+        import re as _re
+        import shutil as _shutil
+        import tempfile as _tempfile
+        root = os.path.dirname(os.path.abspath(__file__))
+        gdir = os.path.join(root, "bin", "gimbal_update")
+        sys.path.insert(0, gdir)
+        try:
+            import gimbal_update as gu
+        finally:
+            sys.path.remove(gdir)
+        for f in ("gimbal_update.py", "cube_mount.py", "gimbal_setup_fixed.py", "loadGimbal_fixed.py",
+                  "gimbal_probe.py", "fix_cube_serial.py", "HANDOFF_SoloWebUtility.md"):
+            self.assertTrue(os.path.isfile(os.path.join(gdir, f)), f)
+        for f in ("gimbal_update.py", "cube_mount.py", "gimbal_setup_fixed.py", "loadGimbal_fixed.py"):
+            src = open(os.path.join(gdir, f)).read()
+            self.assertIsNone(_re.search(r'(?<![\w>\'"])[fF]("[^"\n]*\{|\'[^\'\n]*\{)', src),
+                              "%s: f-string (Solo runs Python 2.7)" % f)
+
+        tmp = _tempfile.mkdtemp()
+        saved_paths, saved_sleep = dict(gu.PATHS), gu.time.sleep
+        try:
+            os.makedirs(os.path.join(tmp, "fw"))
+            os.makedirs(os.path.join(tmp, "gimbal"))
+            with open(os.path.join(tmp, "fw", "gimbal_firmware_1.3.6.ax"), "w") as f:
+                _json.dump({"version": "1.3.6", "release": "r"}, f)
+            with open(os.path.join(tmp, "gimbal", "setup.py"), "wb") as f:
+                f.write(b"stock\r\n")
+            open(os.path.join(tmp, "gimbal_setup"), "w").close()
+            with open(os.path.join(tmp, "loadGimbal.py"), "w") as f:
+                f.write("stock loader\n")
+            gu.PATHS.update({k: os.path.join(tmp, v) for k, v in {
+                "status": "st.json", "lock": "lock", "state": "state.json", "log": "log",
+                "firmware_glob": "fw/*.ax", "gimbal_dir": "gimbal", "gimbal_setup": "gimbal_setup",
+                "boot_loader": "loadGimbal.py", "version_file": "AXON"}.items()})
+            gu.time.sleep = lambda s: None
+
+            class Fake(object):
+                def __init__(self, probes, flashes=(True,), armed=False, mnt=2, fail_mount=None):
+                    self.probes, self.flashes = list(probes), list(flashes)
+                    self.armed, self.mnt, self.fail_mount, self.calls = armed, mnt, fail_mount, []
+
+                def cube_info(self):
+                    return {"armed": self.armed, "mnt1_type": self.mnt, "serial0": 1}
+
+                def set_mount(self, t, settle):
+                    self.calls.append(("mount", t))
+                    if t == self.fail_mount:
+                        return False
+                    self.mnt = t
+                    return True
+
+                def install_setup_fix(self):
+                    return gu._install_file(gu.FIXED_SETUP, os.path.join(gu.PATHS["gimbal_dir"], "setup.py"))
+
+                def probe(self, secs=0):
+                    self.calls.append(("probe",))
+                    return self.probes.pop(0)
+
+                def flash(self, fw, progress, timeout=0):
+                    self.calls.append(("flash",))
+                    progress(50, "Uploading 32.16kB of 64.32kB - 50%")
+                    return self.flashes.pop(0), ""
+
+                def usb_disable(self):
+                    pass
+
+            def run(fake, force=False):
+                for n in ("st.json", "state.json", "AXON"):
+                    if os.path.exists(os.path.join(tmp, n)):
+                        os.remove(os.path.join(tmp, n))
+                st = gu.Status(force=force)
+                return gu.run_update(fake, st, force), st, fake
+
+            none = {"usb": "/dev/x", "sysids": [], "bootloader": False, "version": None}
+            old = {"usb": "/dev/x", "sysids": [1], "bootloader": False, "version": "0.28.2"}
+            cur = {"usb": "/dev/x", "sysids": [1], "bootloader": False, "version": "1.3.6"}
+            boot = {"usb": "/dev/x", "sysids": [0], "bootloader": True, "version": None}
+            id0 = {"usb": "/dev/x", "sysids": [0], "bootloader": False, "version": None}
+
+            # normal: id 1 (MNT1_TYPE=2), open port (0), flash, restore (2)
+            r, st, f = run(Fake([none, old]))
+            self.assertEqual(r, "updated")
+            self.assertEqual(f.calls, [("probe",), ("mount", 2), ("mount", 0), ("probe",), ("flash",), ("mount", 2)])
+            self.assertEqual(open(os.path.join(tmp, "AXON")).read().split(), ["1.3.6", "r"])
+            self.assertFalse(os.path.exists(os.path.join(tmp, "state.json")))
+            self.assertEqual(st.data["state"], "done")
+            # already current: no flash unless forced; MNT1_TYPE still restored
+            r, st, f = run(Fake([none, cur]))
+            self.assertEqual(r, "current")
+            self.assertNotIn(("flash",), f.calls)
+            self.assertEqual(f.calls[-1], ("mount", 2))
+            r, st, f = run(Fake([none, cur]), force=True)
+            self.assertEqual(r, "updated")
+            self.assertIn(("flash",), f.calls)
+            # gimbal in its bootloader: flash straight away
+            r, st, f = run(Fake([boot]))
+            self.assertEqual(r, "updated")
+            self.assertEqual(f.calls[:2], [("probe",), ("flash",)])
+            # gimbal still id 0 after the dance: steps 3-4 repeated once
+            r, st, f = run(Fake([none, id0, old]))
+            self.assertEqual(r, "updated")
+            self.assertEqual(f.calls.count(("mount", 0)), 2)
+            # flash fails twice: failed, but MNT1_TYPE is put back
+            r, st, f = run(Fake([none, old], flashes=(False, False)))
+            self.assertEqual(r, "failed")
+            self.assertEqual(f.calls.count(("flash",)), 2)
+            self.assertEqual((f.calls[-1], f.mnt), (("mount", 2), 2))
+            # armed: refused before anything changes
+            r, st, f = run(Fake([], armed=True))
+            self.assertEqual((r, f.calls), ("failed", []))
+            self.assertIn("ARMED", st.data["message"])
+            # MNT1_TYPE cannot be put back: failed, and the note stays for the startup recovery
+            r, st, f = run(Fake([none, old], fail_mount=2))
+            self.assertEqual(r, "failed")
+            self.assertTrue(os.path.exists(os.path.join(tmp, "state.json")))
+            self.assertIn("could NOT be put back", st.data["message"])
+            # restore-only run (web server start after a power loss)
+            with open(os.path.join(tmp, "state.json"), "w") as fh:
+                _json.dump({"restore_mnt1_type": 2}, fh)
+            fk = Fake([], mnt=0)
+            self.assertEqual(gu.run_restore(fk, gu.Status(mode="restore")), "restored")
+            self.assertEqual((fk.mnt, os.path.exists(os.path.join(tmp, "state.json"))), (2, False))
+
+            # fixed 3DR setup.py installed with LF line endings, original kept once
+            setup = open(os.path.join(tmp, "gimbal", "setup.py"), "rb").read()
+            self.assertTrue(setup.startswith(b"#!/usr/bin/env python\n"))
+            self.assertNotIn(b"\r\n", setup)
+            self.assertEqual(open(os.path.join(tmp, "gimbal", "setup.py.orig"), "rb").read(), b"stock\r\n")
+            # boot updater install / restore
+            self.assertEqual(gu.boot_updater_state()["state"], "original")
+            self.assertEqual(gu.install_boot_updater(), "installed")
+            self.assertEqual(gu.boot_updater_state()["state"], "fixed")
+            self.assertEqual(gu.install_boot_updater(), "current")
+            self.assertEqual(gu.restore_boot_updater(), "restored")
+            self.assertEqual(open(os.path.join(tmp, "loadGimbal.py")).read(), "stock loader\n")
+            # a run that died is reported as interrupted, not "running" forever
+            with open(os.path.join(tmp, "st.json"), "w") as fh:
+                _json.dump({"state": "running", "pid": 999999, "lines": []}, fh)
+            st = gu.get_status()
+            self.assertEqual((st["state"], st["result"], st["running"]), ("failed", "interrupted", False))
+            self.assertEqual(st["firmware_version"], "1.3.6")
+            self.assertEqual(gu.decode_swver(_struct_float((1, 3, 6, 0))), "1.3.6")
+        finally:
+            gu.PATHS.clear()
+            gu.PATHS.update(saved_paths)
+            gu.time.sleep = saved_sleep
+            _shutil.rmtree(tmp, ignore_errors=True)
+
+        # web server: behind login, blocks other Cube work, recovers after a restart
+        swa = open(os.path.join(root, "solo_web_app.py")).read()
+        auth_gate = swa.index("# Require Auth for all other API endpoints")
+        self.assertGreater(swa.index("if path == '/api/gimbal/status':"), auth_gate)
+        post_gate = swa.index("if not self._is_authenticated(allow_cookie=False):")
+        self.assertGreater(swa.index("self._handle_gimbal_post(path, body)"), post_gate)
+        self.assertIn("'/api/flash/start'", swa[swa.index("GIMBAL_BUSY_BLOCKS = ("):swa.index("def gimbal_update_running")])
+        self.assertIn("gimbal_update.recover_on_startup()", swa)
+        self.assertIn("the gimbal cannot be updated while the vehicle is ARMED", swa)
+        # UI on the Firmware Update tab (both copies of the page)
+        for page in ("static/index.html", "templates/index.html"):
+            html = open(os.path.join(root, page), encoding="utf-8").read()
+            for el_id in ("gimbalUpdateCard", "btnStartGimbalUpdate", "chkGimbalForce", "gimbalTerminal",
+                          "btnInstallGimbalBootUpdater", "btnRestoreGimbalBootUpdater"):
+                self.assertIn('id="%s"' % el_id, html)
+        js = open(os.path.join(root, "static", "app.js"), encoding="utf-8").read()
+        self.assertIn("/api/gimbal/start", js)
+        self.assertIn("refreshGimbalStatus();", js)
+        # bin/ (and so bin/gimbal_update/) goes into the image and both installers
+        self.assertIn('"bin"', open(os.path.join(root, "bake_into_firmware.py")).read().split("TREE_DIRS")[1][:60])
+        self.assertIn('"bin"', open(os.path.join(root, "deploy_to_drone.py")).read().split("TREE_DIRS")[1][:60])
+
+
+def _struct_float(b4):
+    """Pack 4 signed bytes into the float the gimbal sends as GMB_SWVER."""
+    import struct
+    return struct.unpack('>f', struct.pack('4b', *b4))[0]
+
 if __name__ == "__main__":
     suite = unittest.TestLoader().loadTestsFromTestCase(TestSoloWebUtility)
     runner = unittest.TextTestRunner(stream=sys.stdout, verbosity=2)

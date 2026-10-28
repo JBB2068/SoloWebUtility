@@ -3294,6 +3294,7 @@ function setUploadProgressVisible(visible) {
             loadParams();
             refreshWifiStatus();
             loadFirmwareChoices();
+            refreshGimbalStatus();
             return;
         }
         appDataStarted = true;
@@ -3307,6 +3308,7 @@ function setUploadProgressVisible(visible) {
         refreshWifiStatus();
         initControllerSetup();
         loadFirmwareChoices();
+        refreshGimbalStatus();
 
         // Check calibration status on load
         apiRequest('/api/calib/status')
@@ -3368,6 +3370,168 @@ function setUploadProgressVisible(visible) {
                 }
             }
         } catch (e) {}
+    }
+
+
+    // =========================================================================
+    // Gimbal firmware update (runs detached on the Solo; this only starts and watches it)
+    // =========================================================================
+    var gimbalPollTimer = null;
+    var gimbalWasRunning = false;
+
+    function gimbalBootUpdaterText(b) {
+        if (!b) { return 'unknown'; }
+        if (b.state === 'fixed') { return 'time-limited updater installed' + (b.backup ? ' (original kept)' : ''); }
+        if (b.state === 'original') { return 'original Open Solo updater'; }
+        return 'not found on this Solo';
+    }
+
+    function updateGimbalUI(st) {
+        var badge = el('gimbalStatusBadge');
+        if (!badge || !st) { return; }
+        var running = !!st.running;
+        var fw = el('gimbalFwVersion');
+        if (fw) { fw.textContent = st.firmware_version ? (st.firmware_version + ' (' + st.firmware_file + ')') : 'none found'; }
+        var inst = el('gimbalInstalledVersion');
+        if (inst) { inst.textContent = st.installed_version || 'unknown'; }
+        var bu = el('gimbalBootUpdaterState');
+        if (bu) { bu.textContent = gimbalBootUpdaterText(st.boot_updater); }
+        var btnInst = el('btnInstallGimbalBootUpdater');
+        var btnRest = el('btnRestoreGimbalBootUpdater');
+        var b = st.boot_updater || {};
+        if (btnInst) { btnInst.disabled = running || b.state !== 'original'; }
+        if (btnRest) { btnRest.disabled = running || !(b.state === 'fixed' && b.backup); }
+
+        var pct = Math.max(0, Math.min(100, st.percent || 0));
+        el('gimbalProgressBar').style.width = pct + '%';
+        el('gimbalPercentLabel').textContent = pct + '%';
+        var stage = st.label || 'Ready';
+        if (st.step) { stage = 'Step ' + st.step + '/' + (st.steps || 7) + ': ' + stage; }
+        if (!running && (st.state === 'idle' || !st.state)) { stage = 'Ready'; }
+        el('gimbalStageLabel').textContent = stage;
+
+        var btn = el('btnStartGimbalUpdate');
+        var btnClear = el('btnClearGimbalUpdate');
+        var done = el('gimbalDoneBanner');
+        var fail = el('gimbalFailBanner');
+        done.style.display = 'none';
+        fail.style.display = 'none';
+        if (running) {
+            badge.textContent = 'Running';
+            badge.className = 'badge badge-warning';
+            btn.disabled = true;
+            btn.textContent = '⏳ Updating gimbal - do not power off';
+            btnClear.style.display = 'none';
+        } else {
+            btn.disabled = !st.firmware_version;
+            btn.textContent = '▶ Update Gimbal Firmware';
+            btnClear.style.display = (st.state === 'done' || st.state === 'failed') ? 'inline-block' : 'none';
+            if (st.state === 'done') {
+                badge.textContent = st.result === 'current' ? 'Up to date' : 'Updated';
+                badge.className = 'badge badge-success';
+                el('gimbalDoneTitle').textContent = st.result === 'current' ? '✅ Gimbal firmware is already current' :
+                    (st.result === 'restored' ? '✅ Gimbal driver restored' : '✅ Gimbal firmware updated');
+                el('gimbalDoneText').textContent = st.message || '';
+                done.style.display = 'block';
+            } else if (st.state === 'failed') {
+                badge.textContent = 'Failed';
+                badge.className = 'badge badge-danger';
+                el('gimbalFailText').textContent = st.message || 'See the console for details.';
+                fail.style.display = 'block';
+            } else {
+                badge.textContent = st.pending_restore ? 'Restore pending' : 'Ready';
+                badge.className = 'badge';
+            }
+        }
+        var term = el('gimbalTerminal');
+        if (term && st.lines && st.lines.length) {
+            var atBottom = term.scrollTop + term.clientHeight >= term.scrollHeight - 20;
+            term.innerHTML = st.lines.map(function (l) {
+                var cls = /\[!\]|failed|FAILED|error/i.test(l) ? 'log-line ERROR' : 'log-line';
+                return '<div class="' + cls + '">' + esc(l) + '</div>';
+            }).join('');
+            if (atBottom || running) { term.scrollTop = term.scrollHeight; }
+        }
+        if (gimbalWasRunning && !running) {
+            if (st.state === 'done') { showToast('🎥 ' + (st.message || 'Gimbal update finished.')); }
+            else if (st.state === 'failed') { showToast('Gimbal update failed: ' + (st.message || ''), true); }
+        }
+        gimbalWasRunning = running;
+    }
+
+    function refreshGimbalStatus() {
+        if (!el('gimbalUpdateCard')) { return; }
+        apiRequest('/api/gimbal/status')
+            .then(function (st) {
+                updateGimbalUI(st);
+                if (st.running) { startGimbalPolling(); }
+                else if (gimbalPollTimer) { clearInterval(gimbalPollTimer); gimbalPollTimer = null; }
+            }).catch(function () {});
+    }
+
+    function startGimbalPolling() {
+        if (gimbalPollTimer) { return; }
+        gimbalPollTimer = setInterval(function () {
+            if (document.hidden) { return; }
+            refreshGimbalStatus();
+        }, 1500);
+    }
+
+    var btnStartGimbalUpdate = el('btnStartGimbalUpdate');
+    if (btnStartGimbalUpdate) {
+        btnStartGimbalUpdate.addEventListener('click', function () {
+            var force = el('chkGimbalForce') && el('chkGimbalForce').checked;
+            if (!confirm('Update the gimbal firmware now?\n\n' +
+                         '- Props off, Solo on the ground.\n' +
+                         '- Do NOT power off the Solo until it has finished (about 5 minutes).\n' +
+                         '- The Cube restarts several times and the gimbal will not respond to tilt meanwhile.')) { return; }
+            btnStartGimbalUpdate.disabled = true;
+            apiRequest('/api/gimbal/start', 'POST', { force: !!force })
+                .then(function () {
+                    showToast('🎥 Gimbal update started. Keep the Solo powered on.');
+                    gimbalWasRunning = true;
+                    refreshGimbalStatus();
+                    startGimbalPolling();
+                }).catch(function (err) {
+                    btnStartGimbalUpdate.disabled = false;
+                    showToast('Could not start the gimbal update: ' + err.message, true);
+                });
+        });
+    }
+
+    var btnClearGimbalUpdate = el('btnClearGimbalUpdate');
+    if (btnClearGimbalUpdate) {
+        btnClearGimbalUpdate.addEventListener('click', function () {
+            apiRequest('/api/gimbal/reset', 'POST', {})
+                .then(function () {
+                    var term = el('gimbalTerminal');
+                    if (term) { term.innerHTML = '<div style="color: var(--text-muted);">[System] Gimbal update ready.</div>'; }
+                    refreshGimbalStatus();
+                }).catch(function (err) { showToast(err.message, true); });
+        });
+    }
+
+    function gimbalBootUpdater(action, question) {
+        if (!confirm(question)) { return; }
+        apiRequest('/api/gimbal/boot-updater', 'POST', { action: action })
+            .then(function (res) {
+                showToast(res.message || 'Done.');
+                refreshGimbalStatus();
+            }).catch(function (err) { showToast('Boot updater: ' + err.message, true); });
+    }
+    var btnInstallGimbalBootUpdater = el('btnInstallGimbalBootUpdater');
+    if (btnInstallGimbalBootUpdater) {
+        btnInstallGimbalBootUpdater.addEventListener('click', function () {
+            gimbalBootUpdater('install', 'Replace /usr/bin/loadGimbal.py with the time-limited version?\n\n' +
+                'It has not yet been tested on a drone. The original is kept as loadGimbal.py.orig and can be put back here.\n' +
+                'Check /log/gimbal_update.log after the next boot.');
+        });
+    }
+    var btnRestoreGimbalBootUpdater = el('btnRestoreGimbalBootUpdater');
+    if (btnRestoreGimbalBootUpdater) {
+        btnRestoreGimbalBootUpdater.addEventListener('click', function () {
+            gimbalBootUpdater('restore', 'Put back the original Open Solo boot-time gimbal updater?');
+        });
     }
 
     // On page load: use a saved login only if the Solo still accepts it
