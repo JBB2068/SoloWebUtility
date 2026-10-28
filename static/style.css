@@ -2102,3 +2102,46 @@ input:checked + .slider:before {
 }
 
 
+
+/* Battery Solutions tab */
+.batsol-table td { vertical-align: top; line-height: 1.5; }
+.batsol-table td a, #tab-battery .card-desc a, #tab-battery li a { color: var(--accent-blue, #3b82f6); }
+.batsol-table th:first-child, .batsol-table td:first-child { white-space: nowrap; }
+@media (max-width: 640px) { .batsol-table th:first-child, .batsol-table td:first-child { white-space: normal; } }
+#tab-battery a.btn { text-decoration: none; }
+
+/* Phones: the tab row folds into a menu button so the page never scrolls sideways */
+.nav-menu-btn { display: none; }
+@media (max-width: 768px) {
+    .app-header { padding: 10px 14px; }
+    .nav-menu-btn {
+        display: flex; align-items: center; gap: 8px; order: 3; width: 100%;
+        background-color: var(--bg-input); color: var(--text-main);
+        border: 1px solid var(--border-color); border-radius: 8px;
+        padding: 10px 14px; font-size: 14px; font-weight: 700; cursor: pointer;
+    }
+    .nav-menu-icon { color: var(--accent-amber); font-size: 18px; line-height: 1; }
+    .nav-tabs { display: none; order: 4; width: 100%; flex-direction: column; }
+    .nav-tabs.open { display: flex; }
+    .nav-tab, .nav-download { width: 100%; justify-content: flex-start; padding: 12px 14px; font-size: 14px; }
+}
+@media (max-width: 768px) {
+    .search-bar-container { flex-wrap: wrap; }
+    .search-input { min-width: 0; width: 100%; }
+    .table-container { overflow-x: auto; }
+    .ctrl-layout-grid { grid-template-columns: minmax(0, 1fr); }
+    .ctrl-layout-grid > * { min-width: 0; }
+}
+@media (max-width: 1100px) {
+    .ctrl-visual-card { position: static; }      /* stacked layout: don't float over the button cards */
+}
+@media (max-width: 768px) {
+    .unified-select-wrap { flex-wrap: wrap; }
+    .action-dropdown { min-width: 0; }
+    .action-summary-badge { white-space: normal; }
+}
+@media (max-width: 860px) {
+    #tab-flash .grid-2col { grid-template-columns: minmax(0, 1fr); }
+    #tab-flash .grid-2col > * { min-width: 0; }
+    #firmwareTargetCard, #pipelineStatusCard { height: auto; min-height: 0; max-height: none; }
+}

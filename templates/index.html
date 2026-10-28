@@ -23,6 +23,10 @@
             </div>
         </div>
 
+        <button class="nav-menu-btn" id="btnNavMenu" type="button" aria-expanded="false" aria-controls="navTabs">
+            <span class="nav-menu-icon">☰</span> <span id="navMenuLabel">Menu</span>
+        </button>
+
         <nav class="nav-tabs" id="navTabs">
             <button class="nav-tab" data-tab="tab-cockpit" id="navTabCockpit">
                 <span class="tab-icon">🎯</span> Cockpit HUD
@@ -38,6 +42,9 @@
             </button>
             <button class="nav-tab" data-tab="tab-controller" id="navTabController">
                 <span class="tab-icon">🎮</span> Controller Setup
+            </button>
+            <button class="nav-tab" data-tab="tab-battery" id="navTabBattery">
+                <span class="tab-icon">🔋</span> Battery Solutions
             </button>
             <button class="nav-tab" data-tab="tab-manual" id="navTabManual">
                 <span class="tab-icon">📖</span> User Manual
@@ -1279,6 +1286,152 @@
         </section>
 
         <!-- ============================================================= -->
+        <!-- TAB: BATTERY SOLUTIONS                                        -->
+        <!-- ============================================================= -->
+        <section class="tab-content" id="tab-battery">
+            <div class="card card-full">
+                <div class="card-header">
+                    <h2>🔋 Battery Solutions for the 3DR Solo</h2>
+                </div>
+                <p class="card-desc">
+                    3DR's Solo Smart Batteries were last made in November 2015, so every original pack is now at or past the end of its expected life.
+                    An old LiPo can lose a cell without warning, and a weak cell can fail in flight. Check each pack's cell voltages before every flight,
+                    and retire packs that sag, swell, or give short flights. There are three ways to get your Solo flying on good batteries again.
+                </p>
+                <div class="info-alert" style="margin-top: 12px;">
+                    <strong>Links on this page</strong> open the sellers' websites, so your phone or PC needs an internet connection
+                    (for example the Controller's home Wi-Fi mode). The battery mod guide (PDF) is stored on the Solo and opens without internet.
+                    Prices were checked in October 2026 and may change.
+                </div>
+            </div>
+
+            <div class="card card-full" style="margin-top: 20px;">
+                <div class="card-header"><h2>Choose your path</h2></div>
+                <div style="overflow-x: auto;">
+                    <table class="param-table batsol-table">
+                        <thead>
+                            <tr><th></th><th>1. Ready-built Battery Mod</th><th>2. Do-it-yourself Battery Mod</th><th>3. BMSOne + off-the-shelf pack</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td><strong>What you do</strong></td><td>Send in your old Solo battery (or BMS)</td><td>Rebuild your own pack with the guide below</td><td>Plug in &mdash; no soldering</td></tr>
+                            <tr><td><strong>Cost</strong></td><td>$129 complete ($73 without the pack)</td><td>Tattu pack about $63, plus tools</td><td>BMSOne Plug and Play $80.75, plus pack(s)</td></tr>
+                            <tr><td><strong>Packs</strong></td><td>Tattu 4S 5200&nbsp;mAh LiPo</td><td>Tattu 4S 5200&nbsp;mAh LiPo</td><td>Any 4S or 5S pack, LiPo or Li-ion</td></tr>
+                            <tr><td><strong>Fit</strong></td><td>Held with a 400&nbsp;mm velcro strap</td><td>Original case or a 3D-printed case</td><td>Snaps onto the battery tray, or mounts in the GPS bay</td></tr>
+                            <tr><td><strong>Parameters</strong></td><td>None (stock LiPo)</td><td>None (stock LiPo)</td><td>None for a 4S LiPo; Li-ion and 5S need a preset (below)</td></tr>
+                            <tr><td><strong>Risk</strong></td><td>Lowest</td><td>Highest &mdash; you open and solder LiPo cells</td><td>Low</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="card card-full" style="margin-top: 20px;">
+                <div class="card-header"><h2>1. Ready-built Battery Mod</h2></div>
+                <p class="card-desc">
+                    The battery mod from the guide below, built and calibrated for you by JB Mod Parts: a refurbished Solo battery with new
+                    Tattu 4S 5200&nbsp;mAh 35C cells and its own Solo BMS, so it reports to the Solo like an original battery. Send in your old Solo
+                    battery or BMS (or buy a BMS for $30 more). It does not use the Solo's battery latches; it is held with the included 400&nbsp;mm velcro strap.
+                </p>
+                <ul style="margin: 10px 0 14px 20px; color: var(--text-muted); font-size: 13px; line-height: 1.7;">
+                    <li>Complete, ready to fly: <strong>$129</strong></li>
+                    <li>Without the battery pack: $73 &nbsp;·&nbsp; Without calibration: $114</li>
+                    <li>Semi-DIY: the BMS is fitted in an enclosure with XT60 and 4S balance connectors; you connect and calibrate your own pack</li>
+                </ul>
+                <a class="btn btn-primary" href="https://jonbrotherton.fws.store/product/3dr-solo-battery-mod" target="_blank" rel="noopener">🛒 Ready-built Battery Mod (JB Mod Parts)</a>
+            </div>
+
+            <div class="card card-full" style="margin-top: 20px;">
+                <div class="card-header"><h2>2. Do-it-yourself: Solo Battery Mod for Dummies</h2></div>
+                <div class="danger-alert" style="margin-bottom: 14px;">
+                    <strong>⚠️ High risk of injury.</strong>
+                    <p style="margin: 6px 0 0 0;">Old LiPo cells are unstable: the slightest nick in a cell's wrapper can cause a fire or explosion. Wear full face protection
+                    the whole time, and do not learn to solder on this project. If you are not comfortable with the risk, choose option 1 or 3.</p>
+                </div>
+                <p class="card-desc">
+                    The step-by-step guide from JB's (Just Better) 3DR Solo Owners Group, by Mike Lione, Jon Brotherton, Chris Goodall and Carl Oliveria.
+                    You take the BMS (the battery's management board) out of your old Solo battery, fit it to a new Tattu 4S1P 5200&nbsp;mAh 35C LiPo,
+                    and then calibrate the BMS to the new cells.
+                </p>
+                <ol style="margin: 10px 0 14px 20px; color: var(--text-muted); font-size: 13px; line-height: 1.7;">
+                    <li><strong>Open the old pack</strong> with a few drops of Glue Buster along the seam, and lift out the cells and BMS.</li>
+                    <li><strong>Remove the BMS</strong>, insulate its contacts with ESD tape, and dispose of the old cells safely (the guide gives two ways: a salt-water soak, or a battery recycling drop-off).</li>
+                    <li><strong>Connect the BMS to the new pack</strong> &mdash; with XT60 and balance connectors, or soldered straight on. Balance wire #1 goes with the + lead, #5 with the &minus; lead.</li>
+                    <li><strong>Calibrate the BMS</strong>: discharge to 12&nbsp;V (3.0&nbsp;V per cell) with a hobby charger at about 1&nbsp;A, rest, then fully charge. Repeat until <code>BATT_CAPACITY</code> reads about 5200 (usually three cycles).</li>
+                </ol>
+                <p class="card-desc">Replacement pack: Tattu 4S1P 5200&nbsp;mAh 35C LiPo with XT60, 133 &times; 45 &times; 33&nbsp;mm, 436&nbsp;g, about $63.</p>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px;">
+                    <a class="btn btn-primary" href="/Solo_Battery_Mod_for_Dummies.pdf" target="_blank">📖 Read the guide (PDF, 16 pages)</a>
+                    <a class="btn btn-secondary" href="/Solo_Battery_Mod_for_Dummies.pdf" download="Solo_Battery_Mod_for_Dummies.pdf">⬇️ Download the guide</a>
+                    <a class="btn btn-secondary" href="https://www.genstattu.com/tattu-5200mah-14-8v-35c-4s1p-lipo-battery-pack-with-xt60-plug.html" target="_blank" rel="noopener">🛒 Tattu 4S 5200 mAh 35C</a>
+                </div>
+            </div>
+
+            <div class="card card-full" style="margin-top: 20px;">
+                <div class="card-header"><h2>3. BMSOne + an off-the-shelf battery</h2></div>
+                <p class="card-desc">
+                    Madhacker's BMSOne is a small battery management board that lets a common 4S or 5S XT60 battery report to the Solo the way the
+                    original battery did: voltage, each cell's voltage and remaining charge. The Plug and Play version from JB Mod Parts comes with
+                    the connectors fitted, a case and a strap, so no soldering is needed. It is a collaboration between Madhacker, Mike Lione,
+                    Jon Brotherton and E.&nbsp;D.
+                </p>
+                <ul style="margin: 10px 0 14px 20px; color: var(--text-muted); font-size: 13px; line-height: 1.7;">
+                    <li><strong>External</strong> (snaps onto the battery tray and gives the battery a flat deck) or <strong>Internal</strong> (mounts in the GPS bay)</li>
+                    <li>Plug and Play <strong>$80.75</strong>; the bare board for your own wiring is $43 less</li>
+                    <li>BMSOne V3 needs ArduCopter 4.4.1 or newer (this utility installs 4.7.2). Use 4S or 5S packs only on the Solo &mdash; the gimbal does not support 6S</li>
+                    <li>Up to 3 battery profiles, chosen with a button; reprogrammable over USB-C. You choose LiPo or Li-ion, and 4S, 5S or both, when ordering</li>
+                    <li>Connect in this order: BMSOne to the Solo, then the balance lead, then the power lead. Unplug both battery leads when you are not flying</li>
+                </ul>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 18px;">
+                    <a class="btn btn-primary" href="https://jonbrotherton.fws.store/product/bmsone-v2-plug-and-play" target="_blank" rel="noopener">🛒 BMSOne Plug and Play (JB Mod Parts)</a>
+                    <a class="btn btn-secondary" href="https://madhacker.org/bmsone-2-universal-2s-6s-bms-for-ardupilot/" target="_blank" rel="noopener">📘 BMSOne manual (Madhacker)</a>
+                    <a class="btn btn-secondary" href="https://bmsone.open-solo.com" target="_blank" rel="noopener">⚙️ BMSOne configurator</a>
+                </div>
+
+                <h3 style="margin: 0 0 8px 0; font-size: 14px; color: var(--text-main);">Batteries and the preset to apply</h3>
+                <p class="card-desc" style="margin-bottom: 10px;">
+                    After fitting a BMSOne, apply the preset for the pack you fly (the Solo must be connected and disarmed). Going back to a 4S LiPo?
+                    Apply <em>Stock 4S LiPo</em> again, or the battery percentage and failsafes will be wrong.
+                </p>
+                <div style="overflow-x: auto;">
+                    <table class="param-table batsol-table">
+                        <thead>
+                            <tr><th>Battery</th><th>Specs</th><th>Preset</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><a href="https://www.genstattu.com/tattu-5200mah-14-8v-35c-4s1p-lipo-battery-pack-with-xt60-plug.html" target="_blank" rel="noopener">Tattu 4S 5200 mAh 35C LiPo</a></td>
+                                <td>4S1P, 436&nbsp;g, XT60, about $63</td>
+                                <td><button class="btn btn-secondary btn-sm" onclick="window.applyPreset('lipo_default')">Stock 4S LiPo</button></td>
+                            </tr>
+                            <tr>
+                                <td><a href="https://www.upgradeenergytech.com/product-page/4s-14-8v-5600mah-30c-dark-lithium-liion-drone-battery" target="_blank" rel="noopener">Upgrade Energy 4S2P 5.6 Ah Li-ion</a></td>
+                                <td>Molicel cells, 40&nbsp;A, 386&nbsp;g, XT60</td>
+                                <td><button class="btn btn-secondary btn-sm" onclick="window.applyPreset('liion_default')">4S Li-ion</button></td>
+                            </tr>
+                            <tr>
+                                <td><a href="https://www.upgradeenergytech.com/product-page/5s2p-3dr-solo-drone-battery" target="_blank" rel="noopener">Upgrade Energy 5S2P 8 Ah Li-ion (made for the Solo)</a></td>
+                                <td>Amprius cells, 21.0&nbsp;V full, 13.5&nbsp;V minimum, 30&nbsp;A, 524&nbsp;g, XT60</td>
+                                <td><button class="btn btn-secondary btn-sm" onclick="window.applyPreset('liion_5s')">5S Li-ion</button></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <p class="card-desc" style="margin-top: 10px;">The seller recommends Li-ion packs that can deliver at least 30&nbsp;A continuously.</p>
+            </div>
+
+            <div class="card card-full" style="margin-top: 20px;">
+                <div class="card-header"><h2>Charging, calibration and safety</h2></div>
+                <ul style="margin: 4px 0 4px 20px; color: var(--text-muted); font-size: 13px; line-height: 1.8;">
+                    <li><strong>Use a balance charger.</strong> The original Solo charger only charges 4S, cannot balance the cells or discharge to storage level, and plugging it in wrongly can cause a fire. A <a href="https://jonbrotherton.fws.store/product/solo-charger-balance-adapter" target="_blank" rel="noopener">Solo Charger Balance Adapter</a> lets it charge 4S XT60 packs.</li>
+                    <li><strong>Never charge unattended</strong>, and charge on a fireproof surface or in a LiPo bag.</li>
+                    <li><strong>Store packs at storage charge</strong> (about 3.8&nbsp;V per cell for LiPo) when you will not fly for a few days.</li>
+                    <li><strong>Calibrate a Solo smart battery or battery mod</strong> when its percentage stops matching reality: gently discharge until it cuts off (about 12&nbsp;V), rest it at least 5 hours without discharging again, charge fully and leave it on the charger for 48 hours, then rest it 2 hours before flying (<a href="https://ardupilot.org/copter/docs/solo_battery_calibration.html" target="_blank" rel="noopener">ArduPilot's Solo battery calibration</a>).</li>
+                    <li><strong>Retire</strong> swollen, damaged or weak packs and dispose of them safely: either soak them in salt water as the guide describes, or tape over the terminals, keep them in a fireproof container and take them to a battery recycling drop-off. Never put a pack straight into household trash.</li>
+                    <li>Any battery modification is done at your own risk.</li>
+                </ul>
+            </div>
+        </section>
+
+        <!-- ============================================================= -->
         <!-- TAB 6: USER MANUAL                                            -->
         <!-- ============================================================= -->
         <section class="tab-content" id="tab-manual">
@@ -1817,8 +1970,13 @@ The 3DR Solo Web Utility is a free, open-source on-board management console that
 <td>4S Li-ion (Madhacker / High-Cap)</td>
 <td>Optimized for 18650/21700 Li-ion packs — lowered cutoffs (11.6V/11.3V) with Smart RTL</td>
 </tr>
+<tr>
+<td>5S Li-ion (BMSOne / Upgrade Energy 5S2P)</td>
+<td>For 5S Li-ion packs on a BMSOne — 14.5V Low / 14.1V Critical with Smart RTL, thrust compensation 13.5–21.0V</td>
+</tr>
 </tbody>
 </table>
+<p><strong>Battery Solutions tab:</strong> original Solo batteries were last made in 2015. This tab compares the three ways to get good batteries today — the ready-built Battery Mod, the do-it-yourself <em>Solo Battery Mod for Dummies</em> guide (stored on the Solo as a PDF), and the BMSOne with off-the-shelf 4S or 5S packs — and applies the matching preset with one click.</p>
 <h3 id="287-controller-button-configuration">2.8.7 Controller Button Configuration</h3>
 <p>The Solo Web Utility includes an interactive Artoo Controller Setup interface. An SVG diagram of the 3DR Artoo Controller is displayed in the browser with clickable buttons. You can customize the <strong>Short Hold</strong> and <strong>Long Hold</strong> actions for the A, B, Preset 1, Preset 2, and Camera buttons. Changes are written directly to <code>/usr/bin/extSettings.conf</code> on the Solo Copter.</p>
 <p><strong>Configurable actions per button event:</strong></p>
@@ -1911,6 +2069,10 @@ The 3DR Solo Web Utility is a free, open-source on-board management console that
 <tr>
 <td>Update the gimbal firmware</td>
 <td>Utility → Firmware Update tab → Update Gimbal Firmware</td>
+</tr>
+<tr>
+<td>Find replacement batteries</td>
+<td>Utility → Battery Solutions tab</td>
 </tr>
 <tr>
 <td>Download the Sololink Viewer</td>

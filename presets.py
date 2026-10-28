@@ -167,6 +167,28 @@ PRESETS = {
             "MOT_BAT_VOLT_MAX": 16.8,
             "MOT_BAT_CURR_MAX": 40.0
         }
+    },
+    "liion_5s": {
+        "id": "liion_5s",
+        "name": "5S Li-ion Battery Parameters (BMSOne / Upgrade Energy 5S2P)",
+        "category": "Battery & Power",
+        "description": "For 5S Li-ion packs on a BMSOne, set from the Upgrade Energy 5S2P 8Ah specs (21.0V full, 13.5V minimum, 30A): 14.5V Low / 14.1V Critical with Smart RTL. Same per-cell thresholds as the 4S Li-ion preset.",
+        "icon": "⚡",
+        "params": {
+            "BATT_MONITOR": 5,        # 5: SMBus / BMSOne
+            "BATT_ARM_VOLT": 15.0,    # Arming voltage requirement (3.0V/cell)
+            "BATT_LOW_VOLT": 14.5,    # Low Failsafe (2.9V/cell)
+            "BATT_CRT_VOLT": 14.1,    # Critical Failsafe (2.82V/cell), above the pack's 13.5V minimum
+            "BATT_LOW_MAH": 0,        # Disabled mAh limit (capacity-independent)
+            "BATT_CRT_MAH": 0,        # Disabled mAh limit
+            "BATT_LOW_TIMER": 2,      # 2 second low voltage filter
+            "BATT_FS_LOW_ACT": 3,     # 3: Smart RTL
+            "BATT_FS_CRT_ACT": 3,     # 3: Smart RTL
+            "BATT_FS_VOLTSRC": 1,
+            "MOT_BAT_VOLT_MIN": 13.5, # Thrust compensation down to the pack minimum (2.7V/cell)
+            "MOT_BAT_VOLT_MAX": 21.0, # 5S full charge (4.2V/cell)
+            "MOT_BAT_CURR_MAX": 30.0  # Pack's continuous current rating
+        }
     }
 }
 

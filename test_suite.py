@@ -2372,6 +2372,42 @@ class TestSoloWebUtility(unittest.TestCase):
         self.assertIn('"bin"', open(os.path.join(root, "bake_into_firmware.py")).read().split("TREE_DIRS")[1][:60])
         self.assertIn('"bin"', open(os.path.join(root, "deploy_to_drone.py")).read().split("TREE_DIRS")[1][:60])
 
+    def test_31_battery_solutions_tab(self):
+        """Battery Solutions tab: the three options, the bundled Solo Battery Mod for Dummies guide
+        (with the salt-water disposal replaced by recycling), and a 5S Li-ion preset from the
+        Upgrade Energy 5S2P specs that the tab can apply."""
+        import presets as _presets
+        root = os.path.dirname(os.path.abspath(__file__))
+        for page in ("static/index.html", "templates/index.html"):
+            html = open(os.path.join(root, page), encoding="utf-8").read()
+            self.assertIn('data-tab="tab-battery"', html)
+            self.assertIn('id="tab-battery"', html)
+            tab = html[html.index('id="tab-battery"'):html.index('id="tab-manual"')]
+            for needle in ("/Solo_Battery_Mod_for_Dummies.pdf", "product/3dr-solo-battery-mod",
+                           "product/bmsone-v2-plug-and-play", "applyPreset('lipo_default')",
+                           "applyPreset('liion_default')", "applyPreset('liion_5s')"):
+                self.assertIn(needle, tab)
+        pdf = os.path.join(root, "static", "Solo_Battery_Mod_for_Dummies.pdf")
+        self.assertTrue(os.path.isfile(pdf))
+        data = open(pdf, "rb").read()
+        self.assertTrue(data.startswith(b"%PDF"))
+        self.assertIn(b"1kwUlTDKVDHVkY6UCDoXdGuPJXFgDAxoO", data)      # guide's own download link
+        p5 = _presets.get_preset("liion_5s")
+        self.assertIsNotNone(p5)
+        prm = p5["params"]
+        self.assertEqual(prm["MOT_BAT_VOLT_MAX"], 21.0)
+        self.assertEqual(prm["MOT_BAT_VOLT_MIN"], 13.5)
+        self.assertGreater(prm["BATT_CRT_VOLT"], 13.5)                # above the pack minimum
+        self.assertLess(prm["BATT_CRT_VOLT"], prm["BATT_LOW_VOLT"])
+        self.assertLess(prm["BATT_LOW_VOLT"], prm["BATT_ARM_VOLT"])
+        self.assertEqual(prm["BATT_MONITOR"], 5)
+        self.assertEqual(prm["BATT_ARM_VOLT"], 15.0)
+        # phones: the tab row folds into a menu button (no sideways page scroll)
+        html = open(os.path.join(root, "static", "index.html"), encoding="utf-8").read()
+        self.assertIn('id="btnNavMenu"', html)
+        css = open(os.path.join(root, "static", "style.css"), encoding="utf-8").read()
+        self.assertIn(".nav-tabs.open", css)
+
 
 def _struct_float(b4):
     """Pack 4 signed bytes into the float the gimbal sends as GMB_SWVER."""

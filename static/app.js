@@ -358,6 +358,32 @@ function setUploadProgressVisible(visible) {
     var navTabs = document.querySelectorAll('.nav-tab');
     var tabContents = document.querySelectorAll('.tab-content');
 
+    // Phones: the tabs fold into a ☰ menu that shows the current tab's name
+    var navMenuBtn = el('btnNavMenu');
+    var navTabsBox = el('navTabs');
+    function setNavMenu(open) {
+        if (!navMenuBtn || !navTabsBox) { return; }
+        navTabsBox.classList.toggle('open', !!open);
+        navMenuBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+    function updateNavMenuLabel() {
+        var active = document.querySelector('.nav-tab.active');
+        var label = el('navMenuLabel');
+        if (active && label) {
+            var icon = active.querySelector('.tab-icon');
+            label.textContent = active.textContent.replace(icon ? icon.textContent : '', '').trim();
+        }
+    }
+    if (navMenuBtn) {
+        navMenuBtn.addEventListener('click', function () {
+            setNavMenu(!navTabsBox.classList.contains('open'));
+        });
+        // the Viewer download link also closes the menu
+        var navDl = el('navDownloadViewer');
+        if (navDl) { navDl.addEventListener('click', function () { setNavMenu(false); }); }
+    }
+    updateNavMenuLabel();
+
     navTabs.forEach(function (tab) {
         tab.addEventListener('click', function () {
             var targetId = tab.getAttribute('data-tab');
@@ -366,6 +392,8 @@ function setUploadProgressVisible(visible) {
             tab.classList.add('active');
             var tgt = el(targetId);
             if (tgt) { tgt.classList.add('active'); }
+            updateNavMenuLabel();
+            setNavMenu(false);
 
             if (targetId === 'tab-wifi') {
                 // No automatic scan: every scan takes the Controller's only radio off
