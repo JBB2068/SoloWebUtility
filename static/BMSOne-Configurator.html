@@ -1,0 +1,3082 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BMSOne V3 Configurator</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --card-border: #334155;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --accent-blue: #38bdf8;
+      --accent-blue-hover: #0284c7;
+      --accent-green: #22c55e;
+      --accent-green-hover: #16a34a;
+      --accent-red: #ef4444;
+      --accent-red-hover: #dc2626;
+      --accent-amber: #f59e0b;
+      --accent-amber-hover: #d97706;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      padding: 12px;
+      line-height: 1.35;
+    }
+
+    .container {
+      max-width: 1160px;
+      margin: 0 auto;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--card-border);
+    }
+
+    h1 {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: #38bdf8;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .badge {
+      font-size: 0.7rem;
+      background: #0369a1;
+      color: #e0f2fe;
+      padding: 2px 7px;
+      border-radius: 9999px;
+      font-weight: 600;
+    }
+
+    .btn-purchase {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(14, 165, 233, 0.15);
+      color: #38bdf8;
+      border: 1px solid rgba(56, 189, 248, 0.4);
+      padding: 3px 9px;
+      border-radius: 5px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.2s ease;
+      white-space: nowrap;
+    }
+    .btn-purchase:hover {
+      background: rgba(14, 165, 233, 0.3);
+      border-color: #38bdf8;
+      color: #ffffff;
+    }
+
+    .card {
+      background-color: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 7px;
+      padding: 10px 12px;
+      margin-bottom: 10px;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
+    }
+
+    .card-title {
+      font-size: 0.88rem;
+      font-weight: 600;
+      color: #e2e8f0;
+      margin-bottom: 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .top-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .control-group {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    label {
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--text-muted);
+    }
+
+    select, input[type="text"], input[type="number"] {
+      background: #0f172a;
+      border: 1px solid var(--card-border);
+      color: var(--text);
+      padding: 4px 8px;
+      border-radius: 5px;
+      font-size: 0.8rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    select:focus, input:focus {
+      border-color: var(--accent-blue);
+    }
+
+    button {
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.8rem;
+      padding: 4px 10px;
+      border-radius: 5px;
+      border: none;
+      transition: all 0.2s;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+    }
+
+    button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      filter: grayscale(40%);
+    }
+
+    .btn-connect {
+      background-color: var(--accent-red);
+      color: white;
+      min-width: 95px;
+    }
+    .btn-connect.connected {
+      background-color: var(--accent-green);
+    }
+
+    .btn-primary {
+      background-color: #0284c7;
+      color: white;
+    }
+    .btn-primary:hover:not(:disabled) {
+      background-color: #0369a1;
+    }
+
+    .btn-success {
+      background-color: var(--accent-green);
+      color: white;
+    }
+    .btn-success:hover:not(:disabled) {
+      background-color: var(--accent-green-hover);
+    }
+    @keyframes pulse-save-glow {
+      0%, 100% { box-shadow: 0 0 4px rgba(34, 197, 94, 0.4); }
+      50% { box-shadow: 0 0 12px rgba(34, 197, 94, 0.85); border-color: #4ade80; }
+    }
+    .btn-success.pulse-save {
+      animation: pulse-save-glow 1.5s infinite;
+      border: 1px solid #4ade80;
+    }
+
+    .btn-secondary {
+      background-color: #334155;
+      color: #f8fafc;
+    }
+    .btn-secondary:hover:not(:disabled) {
+      background-color: #475569;
+    }
+
+    .btn-amber {
+      background-color: var(--accent-amber);
+      color: #0f172a;
+      font-weight: 700;
+    }
+    .btn-amber:hover:not(:disabled) {
+      background-color: var(--accent-amber-hover);
+    }
+
+    .btn-danger {
+      background-color: var(--accent-red);
+      color: white;
+      font-weight: 600;
+    }
+    .btn-danger:hover:not(:disabled) {
+      background-color: var(--accent-red-hover);
+    }
+
+    .btn-sm {
+      padding: 2px 7px;
+      font-size: 0.72rem;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 0.8rem;
+      font-weight: 500;
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: var(--accent-red);
+    }
+    .status-badge.on .status-dot {
+      background-color: var(--accent-green);
+      box-shadow: 0 0 6px var(--accent-green);
+    }
+
+    .badge-boot {
+      font-size: 0.7rem;
+      font-weight: 700;
+      background: rgba(245, 158, 11, 0.15);
+      color: #fbbf24;
+      border: 1px solid rgba(245, 158, 11, 0.45);
+      padding: 2px 7px;
+      border-radius: 9999px;
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      white-space: nowrap;
+    }
+
+    .badge-detected {
+      font-size: 0.68rem;
+      font-weight: 600;
+      background: #1e293b;
+      color: #94a3b8;
+      border: 1px solid var(--card-border);
+      padding: 1px 6px;
+      border-radius: 9999px;
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+    }
+
+    /* ==========================================
+       MAIN SCREEN LAYOUT: 2-COLUMN DASHBOARD
+       Left Panel: Live Voltages/Current + Toggles
+       Right Panel: SoC Curve, Cal, Terminal
+       ========================================== */
+    .main-dashboard-grid {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+    }
+    @media (max-width: 860px) {
+      .main-dashboard-grid {
+        flex-direction: column;
+      }
+      .left-panel {
+        width: 100% !important;
+      }
+    }
+
+    .left-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      width: 235px;
+      flex-shrink: 0;
+    }
+
+    .right-panel {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-width: 0;
+    }
+
+    /* ==========================================
+       VERTICAL LIVE CURRENT & VOLTAGES CARD (LEFT)
+       ========================================== */
+    .live-telemetry-vertical-card {
+      background: #0f172a;
+      border: 1px solid var(--card-border);
+      border-radius: 7px;
+      padding: 8px 9px;
+    }
+
+    .v-telem-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .v-telem-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #151f33;
+      border: 1px solid #23334d;
+      border-radius: 5px;
+      padding: 3px 7px;
+    }
+
+    .v-telem-label {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+
+    .v-telem-val-wrap {
+      display: flex;
+      align-items: baseline;
+      gap: 3px;
+    }
+
+    .v-telem-val {
+      font-size: 0.86rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+    .v-telem-val.highlight {
+      color: #22c55e;
+    }
+    .v-telem-val.cyan {
+      color: #38bdf8;
+    }
+
+    .v-telem-unit {
+      font-size: 0.62rem;
+      color: var(--text-muted);
+    }
+
+    .v-cell-divider {
+      font-size: 0.65rem;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin: 3px 0 1px 2px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .v-cell-list {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .v-cell-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #090e1a;
+      border: 1px solid var(--card-border);
+      border-radius: 4px;
+      padding: 2px 6px;
+    }
+
+    .v-cell-name {
+      font-size: 0.7rem;
+      font-weight: 700;
+      color: #94a3b8;
+    }
+
+    .v-cell-val-wrap {
+      display: flex;
+      align-items: baseline;
+      gap: 3px;
+    }
+
+    .v-cell-val {
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: #38bdf8;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .v-cell-unit {
+      font-size: 0.6rem;
+      color: var(--text-muted);
+    }
+
+    /* ==========================================
+       HARDWARE TOGGLE SWITCHES (LEFT, BELOW TELEMETRY)
+       ========================================== */
+    .hw-toggles-card {
+      background: #0f172a;
+      border: 1px solid var(--card-border);
+      border-radius: 7px;
+      padding: 8px 9px;
+    }
+
+    .hw-toggle-unit {
+      background: #151f33;
+      border: 1px solid #23334d;
+      border-radius: 6px;
+      padding: 6px 7px;
+      margin-bottom: 6px;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    }
+
+    .hw-toggle-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 5px;
+    }
+
+    .hw-toggle-title {
+      font-size: 0.74rem;
+      font-weight: 700;
+      color: #e2e8f0;
+      letter-spacing: 0.02em;
+    }
+
+    .hw-toggle-badge {
+      font-size: 0.66rem;
+      font-weight: 700;
+      padding: 1px 5px;
+      border-radius: 4px;
+      background: #0b1329;
+      color: #38bdf8;
+      border: 1px solid #334155;
+      font-variant-numeric: tabular-nums;
+      transition: all 0.2s ease;
+    }
+    .hw-toggle-badge.alt {
+      color: #fbbf24;
+      border-color: rgba(245, 158, 11, 0.4);
+      background: rgba(245, 158, 11, 0.1);
+    }
+
+    .hw-toggle-control-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 5px;
+      background: #0a0f1d;
+      padding: 3px 5px;
+      border-radius: 5px;
+      border: 1px solid #1a2538;
+    }
+
+    .hw-toggle-label {
+      font-size: 0.68rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      cursor: pointer;
+      user-select: none;
+      transition: color 0.2s;
+      white-space: nowrap;
+    }
+    .hw-toggle-label.active {
+      color: #38bdf8;
+      font-weight: 700;
+    }
+    .hw-toggle-label.active.alt {
+      color: #fbbf24;
+      font-weight: 700;
+    }
+
+    /* Mechanical Bat Toggle Switch */
+    .mech-toggle {
+      position: relative;
+      display: inline-block;
+      width: 44px;
+      height: 20px;
+      flex-shrink: 0;
+      cursor: pointer;
+    }
+
+    .mech-toggle input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+      position: absolute;
+    }
+
+    .mech-bezel {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: linear-gradient(180deg, #243248 0%, #0c1424 100%);
+      border: 1px solid #475569;
+      border-radius: 10px;
+      box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.8), 0 1px 1px rgba(255, 255, 255, 0.1);
+      transition: all 0.2s ease;
+    }
+
+    .mech-slot {
+      position: absolute;
+      top: 2px;
+      left: 4px;
+      right: 4px;
+      bottom: 2px;
+      background: #020617;
+      border-radius: 6px;
+      box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.95);
+      border: 1px solid #141c2c;
+    }
+
+    .mech-bat {
+      position: absolute;
+      top: 1px;
+      left: 2px;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 30%, #ffffff 0%, #cbd5e1 35%, #94a3b8 65%, #475569 100%);
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.6), inset 0 1px 2px rgba(255, 255, 255, 0.9);
+      transition: transform 0.22s cubic-bezier(0.34, 1.4, 0.64, 1), background 0.2s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .mech-bat::after {
+      content: "";
+      position: absolute;
+      width: 3.5px;
+      height: 7px;
+      background: linear-gradient(90deg, #64748b 0%, #f1f5f9 50%, #334155 100%);
+      border-radius: 2px;
+      top: -3px;
+      box-shadow: 0 -1px 2px rgba(0, 0, 0, 0.4);
+      transform: rotate(-12deg);
+      transition: transform 0.22s ease;
+    }
+
+    .mech-toggle input:checked + .mech-bezel .mech-bat {
+      transform: translateX(22px);
+      background: radial-gradient(circle at 35% 30%, #ffffff 0%, #fde68a 35%, #f59e0b 65%, #92400e 100%);
+    }
+
+    .mech-toggle input:checked + .mech-bezel .mech-bat::after {
+      transform: rotate(12deg);
+      background: linear-gradient(90deg, #d97706 0%, #fef3c7 50%, #78350f 100%);
+    }
+
+    .mech-toggle input:checked + .mech-bezel {
+      border-color: #f59e0b;
+      box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.8), 0 0 6px rgba(245, 158, 11, 0.3);
+    }
+
+    .mech-toggle input:disabled + .mech-bezel {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    /* ==========================================
+       SOC CURVE CONFIGURATION: TABLE + DISCHARGE GRAPH
+       ========================================== */
+    .curve-config-layout {
+      display: grid;
+      grid-template-columns: 245px 1fr;
+      gap: 10px;
+      align-items: stretch;
+      margin-bottom: 10px;
+    }
+    @media (max-width: 780px) {
+      .curve-config-layout {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .curve-table-wrapper {
+      background: #0f172a;
+      border: 1px solid var(--card-border);
+      border-radius: 6px;
+      padding: 5px 6px;
+      display: flex;
+      flex-direction: column;
+      height: 410px;
+    }
+
+    .curve-table-header {
+      display: grid;
+      grid-template-columns: 42px 1fr 1fr;
+      gap: 5px;
+      padding: 2px 2px 5px;
+      border-bottom: 1px solid var(--card-border);
+      font-size: 0.66rem;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      text-align: center;
+    }
+
+    .curve-table-body {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      margin-top: 4px;
+      overflow-y: auto;
+      flex: 1;
+      padding-right: 2px;
+    }
+
+    .curve-row {
+      display: grid;
+      grid-template-columns: 42px 1fr 1fr;
+      gap: 5px;
+      align-items: center;
+      padding: 2px 2px;
+      border-radius: 4px;
+      transition: background-color 0.15s;
+    }
+    .curve-row:hover, .curve-row.highlight {
+      background: rgba(56, 189, 248, 0.12);
+    }
+
+    .curve-pt-label {
+      font-size: 0.68rem;
+      font-weight: 700;
+      color: #94a3b8;
+      background: #1e293b;
+      padding: 2px 0;
+      border-radius: 3px;
+      text-align: center;
+      border: 1px solid #334155;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* Clean, easy-to-edit numeric inputs */
+    .curve-input {
+      background: #1e293b;
+      border: 1px solid var(--card-border);
+      border-radius: 4px;
+      color: #f8fafc;
+      font-size: 0.78rem;
+      font-weight: 700;
+      padding: 3px 4px;
+      text-align: center;
+      width: 100%;
+      font-variant-numeric: tabular-nums;
+    }
+    .curve-input:focus {
+      border-color: var(--accent-blue);
+      background: #0f172a;
+      box-shadow: 0 0 4px rgba(56, 189, 248, 0.4);
+    }
+    .curve-input.voltage {
+      color: #38bdf8;
+    }
+    .curve-input.percent {
+      color: #4ade80;
+    }
+
+    .curve-graph-card {
+      background: #0b1329;
+      border: 1px solid var(--card-border);
+      border-radius: 6px;
+      padding: 6px;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      height: 410px;
+    }
+    #curveCanvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      border-radius: 4px;
+      cursor: crosshair;
+    }
+
+    .actions-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
+
+    /* Warning Banner */
+    .warning-banner {
+      background: rgba(245, 158, 11, 0.12);
+      border: 1px solid var(--accent-amber);
+      border-radius: 5px;
+      padding: 6px 10px;
+      margin-bottom: 8px;
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+    }
+    .warning-icon {
+      font-size: 1.1rem;
+      line-height: 1;
+      color: var(--accent-amber);
+    }
+    .warning-content {
+      font-size: 0.75rem;
+      color: #fde68a;
+      line-height: 1.3;
+    }
+    .warning-content strong {
+      color: #fbbf24;
+    }
+
+    /* Calibration Grid */
+    .cal-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 10px;
+    }
+    .cal-box {
+      background: #0f172a;
+      border: 1px solid var(--card-border);
+      border-radius: 5px;
+      padding: 8px;
+    }
+    .cal-title {
+      font-weight: 600;
+      font-size: 0.8rem;
+      margin-bottom: 4px;
+      color: #e2e8f0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .cal-desc {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      margin-bottom: 5px;
+    }
+    .cal-live-val {
+      font-size: 0.74rem;
+      background: #1e293b;
+      padding: 3px 6px;
+      border-radius: 4px;
+      margin-bottom: 5px;
+      color: #38bdf8;
+      font-family: monospace;
+    }
+
+    /* Terminal Warning */
+    .terminal-warning {
+      background: rgba(245, 158, 11, 0.08);
+      border: 1px solid rgba(245, 158, 11, 0.35);
+      border-radius: 5px;
+      padding: 6px 9px;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+    }
+    .terminal-warning-icon {
+      font-size: 1rem;
+      line-height: 1.2;
+      flex-shrink: 0;
+    }
+    .terminal-warning-text {
+      font-size: 0.74rem;
+      color: #fde68a;
+      line-height: 1.3;
+    }
+    .terminal-warning-text strong {
+      color: #fbbf24;
+    }
+
+    /* Terminal Command Bar */
+    .terminal-cmd-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 6px;
+    }
+    .cmd-dropdown {
+      background-color: #1e293b;
+      border: 1px solid var(--card-border);
+      color: var(--text);
+      padding: 5px 8px;
+      border-radius: 5px;
+      font-size: 0.78rem;
+      outline: none;
+      min-width: 240px;
+      cursor: pointer;
+    }
+    .cmd-dropdown:focus {
+      border-color: var(--accent-blue);
+    }
+    .cmd-dropdown:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    /* Terminal Log */
+    #terminal {
+      background: #020617;
+      border: 1px solid var(--card-border);
+      border-radius: 5px;
+      padding: 6px 8px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 0.76rem;
+      height: 140px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .log-info { color: #94a3b8; }
+    .log-tx { color: #38bdf8; font-weight: 600; }
+    .log-rx { color: #a7f3d0; }
+    .log-warn { color: #fbbf24; }
+    .log-err { color: #f87171; font-weight: 600; }
+    .log-success { color: #4ade80; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>
+        BMSOne V3 Configurator
+        <span class="badge" id="appTypeBadge">WebSerial / Android</span>
+      </h1>
+      <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+        <a href="https://jonbrotherton.fws.store/product/bmsone-v2-plug-and-play" target="_blank" rel="noopener noreferrer" class="btn-purchase" title="Purchase BMSOne V2 Plug and Play Hardware">
+          🛒 Purchase BMSOne
+        </a>
+        <div id="statusIndicator" class="status-badge off">
+          <div class="status-dot"></div>
+          <span id="statusText">Disconnected</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Connection & Bank Header -->
+    <div class="card" style="padding: 7px 12px; margin-bottom: 10px;">
+      <div class="top-bar">
+        <div class="control-group">
+          <button id="connectBtn" class="btn-connect">Connect</button>
+          <label for="baudRate">Baud:</label>
+          <select id="baudRate">
+            <option value="9600" selected>9600 (Standard)</option>
+            <option value="115200">115200 (High Speed)</option>
+          </select>
+        </div>
+
+        <div class="control-group" style="align-items: center; gap: 8px;">
+          <label for="bankSelect">Bank:</label>
+          <select id="bankSelect">
+            <option value="1">Bank 1 (Boot Default)</option>
+            <option value="2">Bank 2</option>
+            <option value="3">Bank 3</option>
+          </select>
+          <span id="bootBankBadge" class="badge-boot" title="Current Default Boot Bank in BMSOne EEPROM. This bank automatically loads on power-up.">
+            ⚡ Boot: Bank 1
+          </span>
+          <button id="setBootBtn" class="btn-amber btn-sm" disabled title="Writes this bank to EEPROM as active boot bank (SW<bank>)">
+            ★ Set as Boot Bank
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Dashboard Grid: Left Panel (Telemetry & Toggles) + Right Panel (SoC, Cal, Terminal) -->
+    <div class="main-dashboard-grid">
+      <!-- Left Panel: Live Current & Voltages vertically aligned ABOVE the Toggles -->
+      <aside class="left-panel">
+        <!-- 1. Live Current & Voltages (Vertical) -->
+        <div class="card live-telemetry-vertical-card">
+          <div class="card-title" style="margin-bottom: 6px;">
+            <span style="font-size: 0.78rem; font-weight: 700; color: #38bdf8;">⚡ Live Readings</span>
+            <span id="detectedCellsBadge" class="badge-detected">
+              <strong id="detectedCellsText" style="color: #38bdf8;">—</strong>
+            </span>
+          </div>
+          <div class="plug-order-note" style="margin: 6px 0 10px 0; background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 6px; padding: 7px 9px; font-size: 0.74rem; color: #fef08a; line-height: 1.4;">
+            <div style="font-weight: 800; color: #f59e0b; margin-bottom: 3px; display: flex; align-items: center; gap: 4px;">
+              <span>⚠️ Proper Plug-In Order:</span>
+            </div>
+            <div style="color: #f8fafc; font-size: 0.73rem;">
+              <strong>1. Balance lead</strong> &nbsp;➔&nbsp; <strong>2. Power lead</strong> &nbsp;➔&nbsp; <strong>3. USB</strong>
+            </div>
+          </div>
+
+          <div class="v-telem-list">
+            <div class="v-telem-item">
+              <span class="v-telem-label">Pack Total</span>
+              <div class="v-telem-val-wrap">
+                <strong class="v-telem-val highlight" id="livePack">—</strong>
+                <span class="v-telem-unit">mV</span>
+              </div>
+            </div>
+
+            <div class="v-telem-item">
+              <span class="v-telem-label">Current</span>
+              <div class="v-telem-val-wrap">
+                <strong class="v-telem-val cyan" id="liveCurrent">—</strong>
+                <span class="v-telem-unit">mA</span>
+              </div>
+            </div>
+
+            <div class="v-telem-item">
+              <span class="v-telem-label">Temperature</span>
+              <div class="v-telem-val-wrap">
+                <strong class="v-telem-val" style="color: #fb923c;" id="liveTemp">—</strong>
+                <span class="v-telem-unit">°C</span>
+              </div>
+            </div>
+
+            <div class="v-cell-divider">
+              <span>Cell Voltages</span>
+              <span style="font-size: 0.6rem; color: var(--text-muted);">2S - 6S</span>
+            </div>
+
+            <div class="v-cell-list">
+              <div class="v-cell-item">
+                <span class="v-cell-name">Cell 1</span>
+                <div class="v-cell-val-wrap">
+                  <span class="v-cell-val" id="liveCell1">—</span>
+                  <span class="v-cell-unit">mV</span>
+                </div>
+              </div>
+              <div class="v-cell-item">
+                <span class="v-cell-name">Cell 2</span>
+                <div class="v-cell-val-wrap">
+                  <span class="v-cell-val" id="liveCell2">—</span>
+                  <span class="v-cell-unit">mV</span>
+                </div>
+              </div>
+              <div class="v-cell-item">
+                <span class="v-cell-name">Cell 3</span>
+                <div class="v-cell-val-wrap">
+                  <span class="v-cell-val" id="liveCell3">—</span>
+                  <span class="v-cell-unit">mV</span>
+                </div>
+              </div>
+              <div class="v-cell-item">
+                <span class="v-cell-name">Cell 4</span>
+                <div class="v-cell-val-wrap">
+                  <span class="v-cell-val" id="liveCell4">—</span>
+                  <span class="v-cell-unit">mV</span>
+                </div>
+              </div>
+              <div class="v-cell-item">
+                <span class="v-cell-name">Cell 5</span>
+                <div class="v-cell-val-wrap">
+                  <span class="v-cell-val" id="liveCell5">—</span>
+                  <span class="v-cell-unit">mV</span>
+                </div>
+              </div>
+              <div class="v-cell-item">
+                <span class="v-cell-name">Cell 6</span>
+                <div class="v-cell-val-wrap">
+                  <span class="v-cell-val" id="liveCell6">—</span>
+                  <span class="v-cell-unit">mV</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. Hardware Toggles (Directly below Live Readings on the Left) -->
+        <div class="card hw-toggles-card">
+          <div class="card-title" style="margin-bottom: 6px;">
+            <span style="font-size: 0.78rem; font-weight: 700; color: #38bdf8;">⚙ Hardware Toggles</span>
+            <button id="restoreDeviceDefaultsBtn" class="btn-secondary btn-sm" disabled title="Restore BMSOne Hardware Toggles to defaults (S0, SH). Does not alter the curve table.">
+              ↺ Reset Toggles
+            </button>
+          </div>
+
+          <!-- 1. SoC Mode Toggle -->
+          <div class="hw-toggle-unit" title="SoC Estimation Mode:&#10;• S0 Voltage (Recommended): Uses real-time cell voltage and 15-point calibration table.&#10;• S1 Capacity: Coulomb counting from 100% full.">
+            <div class="hw-toggle-top">
+              <span class="hw-toggle-title">SoC Mode</span>
+              <span class="hw-toggle-badge" id="modeStateBadge">Voltage (S0)</span>
+            </div>
+            <div class="hw-toggle-control-row">
+              <span class="hw-toggle-label active" id="modeOptS0" title="S0: Voltage-based SoC mode (Recommended)">S0 Volt</span>
+              <label class="mech-toggle" title="Toggle between S0 (Voltage) and S1 (Capacity)">
+                <input type="checkbox" id="modeSwitch" disabled>
+                <span class="mech-bezel">
+                  <span class="mech-slot"></span>
+                  <span class="mech-bat"></span>
+                </span>
+              </label>
+              <span class="hw-toggle-label" id="modeOptS1" title="S1: Capacity-based SoC mode (Coulomb counting)">S1 Cap</span>
+            </div>
+          </div>
+
+
+          <!-- 3. Temperature Toggle -->
+          <div class="hw-toggle-unit" title="Temperature Sensor:&#10;• SH 100K NTC: Live external 100K NTC thermistor telemetry.&#10;• S! Fake 22.5°C: Emulates safe room temperature when no thermistor is attached.">
+            <div class="hw-toggle-top">
+              <span class="hw-toggle-title">Temperature</span>
+              <span class="hw-toggle-badge" id="tempStateBadge">100K NTC (SH)</span>
+            </div>
+            <div class="hw-toggle-control-row">
+              <span class="hw-toggle-label active" id="tempOptSH" title="SH: Enable 100K NTC Thermistor">SH NTC</span>
+              <label class="mech-toggle" title="Toggle between SH (100K Thermistor) and S! (Fake 22.5°C)">
+                <input type="checkbox" id="tempSwitch" disabled>
+                <span class="mech-bezel">
+                  <span class="mech-slot"></span>
+                  <span class="mech-bat"></span>
+                </span>
+              </label>
+              <span class="hw-toggle-label" id="tempOptFake" title="S!: Disable thermistor and fake safe 22.5°C">S! Fake</span>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Right Panel: SoC Curve Configuration, Calibration & Terminal -->
+      <main class="right-panel">
+        <!-- State of Charge (SoC) Curve Configuration -->
+        <div class="card">
+          <div class="card-title">
+            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+              <span>State of Charge (SoC) Curve Configuration</span>
+              <span id="activeBankBadge" style="font-size: 0.72rem; color: #38bdf8; font-weight: 600;">Active: Bank 1</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <label for="mahInput" style="font-weight: 600; color: #f8fafc; font-size: 0.78rem;">Capacity:</label>
+              <input id="mahInput" type="number" min="500" max="40000" step="100" style="width: 80px; padding: 2px 5px; font-size: 0.78rem;" value="5200">
+              <span style="font-size: 0.72rem; color: var(--text-muted);">mAh</span>
+              <span id="uncommittedTag" style="font-size: 0.7rem; color: var(--accent-amber); font-weight: 700; display: none; margin-left: 4px;">● Unsaved</span>
+            </div>
+          </div>
+
+          <!-- Table on Left (Descending P15->P1) + Graph on Right (Full voltage on Left dropping to Right) -->
+          <div class="curve-config-layout">
+            <div class="curve-table-wrapper">
+              <div class="curve-table-header">
+                <div>Point</div>
+                <div>Volt (V)</div>
+                <div>SoC (%)</div>
+              </div>
+              <div id="curveTableBody" class="curve-table-body"></div>
+            </div>
+
+            <!-- Li-ion Discharge Curve Graph: 4.2V (Left) -> 3.0V (Right) -->
+            <div class="curve-graph-card">
+              <canvas id="curveCanvas"></canvas>
+            </div>
+          </div>
+
+          <div class="actions-bar">
+            <button id="readConfigBtn" class="btn-primary" disabled>
+              📥 Read Config
+            </button>
+            <button id="saveBankBtn" class="btn-success" disabled>
+              💾 Save to Selected Bank
+            </button>
+            <button id="loadLipoBtn" class="btn-secondary" title="Loads standard LiPo preset (3.5V–4.2V) into the table. Click 'Save to Selected Bank' to write to BMSOne EEPROM.">
+              ⚡ LiPo Defaults
+            </button>
+            <button id="loadLiionBtn" class="btn-secondary" title="Loads standard Li-ion preset (2.8V–4.2V) into the table. Click 'Save to Selected Bank' to write to BMSOne EEPROM.">
+              🔋 Li-ion Defaults
+            </button>
+            <button id="restoreDefaultsBtn" class="btn-secondary" title="Restores factory table calibration defaults for active bank onto screen. Click 'Save to Selected Bank' to write to BMSOne EEPROM.">
+              ↺ Restore Defaults
+            </button>
+          </div>
+        </div>
+
+        <!-- Sensor Calibration Section -->
+        <div class="card">
+          <details id="calDetails">
+            <summary style="font-weight: 600; cursor: pointer; color: #e2e8f0; outline: none; font-size: 0.82rem;">
+              ⚙ Sensor Calibration (Voltage & Current Sensing)
+            </summary>
+            <div style="margin-top: 8px;">
+              <!-- Warning Banner -->
+              <div class="warning-banner">
+                <span class="warning-icon">⚠️</span>
+                <div class="warning-content">
+                  <strong>Warning:</strong> Making incorrect changes here can cause false battery readings or false failsafes. Only calibrate with a precision multimeter connected.
+                </div>
+              </div>
+
+              <!-- Existing Sensor Settings Display Card -->
+              <div style="background: #0f172a; border: 1px solid var(--card-border); border-radius: 5px; padding: 8px; margin-bottom: 10px;">
+                <div style="font-weight: 600; font-size: 0.78rem; color: #38bdf8; margin-bottom: 6px; display: flex; justify-content: space-between;">
+                  <span>Existing Sensor Calibration Settings</span>
+                  <span id="calActiveBankTag" style="font-size: 0.7rem; color: var(--text-muted);">Active Bank: Bank 1</span>
+                </div>
+                
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(80px, 1fr)); gap: 5px; margin-bottom: 6px;">
+                  <div class="v-cell-item" style="padding: 3px 5px;"><span class="v-cell-name">C1</span><span class="v-cell-val" id="calC1">—</span><span class="v-cell-unit">mV</span></div>
+                  <div class="v-cell-item" style="padding: 3px 5px;"><span class="v-cell-name">C2</span><span class="v-cell-val" id="calC2">—</span><span class="v-cell-unit">mV</span></div>
+                  <div class="v-cell-item" style="padding: 3px 5px;"><span class="v-cell-name">C3</span><span class="v-cell-val" id="calC3">—</span><span class="v-cell-unit">mV</span></div>
+                  <div class="v-cell-item" style="padding: 3px 5px;"><span class="v-cell-name">C4</span><span class="v-cell-val" id="calC4">—</span><span class="v-cell-unit">mV</span></div>
+                  <div class="v-cell-item" style="padding: 3px 5px;"><span class="v-cell-name">C5</span><span class="v-cell-val" id="calC5">—</span><span class="v-cell-unit">mV</span></div>
+                  <div class="v-cell-item" style="padding: 3px 5px;"><span class="v-cell-name">C6</span><span class="v-cell-val" id="calC6">—</span><span class="v-cell-unit">mV</span></div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 6px; font-size: 0.75rem; background: #1e293b; padding: 6px; border-radius: 4px;">
+                  <div><span style="color: var(--text-muted);">Pack Voltage:</span> <strong id="calPackVolt" style="color: #22c55e;">— mV</strong></div>
+                  <div><span style="color: var(--text-muted);">Current:</span> <strong id="calActiveCurr" style="color: #38bdf8;">— mA</strong></div>
+                  <div><span style="color: var(--text-muted);">Multiplier (SJ):</span> <strong id="calActiveMultiplier" style="color: #f59e0b;">1.000</strong></div>
+                  <div><span style="color: var(--text-muted);">Direction (ST):</span> <strong id="calActiveDirection" style="color: #f8fafc;">Normal</strong></div>
+                </div>
+              </div>
+
+              <!-- Current Calibration & Undo Toolbar -->
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 6px;">
+                <div id="calStatusText" style="font-size: 0.74rem; color: var(--text-muted);">
+                  Saved Baseline: <span id="calBaselineLabel" style="color: #38bdf8; font-weight: 600;">Not Captured</span>
+                </div>
+                <div style="display: flex; gap: 6px;">
+                  <button id="snapshotCalBtn" class="btn-secondary btn-sm" disabled title="Save current readings as an undo restore point">
+                    📸 Snapshot Baseline
+                  </button>
+                  <button id="undoCalBtn" class="btn-amber btn-sm" disabled title="Revert calibration settings back to the saved baseline">
+                    ↺ Undo / Revert to Baseline
+                  </button>
+                </div>
+              </div>
+
+              <!-- Calibration Controls Grid -->
+              <div class="cal-grid">
+                <div class="cal-box">
+                  <div class="cal-title"><span>Cell Voltage Calibration (SC)</span></div>
+                  <div class="cal-desc">Enter mV measured with multimeter:</div>
+                  <div class="cal-live-val" id="calLiveCells">Readings: —</div>
+                  <div style="display: flex; gap: 6px;">
+                    <input id="calVoltInput" type="text" placeholder="e.g. 3740,3746,3752,3749" style="flex: 1;">
+                    <button id="sendCalVoltBtn" class="btn-secondary btn-sm" disabled>Send SC</button>
+                  </div>
+                </div>
+
+                <div class="cal-box">
+                  <div class="cal-title"><span>Current Sensor Calibration (SI / SJ)</span></div>
+                  <div class="cal-desc">Pass known mA (SI) or multiplier (SJ):</div>
+                  <div class="cal-live-val" id="calLiveCurrent">Current: — mA</div>
+                  <div style="display: flex; gap: 6px; margin-bottom: 4px;">
+                    <input id="calCurrInput" type="number" placeholder="mA (e.g. 10220)" style="flex: 1;">
+                    <button id="sendCalCurrBtn" class="btn-secondary btn-sm" disabled>Send SI</button>
+                  </div>
+                  <div style="display: flex; gap: 6px;">
+                    <input id="calMulInput" type="text" placeholder="Multiplier (e.g. -7.5)" style="flex: 1;">
+                    <button id="sendCalMulBtn" class="btn-secondary btn-sm" disabled>Send SJ</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </details>
+        </div>
+
+        <!-- Manual Command & Terminal Log -->
+        <div class="card">
+          <div class="card-title">
+            <span>Serial Terminal & Manual Command</span>
+            <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+              <button id="masterResetBtn" class="btn-danger btn-sm" disabled title="Performs master full factory reset: restores all 3 banks to standard factory tables in EEPROM, sets Bank 1 as boot bank, and resets hardware modes.">
+                ⚠️ Master Full Factory Reset
+              </button>
+              <button id="clearLogBtn" class="btn-secondary btn-sm">Clear Log</button>
+            </div>
+          </div>
+
+          <div class="terminal-warning">
+            <span class="terminal-warning-icon">⚠️</span>
+            <div class="terminal-warning-text">
+              <strong>Caution with Manual Commands:</strong> Commands communicate directly with BMSOne MCU & EEPROM. Incorrect writes (e.g. <code>SW!</code> or uncalibrated <code>SC</code>) can corrupt profile tables.
+            </div>
+          </div>
+
+          <div class="terminal-cmd-bar">
+            <select id="cmdSelect" class="cmd-dropdown" disabled title="Select a BMSOne command to pre-fill">
+              <option value="" selected>-- Select a Command from List --</option>
+              <optgroup label="Status & Telemetry">
+                <option value="SS">SS — Show Full Configuration Dump</option>
+                <option value="SD">SD — Dump Internal Sensor & ADC Readings</option>
+              </optgroup>
+              <optgroup label="SoC & Protocol Modes">
+                <option value="S0">S0 — Voltage-based SoC Mode (Recommended)</option>
+                <option value="S1">S1 — Capacity-based SoC Mode</option>
+                <option value="SN">SN — Enable New Protocol (2S-6S Support)</option>
+                <option value="SO">SO — Force Old Protocol (4S Spoofing)</option>
+                <option value="SY">SY — Enable Auto Cell Count Detection (Default)</option>
+              </optgroup>
+              <optgroup label="Sensors & Calibration">
+                <option value="SH">SH — Enable 100K Thermistor Temp Reporting</option>
+                <option value="S!">S! — Disable Thermistor (Fake Safe 22.5°C Temp)</option>
+                <option value="ST">ST — Invert Current Sensing Direction</option>
+                <option value="SC">SC — Calibrate Cell Voltages (e.g. SC4200,4200,4200,4200,4200)</option>
+                <option value="SI">SI — Calibrate Current Sensor (e.g. SI10220)</option>
+                <option value="SJ">SJ — Set Current Multiplier (e.g. SJ-7.5)</option>
+              </optgroup>
+              <optgroup label="EEPROM & Memory Banks">
+                <option value="SR1">SR1 — Switch & Read Configuration from Bank 1</option>
+                <option value="SR2">SR2 — Switch & Read Configuration from Bank 2</option>
+                <option value="SR3">SR3 — Switch & Read Configuration from Bank 3</option>
+                <option value="SW1">SW1 — Save Current Buffer to EEPROM Bank 1</option>
+                <option value="SW2">SW2 — Save Current Buffer to EEPROM Bank 2</option>
+                <option value="SW3">SW3 — Save Current Buffer to EEPROM Bank 3</option>
+                <option value="SW">SW — Save Current Buffer to Active Bank</option>
+                <option value="SW!">SW! — Save Current Buffer to ALL Banks (Caution!)</option>
+                <option value="SM">SM — Set Total Capacity in mAh (e.g. SM5200)</option>
+                <option value="SV">SV — Set Voltage Table (15 mV points)</option>
+                <option value="SP">SP — Set Percentage Table (15 % points)</option>
+              </optgroup>
+            </select>
+            <input id="manualCmdInput" type="text" placeholder="Or type command here and press Enter" style="flex: 1;">
+            <button id="sendManualBtn" class="btn-primary" disabled>Send</button>
+          </div>
+
+          <div id="terminal"></div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script>
+    // ==========================================
+    // DEFAULT CONFIGURATIONS & PRESETS (WHOLE PERCENTAGES)
+    // ==========================================
+    const LIPO_DEFAULT = {
+      mah: 5200,
+      voltages: [3.500, 3.525, 3.550, 3.575, 3.600, 3.625, 3.675, 3.700, 3.725, 3.750, 3.800, 3.825, 3.950, 4.000, 4.200],
+      percentages: [0, 8, 21, 27, 41, 49, 57, 64, 72, 80, 85, 88, 98, 99, 100]
+    };
+
+    const LIION_DEFAULT = {
+      mah: 6000,
+      voltages: [2.800, 2.900, 3.000, 3.100, 3.200, 3.320, 3.400, 3.500, 3.600, 3.700, 3.800, 3.860, 3.900, 3.960, 4.200],
+      percentages: [0, 7, 15, 22, 29, 37, 44, 51, 58, 66, 73, 80, 88, 95, 100]
+    };
+
+    function getDefaultProfile(bankNum) {
+      if (bankNum === 1) {
+        return JSON.parse(JSON.stringify(LIPO_DEFAULT));
+      } else if (bankNum === 2) {
+        const b = JSON.parse(JSON.stringify(LIION_DEFAULT));
+        b.mah = 6000;
+        return b;
+      } else {
+        const b = JSON.parse(JSON.stringify(LIION_DEFAULT));
+        b.mah = 8000;
+        return b;
+      }
+    }
+
+    let savedBanks = null;
+    try {
+      savedBanks = JSON.parse(localStorage.getItem('bmsone_banks_v4'));
+      if (savedBanks) {
+        [1, 2, 3].forEach(k => {
+          if (savedBanks[k] && Array.isArray(savedBanks[k].percentages)) {
+            savedBanks[k].percentages = savedBanks[k].percentages.map(p => Math.round(p));
+          }
+        });
+      }
+    } catch (e) {}
+
+    let banks = savedBanks || {
+      1: getDefaultProfile(1),
+      2: getDefaultProfile(2),
+      3: getDefaultProfile(3)
+    };
+
+    let currentBank = 1;
+    let bootBank = parseInt(localStorage.getItem('bmsone_boot_bank') || '1', 10);
+    if (bootBank < 1 || bootBank > 3) bootBank = 1;
+
+    let isSaveInProgress = false;
+
+    function updateBootBankUI() {
+      const bootBadge = document.getElementById('bootBankBadge');
+      if (bootBadge) {
+        bootBadge.innerHTML = `⚡ Boot: Bank ${bootBank}`;
+        bootBadge.title = `Current Default Boot Bank in BMSOne EEPROM: Bank ${bootBank}. Automatically loads on power-up.`;
+      }
+
+      if (bankSelect) {
+        const bOptions = bankSelect.querySelectorAll('option');
+        bOptions.forEach(opt => {
+          const val = parseInt(opt.value, 10);
+          const isBoot = (val === bootBank);
+          opt.textContent = isBoot ? `Bank ${val} (Boot Default)` : `Bank ${val}`;
+        });
+      }
+
+      if (setBootBtn) {
+        const isCurrentBoot = (currentBank === bootBank);
+        if (isCurrentBoot) {
+          setBootBtn.innerHTML = '★ Active Boot Bank';
+          setBootBtn.className = 'btn-secondary btn-sm';
+          setBootBtn.title = `Bank ${currentBank} is currently configured as default boot bank in EEPROM.`;
+        } else {
+          setBootBtn.innerHTML = '★ Set as Boot Bank';
+          setBootBtn.className = 'btn-amber btn-sm';
+          setBootBtn.title = `Write Bank ${currentBank} to EEPROM as default boot bank on power-up (SW${currentBank}).`;
+        }
+      }
+    }
+
+    let activeMultiplierVal = '1.000';
+    let isCurrentInverted = false;
+    let savedCalibration = null;
+    try {
+      savedCalibration = JSON.parse(localStorage.getItem('bmsone_cal_snapshot_v4'));
+    } catch (e) {}
+
+    // Serial connection state
+    let port = null;
+    let reader = null;
+    let writer = null;
+    let keepReading = false;
+    let isCommandInProgress = false;
+    let isExplicitReadRequested = false;
+    let bankSwitchDebounceTimer = null;
+
+    function isDeviceConnected() {
+      if (typeof window.AndroidUSB !== 'undefined') {
+        return window.AndroidUSB.isConnected();
+      }
+      return !!(port && writer);
+    }
+
+    // DOM Elements
+    const connectBtn = document.getElementById('connectBtn');
+    const baudSelect = document.getElementById('baudRate');
+    const bankSelect = document.getElementById('bankSelect');
+    const setBootBtn = document.getElementById('setBootBtn');
+    const statusIndicator = document.getElementById('statusIndicator');
+    const statusText = document.getElementById('statusText');
+    const activeBankBadge = document.getElementById('activeBankBadge');
+    const uncommittedTag = document.getElementById('uncommittedTag');
+
+    const liveCurrent = document.getElementById('liveCurrent');
+    const livePack = document.getElementById('livePack');
+    const liveTemp = document.getElementById('liveTemp');
+    const liveCells = [1,2,3,4,5,6].map(i => document.getElementById('liveCell' + i));
+    const detectedCellsBadge = document.getElementById('detectedCellsBadge');
+    const detectedCellsText = document.getElementById('detectedCellsText');
+    let detectedCellCount = null;
+
+    function updateDetectedCellCount(count) {
+      if (count >= 2 && count <= 6) {
+        detectedCellCount = count;
+        if (detectedCellsText) {
+          detectedCellsText.textContent = `${count}S (${count} Cells)`;
+        }
+        if (detectedCellsBadge) {
+          detectedCellsBadge.style.background = 'rgba(6, 95, 70, 0.4)';
+          detectedCellsBadge.style.borderColor = '#059669';
+          detectedCellsBadge.style.color = '#6ee7b7';
+        }
+      } else if (count === 0) {
+        if (detectedCellsText) detectedCellsText.textContent = 'No Pack (0S)';
+      }
+    }
+
+    const mahInput = document.getElementById('mahInput');
+    const curveTableBody = document.getElementById('curveTableBody');
+    const curveCanvas = document.getElementById('curveCanvas');
+
+    const readConfigBtn = document.getElementById('readConfigBtn');
+    const saveBankBtn = document.getElementById('saveBankBtn');
+    const loadLipoBtn = document.getElementById('loadLipoBtn');
+    const loadLiionBtn = document.getElementById('loadLiionBtn');
+    const restoreDefaultsBtn = document.getElementById('restoreDefaultsBtn');
+
+    const manualCmdInput = document.getElementById('manualCmdInput');
+    const sendManualBtn = document.getElementById('sendManualBtn');
+    const terminal = document.getElementById('terminal');
+    const clearLogBtn = document.getElementById('clearLogBtn');
+    const masterResetBtn = document.getElementById('masterResetBtn');
+
+    // Quick Commands & Toggle Switches
+    const modeSwitch = document.getElementById('modeSwitch');
+    const modeStateBadge = document.getElementById('modeStateBadge');
+    const modeOptS0 = document.getElementById('modeOptS0');
+    const modeOptS1 = document.getElementById('modeOptS1');
+
+    const protoSwitch = document.getElementById('protoSwitch');
+    const protoStateBadge = document.getElementById('protoStateBadge');
+    const protoOptSN = document.getElementById('protoOptSN');
+    const protoOptSO = document.getElementById('protoOptSO');
+
+    const tempSwitch = document.getElementById('tempSwitch');
+    const tempStateBadge = document.getElementById('tempStateBadge');
+    const tempOptSH = document.getElementById('tempOptSH');
+    const tempOptFake = document.getElementById('tempOptFake');
+
+    const restoreDeviceDefaultsBtn = document.getElementById('restoreDeviceDefaultsBtn');
+    const cmdSelect = document.getElementById('cmdSelect');
+
+    const calVoltInput = document.getElementById('calVoltInput');
+    const sendCalVoltBtn = document.getElementById('sendCalVoltBtn');
+    const calCurrInput = document.getElementById('calCurrInput');
+    const sendCalCurrBtn = document.getElementById('sendCalCurrBtn');
+    const calMulInput = document.getElementById('calMulInput');
+    const sendCalMulBtn = document.getElementById('sendCalMulBtn');
+    const calLiveCells = document.getElementById('calLiveCells');
+    const calLiveCurrent = document.getElementById('calLiveCurrent');
+    const calBaselineLabel = document.getElementById('calBaselineLabel');
+    const snapshotCalBtn = document.getElementById('snapshotCalBtn');
+    const undoCalBtn = document.getElementById('undoCalBtn');
+    const calActiveBankTag = document.getElementById('calActiveBankTag');
+    const calPackVolt = document.getElementById('calPackVolt');
+    const calActiveCurr = document.getElementById('calActiveCurr');
+    const calActiveMultiplier = document.getElementById('calActiveMultiplier');
+    const calActiveDirection = document.getElementById('calActiveDirection');
+    const calC = [1,2,3,4,5,6].map(i => document.getElementById('calC' + i));
+
+    function log(msg, type = 'info') {
+      const time = new Date().toLocaleTimeString();
+      const div = document.createElement('div');
+      div.className = 'log-' + type;
+      div.textContent = `[${time}] ${msg}`;
+      terminal.appendChild(div);
+      terminal.scrollTop = terminal.scrollHeight;
+    }
+
+    clearLogBtn.addEventListener('click', () => {
+      terminal.innerHTML = '';
+    });
+
+    function delay(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    function persistBanks() {
+      try {
+        localStorage.setItem('bmsone_banks_v4', JSON.stringify(banks));
+      } catch (e) {}
+    }
+
+    function isCurrentBankAtDefaults() {
+      const current = banks[currentBank];
+      const standard = getDefaultProfile(currentBank);
+      if (current.mah !== standard.mah) return false;
+      for (let i = 0; i < 15; i++) {
+        if (Math.abs(current.voltages[i] - standard.voltages[i]) > 0.002) return false;
+        if (Math.round(current.percentages[i]) !== Math.round(standard.percentages[i])) return false;
+      }
+      return true;
+    }
+
+    function updateRestoreDefaultsState() {
+      activeBankBadge.textContent = `Active: Bank ${currentBank}${currentBank === bootBank ? ' (Boot)' : ''}`;
+      if (calActiveBankTag) calActiveBankTag.textContent = `Active Bank: Bank ${currentBank}${currentBank === bootBank ? ' (Boot)' : ''}`;
+    }
+
+    function markUnsaved(isUnsaved) {
+      if (uncommittedTag) {
+        uncommittedTag.style.display = isUnsaved ? 'inline' : 'none';
+      }
+      if (isUnsaved) {
+        saveBankBtn.disabled = false;
+        saveBankBtn.classList.add('pulse-save');
+      } else {
+        saveBankBtn.classList.remove('pulse-save');
+      }
+    }
+
+    function setControlsEnabled(enabled) {
+      baudSelect.disabled = enabled;
+      setBootBtn.disabled = !enabled;
+      readConfigBtn.disabled = !enabled;
+      saveBankBtn.disabled = !enabled;
+      if (restoreDefaultsBtn) restoreDefaultsBtn.disabled = !enabled;
+      sendManualBtn.disabled = !enabled;
+      sendCalVoltBtn.disabled = !enabled;
+      sendCalCurrBtn.disabled = !enabled;
+      sendCalMulBtn.disabled = !enabled;
+      snapshotCalBtn.disabled = !enabled;
+      undoCalBtn.disabled = !enabled;
+      if (modeSwitch) modeSwitch.disabled = !enabled;
+      if (protoSwitch) protoSwitch.disabled = !enabled;
+      if (tempSwitch) tempSwitch.disabled = !enabled;
+      if (restoreDeviceDefaultsBtn) restoreDeviceDefaultsBtn.disabled = !enabled;
+      if (cmdSelect) cmdSelect.disabled = !enabled;
+      if (masterResetBtn) masterResetBtn.disabled = !enabled;
+    }
+
+    // ==========================================
+    // LI-ION / LIPO CURVE GRAPH (HTML5 CANVAS)
+    // Full Voltage on Left (100%) -> Drops to Right (0%)
+    // ==========================================
+    let hoveredPointIndex = -1;
+
+    function drawCurveChart() {
+      const canvas = document.getElementById('curveCanvas');
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      const dpr = window.devicePixelRatio || 1;
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return;
+
+      canvas.width = Math.round(rect.width * dpr);
+      canvas.height = Math.round(rect.height * dpr);
+      ctx.scale(dpr, dpr);
+
+      const w = rect.width;
+      const h = rect.height;
+      const padLeft = 44;
+      const padRight = 18;
+      const padTop = 28;
+      const padBottom = 36;
+      const plotW = Math.max(10, w - padLeft - padRight);
+      const plotH = Math.max(10, h - padTop - padBottom);
+
+      const b = banks[currentBank] || getDefaultProfile(currentBank);
+
+      // Prepare 15 points sorted by percentage DESCENDING (100% at Left -> 0% at Right)
+      const pts = [];
+      for (let i = 0; i < 15; i++) {
+        pts.push({
+          p: typeof b.percentages[i] === 'number' ? Math.round(b.percentages[i]) : 0,
+          v: typeof b.voltages[i] === 'number' ? b.voltages[i] : 3.5,
+          origIdx: i
+        });
+      }
+      pts.sort((a, b) => b.p - a.p); // 100% full on left, 0% empty on right
+
+      // Voltage bounds (Y axis)
+      const minV = Math.min(...pts.map(pt => pt.v));
+      const maxV = Math.max(...pts.map(pt => pt.v));
+      const yMin = Math.min(2.6, Math.floor(minV * 4) / 4);
+      const yMax = Math.max(4.3, Math.ceil(maxV * 4) / 4);
+
+      // X mapping: Full voltage (100%) on left -> Dropping voltage (0%) on right
+      function xToPx(pct) {
+        return padLeft + ((100 - Math.max(0, Math.min(100, pct))) / 100) * plotW;
+      }
+      function vToPx(volt) {
+        return padTop + plotH - ((volt - yMin) / (yMax - yMin)) * plotH;
+      }
+
+      // 1. Technical Dark Background
+      ctx.fillStyle = '#0b1329';
+      ctx.fillRect(0, 0, w, h);
+
+      // 2. Voltage Y Grid lines and Ticks
+      ctx.lineWidth = 1;
+      const voltStep = 0.2;
+      const startV = Math.ceil(yMin / voltStep) * voltStep;
+      for (let v = startV; v <= yMax + 0.001; v += voltStep) {
+        const y = vToPx(v);
+        if (y < padTop - 2 || y > padTop + plotH + 2) continue;
+
+        const isNominal = Math.abs(v - 3.7) < 0.01;
+        const isFull = Math.abs(v - 4.2) < 0.01;
+
+        ctx.strokeStyle = isNominal ? 'rgba(245, 158, 11, 0.35)' :
+                          isFull ? 'rgba(34, 197, 94, 0.35)' :
+                          'rgba(51, 65, 85, 0.4)';
+        ctx.setLineDash((isNominal || isFull) ? [4, 4] : [2, 4]);
+        ctx.beginPath();
+        ctx.moveTo(padLeft, y);
+        ctx.lineTo(padLeft + plotW, y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        ctx.fillStyle = isNominal ? '#fbbf24' : isFull ? '#4ade80' : '#94a3b8';
+        ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(v.toFixed(2) + 'V', padLeft - 6, y);
+      }
+
+      // Reference annotations
+      const nomY = vToPx(3.7);
+      if (nomY >= padTop && nomY <= padTop + plotH) {
+        ctx.fillStyle = 'rgba(245, 158, 11, 0.7)';
+        ctx.font = '9px -apple-system, BlinkMacSystemFont, sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillText('Nominal 3.70V', padLeft + plotW - 6, nomY - 5);
+      }
+      const fullY = vToPx(4.2);
+      if (fullY >= padTop && fullY <= padTop + plotH) {
+        ctx.fillStyle = 'rgba(34, 197, 94, 0.7)';
+        ctx.font = '9px -apple-system, BlinkMacSystemFont, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText('Full 4.20V', padLeft + 6, fullY - 5);
+      }
+
+      // 3. SoC % X Grid lines and Ticks: 100% on left -> 0% on right
+      for (let p = 0; p <= 100; p += 20) {
+        const x = xToPx(p);
+        ctx.strokeStyle = 'rgba(51, 65, 85, 0.4)';
+        ctx.setLineDash([2, 4]);
+        ctx.beginPath();
+        ctx.moveTo(x, padTop);
+        ctx.lineTo(x, padTop + plotH);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        ctx.fillStyle = (p === 100) ? '#4ade80' : (p === 0) ? '#f87171' : '#94a3b8';
+        ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillText(p + '%', x, padTop + plotH + 4);
+      }
+
+      // Axis labels (Full on Left -> Empty on Right)
+      ctx.fillStyle = '#64748b';
+      ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Discharge Progress (100% Full → 0% Empty)', padLeft + plotW / 2, padTop + plotH + 19);
+
+      // Spec Header
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillStyle = '#38bdf8';
+      ctx.font = 'bold 11px -apple-system, BlinkMacSystemFont, sans-serif';
+      const chemName = currentBank === 1 ? 'LiPo' : 'Li-ion';
+      ctx.fillText(`⚡ Bank ${currentBank} (${chemName} ${b.mah} mAh) — Discharge Curve`, padLeft + 2, 8);
+
+      // 4. Smooth Monotonic Spline Interpolation
+      const pixelPoints = pts.map(pt => ({
+        x: xToPx(pt.p),
+        y: vToPx(pt.v),
+        p: pt.p,
+        v: pt.v,
+        origIdx: pt.origIdx
+      }));
+
+      const n = pixelPoints.length;
+      const dx = [];
+      const dy = [];
+      const m = [];
+      for (let i = 0; i < n - 1; i++) {
+        dx.push(pixelPoints[i + 1].x - pixelPoints[i].x);
+        dy.push(pixelPoints[i + 1].y - pixelPoints[i].y);
+        m.push(dx[i] !== 0 ? dy[i] / dx[i] : 0);
+      }
+      const d = new Array(n);
+      d[0] = m[0];
+      d[n - 1] = m[n - 2];
+      for (let i = 1; i < n - 1; i++) {
+        if (m[i - 1] * m[i] <= 0) {
+          d[i] = 0;
+        } else {
+          d[i] = (m[i - 1] + m[i]) / 2;
+        }
+      }
+      for (let i = 0; i < n - 1; i++) {
+        if (m[i] === 0) {
+          d[i] = 0;
+          d[i + 1] = 0;
+        } else {
+          const a = d[i] / m[i];
+          const bVal = d[i + 1] / m[i];
+          const hVal = Math.hypot(a, bVal);
+          if (hVal > 3) {
+            d[i] = 3 * m[i] * a / hVal;
+            d[i + 1] = 3 * m[i] * bVal / hVal;
+          }
+        }
+      }
+
+      function traceCurvePath() {
+        ctx.beginPath();
+        ctx.moveTo(pixelPoints[0].x, pixelPoints[0].y);
+        for (let i = 0; i < n - 1; i++) {
+          const cur = pixelPoints[i];
+          const nxt = pixelPoints[i + 1];
+          const segDx = nxt.x - cur.x;
+          const cp1x = cur.x + segDx / 3;
+          const cp1y = cur.y + d[i] * (segDx / 3);
+          const cp2x = nxt.x - segDx / 3;
+          const cp2y = nxt.y - d[i + 1] * (segDx / 3);
+          ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, nxt.x, nxt.y);
+        }
+      }
+
+      // 5. Shaded Gradient Fill Under Curve
+      ctx.save();
+      traceCurvePath();
+      ctx.lineTo(pixelPoints[n - 1].x, padTop + plotH);
+      ctx.lineTo(pixelPoints[0].x, padTop + plotH);
+      ctx.closePath();
+      const fillGrad = ctx.createLinearGradient(0, padTop, 0, padTop + plotH);
+      fillGrad.addColorStop(0, 'rgba(56, 189, 248, 0.25)');
+      fillGrad.addColorStop(1, 'rgba(56, 189, 248, 0.01)');
+      ctx.fillStyle = fillGrad;
+      ctx.fill();
+      ctx.restore();
+
+      // 6. Glowing Curve Stroke
+      ctx.save();
+      traceCurvePath();
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 2.5;
+      ctx.shadowColor = 'rgba(56, 189, 248, 0.6)';
+      ctx.shadowBlur = 8;
+      ctx.stroke();
+      ctx.restore();
+
+      // 7. Calibration Points (Dots)
+      pixelPoints.forEach((pt) => {
+        const isHovered = (pt.origIdx === hoveredPointIndex);
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, isHovered ? 6 : 4, 0, Math.PI * 2);
+        ctx.fillStyle = isHovered ? '#38bdf8' : '#0284c7';
+        ctx.fill();
+        ctx.lineWidth = isHovered ? 2.5 : 1.5;
+        ctx.strokeStyle = '#ffffff';
+        ctx.stroke();
+        if (isHovered) {
+          ctx.shadowColor = '#38bdf8';
+          ctx.shadowBlur = 10;
+          ctx.stroke();
+        }
+        ctx.restore();
+      });
+
+      // 8. Hover Crosshair & Spec Tooltip
+      if (hoveredPointIndex >= 0 && hoveredPointIndex < 15) {
+        const hPt = pixelPoints.find(p => p.origIdx === hoveredPointIndex);
+        if (hPt) {
+          ctx.strokeStyle = 'rgba(56, 189, 248, 0.45)';
+          ctx.setLineDash([3, 3]);
+          ctx.beginPath();
+          ctx.moveTo(hPt.x, padTop);
+          ctx.lineTo(hPt.x, padTop + plotH);
+          ctx.stroke();
+
+          ctx.beginPath();
+          ctx.moveTo(padLeft, hPt.y);
+          ctx.lineTo(padLeft + plotW, hPt.y);
+          ctx.stroke();
+          ctx.setLineDash([]);
+
+          const tipText1 = `P${hPt.origIdx + 1}: ${hPt.v.toFixed(3)} V`;
+          const tipText2 = `SoC: ${Math.round(hPt.p)}%`;
+          ctx.font = 'bold 11px -apple-system, BlinkMacSystemFont, sans-serif';
+          const tipW = Math.max(ctx.measureText(tipText1).width, ctx.measureText(tipText2).width) + 16;
+          const tipH = 38;
+
+          let tipX = hPt.x + 10;
+          if (tipX + tipW > w - 10) tipX = hPt.x - tipW - 10;
+          let tipY = hPt.y - tipH / 2;
+          if (tipY < padTop) tipY = padTop + 4;
+          if (tipY + tipH > h - 10) tipY = h - tipH - 10;
+
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.94)';
+          ctx.strokeStyle = '#38bdf8';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          if (ctx.roundRect) ctx.roundRect(tipX, tipY, tipW, tipH, 5);
+          else ctx.rect(tipX, tipY, tipW, tipH);
+          ctx.fill();
+          ctx.stroke();
+
+          ctx.fillStyle = '#38bdf8';
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'top';
+          ctx.fillText(tipText1, tipX + 8, tipY + 5);
+
+          ctx.fillStyle = '#4ade80';
+          ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
+          ctx.fillText(tipText2, tipX + 8, tipY + 20);
+        }
+      }
+    }
+
+    function initCanvasInteractivity() {
+      const canvas = document.getElementById('curveCanvas');
+      if (!canvas) return;
+
+      canvas.addEventListener('mousemove', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+
+        const b = banks[currentBank];
+        if (!b) return;
+
+        const padLeft = 44;
+        const padRight = 18;
+        const padTop = 28;
+        const padBottom = 36;
+        const plotW = Math.max(10, rect.width - padLeft - padRight);
+        const plotH = Math.max(10, rect.height - padTop - padBottom);
+
+        const minV = Math.min(...b.voltages);
+        const maxV = Math.max(...b.voltages);
+        const yMin = Math.min(2.6, Math.floor(minV * 4) / 4);
+        const yMax = Math.max(4.3, Math.ceil(maxV * 4) / 4);
+
+        let closestIdx = -1;
+        let closestDist = 28;
+
+        for (let i = 0; i < 15; i++) {
+          const px = padLeft + ((100 - Math.max(0, Math.min(100, b.percentages[i]))) / 100) * plotW;
+          const py = padTop + plotH - ((b.voltages[i] - yMin) / (yMax - yMin)) * plotH;
+          const dist = Math.hypot(mx - px, my - py);
+          if (dist < closestDist) {
+            closestDist = dist;
+            closestIdx = i;
+          }
+        }
+
+        if (closestIdx !== hoveredPointIndex) {
+          hoveredPointIndex = closestIdx;
+          drawCurveChart();
+
+          document.querySelectorAll('.curve-row').forEach(row => {
+            const idx = parseInt(row.getAttribute('data-idx'), 10);
+            if (idx === hoveredPointIndex) {
+              row.classList.add('highlight');
+              row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            } else {
+              row.classList.remove('highlight');
+            }
+          });
+        }
+      });
+
+      canvas.addEventListener('mouseleave', () => {
+        hoveredPointIndex = -1;
+        drawCurveChart();
+        document.querySelectorAll('.curve-row.highlight').forEach(row => row.classList.remove('highlight'));
+      });
+
+      window.addEventListener('resize', () => {
+        drawCurveChart();
+      });
+
+      if (typeof ResizeObserver !== 'undefined') {
+        const ro = new ResizeObserver(() => drawCurveChart());
+        const card = canvas.closest('.curve-graph-card');
+        if (card) ro.observe(card);
+      }
+    }
+
+    // ==========================================
+    // VERTICAL TABLE RENDERING (DESCENDING ORDER, WHOLE NUMBER PERCENTAGES)
+    // ==========================================
+    function buildSliders() {
+      if (!curveTableBody) return;
+      curveTableBody.innerHTML = '';
+
+      mahInput.value = banks[currentBank].mah;
+
+      // Descending order: i = 14 down to 0 (P15 at 100%/4.2V down to P1 at 0%/3.5V)
+      for (let i = 14; i >= 0; i--) {
+        const row = document.createElement('div');
+        row.className = 'curve-row';
+        row.setAttribute('data-idx', i);
+
+        const currentPct = Math.round(banks[currentBank].percentages[i]);
+        const currentVolt = banks[currentBank].voltages[i].toFixed(3);
+
+        row.innerHTML = `
+          <div class="curve-pt-label">P${i + 1}</div>
+          <input type="number" class="curve-input voltage" id="vInput_${i}"
+                 min="2.500" max="4.300" step="0.005" value="${currentVolt}"
+                 title="Point ${i + 1} Cell Voltage (V)">
+          <input type="number" class="curve-input percent" id="pInput_${i}"
+                 min="0" max="100" step="1" value="${currentPct}"
+                 title="Point ${i + 1} SoC Percentage (%) — Whole Number">
+        `;
+        curveTableBody.appendChild(row);
+
+        const vInput = row.querySelector(`#vInput_${i}`);
+        const pInput = row.querySelector(`#pInput_${i}`);
+
+        // VOLTAGE: Do NOT overwrite input.value on 'input' event to prevent cursor interruption
+        vInput.addEventListener('input', (e) => {
+          const raw = e.target.value.trim();
+          if (raw === '' || raw === '.' || raw === '0.') return;
+          let val = parseFloat(raw);
+          if (!isNaN(val)) {
+            val = Math.max(2.5, Math.min(4.3, val));
+            banks[currentBank].voltages[i] = val;
+            saveBankBtn.disabled = false;
+            markUnsaved(true);
+            updateRestoreDefaultsState();
+            persistBanks();
+            drawCurveChart();
+          }
+        });
+        vInput.addEventListener('change', (e) => {
+          let val = parseFloat(e.target.value);
+          if (isNaN(val)) val = banks[currentBank].voltages[i] || 3.5;
+          val = Math.max(2.5, Math.min(4.3, val));
+          banks[currentBank].voltages[i] = val;
+          vInput.value = val.toFixed(3);
+          saveBankBtn.disabled = false;
+          markUnsaved(true);
+          updateRestoreDefaultsState();
+          persistBanks();
+          drawCurveChart();
+        });
+
+        // PERCENTAGE: WHOLE NUMBERS, DO NOT overwrite input.value on 'input' event
+        pInput.addEventListener('input', (e) => {
+          const raw = e.target.value.trim();
+          if (raw === '') return;
+          let val = parseInt(raw, 10);
+          if (!isNaN(val)) {
+            val = Math.max(0, Math.min(100, val));
+            banks[currentBank].percentages[i] = val;
+            saveBankBtn.disabled = false;
+            markUnsaved(true);
+            updateRestoreDefaultsState();
+            persistBanks();
+            drawCurveChart();
+          }
+        });
+        pInput.addEventListener('change', (e) => {
+          let val = parseInt(e.target.value, 10);
+          if (isNaN(val)) val = Math.round(banks[currentBank].percentages[i]) || 0;
+          val = Math.max(0, Math.min(100, val));
+          banks[currentBank].percentages[i] = val;
+          pInput.value = val;
+          saveBankBtn.disabled = false;
+          markUnsaved(true);
+          updateRestoreDefaultsState();
+          persistBanks();
+          drawCurveChart();
+        });
+
+        row.addEventListener('mouseenter', () => {
+          hoveredPointIndex = i;
+          drawCurveChart();
+          row.classList.add('highlight');
+        });
+        row.addEventListener('mouseleave', () => {
+          hoveredPointIndex = -1;
+          drawCurveChart();
+          row.classList.remove('highlight');
+        });
+      }
+
+      updateRestoreDefaultsState();
+      drawCurveChart();
+    }
+
+    function refreshSlidersInPlace() {
+      const b = banks[currentBank];
+      mahInput.value = b.mah;
+      for (let i = 0; i < 15; i++) {
+        const vIn = document.getElementById(`vInput_${i}`);
+        if (vIn) {
+          vIn.value = b.voltages[i].toFixed(3);
+        }
+        const pIn = document.getElementById(`pInput_${i}`);
+        if (pIn) {
+          pIn.value = Math.round(b.percentages[i]);
+        }
+      }
+      updateRestoreDefaultsState();
+      persistBanks();
+      drawCurveChart();
+    }
+
+    // Bank Selection change from Dropdown
+    bankSelect.addEventListener('change', async () => {
+      if (isSaveInProgress) return;
+      currentBank = parseInt(bankSelect.value, 10);
+      log(`Switched view to Bank ${currentBank}`, 'info');
+      updateBootBankUI();
+      refreshSlidersInPlace();
+
+      if (isDeviceConnected()) {
+        log(`▶ Loading Bank ${currentBank} from BMSOne (SR${currentBank})...`, 'info');
+        try {
+          await sendCmd(`SR${currentBank}`);
+          setTimeout(async () => {
+            if (isDeviceConnected() && !isSaveInProgress) {
+              await sendCmd('SS');
+            }
+          }, 500);
+        } catch (e) {
+          log(`Error switching bank: ${e.message}`, 'err');
+        }
+      }
+    });
+
+    // Battery Capacity input
+    mahInput.addEventListener('input', () => {
+      let val = parseInt(mahInput.value, 10);
+      if (!isNaN(val) && val > 0) {
+        banks[currentBank].mah = val;
+        markUnsaved(true);
+        updateRestoreDefaultsState();
+        persistBanks();
+        drawCurveChart();
+      }
+    });
+
+    mahInput.addEventListener('change', () => {
+      let val = parseInt(mahInput.value, 10);
+      if (isNaN(val) || val < 100) val = getDefaultProfile(currentBank).mah;
+      banks[currentBank].mah = val;
+      mahInput.value = val;
+      markUnsaved(true);
+      updateRestoreDefaultsState();
+      persistBanks();
+      drawCurveChart();
+      log(`Bank ${currentBank} capacity set to ${val} mAh (screen only). Click "Save to Selected Bank" to write to EEPROM.`, 'info');
+    });
+
+    // Preset Buttons
+    loadLipoBtn.addEventListener('click', () => {
+      banks[currentBank] = JSON.parse(JSON.stringify(LIPO_DEFAULT));
+      if (currentBank === 2) banks[currentBank].mah = 6000;
+      if (currentBank === 3) banks[currentBank].mah = 8000;
+      refreshSlidersInPlace();
+      markUnsaved(true);
+      log(`⚡ Loaded standard LiPo defaults for Bank ${currentBank} (${banks[currentBank].mah} mAh). Click "Save to Selected Bank" to commit to BMSOne EEPROM.`, 'warn');
+    });
+
+    loadLiionBtn.addEventListener('click', () => {
+      banks[currentBank] = JSON.parse(JSON.stringify(LIION_DEFAULT));
+      if (currentBank === 1) banks[currentBank].mah = 5200;
+      if (currentBank === 2) banks[currentBank].mah = 6000;
+      if (currentBank === 3) banks[currentBank].mah = 8000;
+      refreshSlidersInPlace();
+      markUnsaved(true);
+      log(`🔋 Loaded standard Li-ion defaults for Bank ${currentBank} (${banks[currentBank].mah} mAh). Click "Save to Selected Bank" to commit to BMSOne EEPROM.`, 'warn');
+    });
+
+    restoreDefaultsBtn.addEventListener('click', () => {
+      banks[currentBank] = getDefaultProfile(currentBank);
+      refreshSlidersInPlace();
+      markUnsaved(true);
+      log(`↺ Restored factory defaults for Bank ${currentBank} (${banks[currentBank].mah} mAh). Click "Save to Selected Bank" to commit to BMSOne EEPROM.`, 'info');
+    });
+
+    // ==========================================
+    // WEB SERIAL PROTOCOL ENGINE
+    // ==========================================
+    let writeQueue = Promise.resolve();
+    async function sendCmd(cmd, isSilent = false) {
+      if (!isDeviceConnected()) {
+        if (!isSilent) log('Error: Not connected to BMSOne', 'err');
+        return;
+      }
+      writeQueue = writeQueue.then(async () => {
+        try {
+          if (typeof window.AndroidUSB !== 'undefined' && window.AndroidUSB.isConnected()) {
+            window.AndroidUSB.send(cmd + '\r');
+            if (!isSilent) log('→ ' + cmd, 'tx');
+            await delay(35);
+          } else if (writer) {
+            const data = new TextEncoder().encode(cmd + '\r');
+            await writer.write(data);
+            if (!isSilent) log('→ ' + cmd, 'tx');
+          }
+        } catch (err) {
+          if (!isSilent) log(`Send error: ${err.message}`, 'err');
+        }
+      });
+      return writeQueue;
+    }
+
+    async function connectSerial() {
+      try {
+        port = await navigator.serial.requestPort();
+        const baud = parseInt(baudSelect.value, 10);
+        try {
+          await port.open({ baudRate: baud });
+        } catch (openErr) {
+          await port.open({ baudRate: baud, dataBits: 8, stopBits: 1, parity: 'none' });
+        }
+
+        writer = port.writable.getWriter();
+        keepReading = true;
+
+        connectBtn.textContent = 'Disconnect';
+        connectBtn.classList.add('connected');
+        setControlsEnabled(true);
+        updateUndoCalBtnState();
+
+        statusIndicator.className = 'status-badge on';
+        statusText.textContent = `Connected (${baud} baud)`;
+        log(`Connected to BMSOne at ${baud} baud`, 'success');
+
+        readSerialLoop();
+        await delay(300);
+
+        writeQueue = Promise.resolve();
+        isExplicitReadRequested = true;
+        await sendCmd('SS');
+        await delay(500);
+        await sendCmd('SD');
+        log('Requested BMSOne configuration and sensor readings', 'info');
+
+        setTimeout(() => { isExplicitReadRequested = false; }, 2500);
+
+      } catch (err) {
+        log(`Connection failed: ${err.message}`, 'err');
+        disconnectSerial();
+      }
+    }
+
+    async function disconnectSerial() {
+      keepReading = false;
+      if (bankSwitchDebounceTimer) {
+        clearTimeout(bankSwitchDebounceTimer);
+        bankSwitchDebounceTimer = null;
+      }
+      writeQueue = Promise.resolve();
+
+      try {
+        if (reader) {
+          await reader.cancel();
+          reader.releaseLock();
+        }
+        if (writer) {
+          writer.releaseLock();
+        }
+        if (port) {
+          await port.close();
+        }
+      } catch (e) {}
+
+      port = null;
+      reader = null;
+      writer = null;
+
+      connectBtn.textContent = 'Connect';
+      connectBtn.classList.remove('connected');
+      setControlsEnabled(false);
+
+      statusIndicator.className = 'status-badge off';
+      statusText.textContent = 'Disconnected';
+      log('Disconnected from device', 'info');
+
+      liveCurrent.textContent = '—';
+      livePack.textContent = '—';
+      if (liveTemp) liveTemp.textContent = '—';
+      liveCells.forEach(el => el.textContent = '—');
+      detectedCellCount = null;
+      if (detectedCellsText) detectedCellsText.textContent = '—';
+      if (detectedCellsBadge) {
+        detectedCellsBadge.style.background = '#1e293b';
+        detectedCellsBadge.style.borderColor = 'var(--card-border)';
+        detectedCellsBadge.style.color = '#94a3b8';
+      }
+      calLiveCells.textContent = 'Readings: —';
+      calLiveCurrent.textContent = 'Current: — mA';
+      calC.forEach(el => { if (el) el.textContent = '—'; });
+      if (calPackVolt) calPackVolt.textContent = '— mV';
+      if (calActiveCurr) calActiveCurr.textContent = '— mA';
+    }
+
+    connectBtn.addEventListener('click', () => {
+      if (typeof window.AndroidUSB !== 'undefined') {
+        if (window.AndroidUSB.isConnected()) {
+          window.AndroidUSB.disconnect();
+        } else {
+          statusIndicator.className = 'status-badge off';
+          statusText.textContent = 'Connecting via Android USB...';
+          const baud = parseInt(baudSelect.value, 10) || 115200;
+          window.AndroidUSB.connect(baud);
+        }
+        return;
+      }
+
+      if (port) disconnectSerial();
+      else connectSerial();
+    });
+
+    let streamBuffer = '';
+    let bufferFlushTimer = null;
+
+    function processIncomingChunk(textChunk) {
+      if (!textChunk) return;
+      streamBuffer += textChunk;
+
+      let lines = streamBuffer.split(/[\r\n]+/);
+      streamBuffer = lines.pop();
+
+      for (const line of lines) {
+        const cleanLine = line.trim();
+        if (cleanLine.length > 0) {
+          handleIncomingLine(cleanLine);
+        }
+      }
+
+      if (bufferFlushTimer) clearTimeout(bufferFlushTimer);
+      bufferFlushTimer = setTimeout(() => {
+        if (streamBuffer.trim().length > 0) {
+          handleIncomingLine(streamBuffer.trim());
+          streamBuffer = '';
+        }
+      }, 150);
+    }
+
+    async function readSerialLoop() {
+      const decoder = new TextDecoder();
+
+      try {
+        reader = port.readable.getReader();
+        while (keepReading) {
+          const { value, done } = await reader.read();
+          if (done) break;
+
+          const textChunk = decoder.decode(value, { stream: true });
+          processIncomingChunk(textChunk);
+        }
+      } catch (err) {
+        if (keepReading) {
+          log(`Serial connection lost: ${err.message}`, 'warn');
+        }
+      } finally {
+        if (reader) {
+          try { reader.releaseLock(); } catch(e) {}
+          reader = null;
+        }
+        if (keepReading) {
+          disconnectSerial();
+        }
+      }
+    }
+
+    function handleIncomingLine(line) {
+      if (line.includes('Writing to EEPROM bank') || line.includes('Done')) {
+        log(line, 'success');
+      } else if (line.startsWith('Set Voltage table') || line.startsWith('Set Percent table') || line.startsWith('Set capacity')) {
+        log(line, 'info');
+      } else if (line.startsWith('Cell voltages') || line.startsWith('Current') || line.startsWith('AD data')) {
+        log(line, 'rx');
+      } else {
+        log(line, 'info');
+      }
+
+      if (!isSaveInProgress) {
+        const bankDetectMatch = line.match(/\bLoading\s+(?:from\s+)?EEPROM\s+bank\s*([1-3])/i);
+        if (bankDetectMatch) {
+          const detectedBank = parseInt(bankDetectMatch[1], 10);
+          if (detectedBank >= 1 && detectedBank <= 3) {
+            const wasDifferent = (currentBank !== detectedBank);
+            currentBank = detectedBank;
+            bankSelect.value = detectedBank;
+            updateBootBankUI();
+            if (banks[detectedBank] && banks[detectedBank].mah) {
+              mahInput.value = banks[detectedBank].mah;
+            }
+            refreshSlidersInPlace();
+            markUnsaved(false);
+            if (wasDifferent) {
+              log(`⚡ BMSOne hardware button pressed: switched to Bank ${detectedBank}`, 'warn');
+            }
+
+            if (bankSwitchDebounceTimer) clearTimeout(bankSwitchDebounceTimer);
+            bankSwitchDebounceTimer = setTimeout(async () => {
+              if (isDeviceConnected() && !isSaveInProgress) {
+                try { await sendCmd('SS'); } catch (e) {}
+              }
+            }, 400);
+          }
+        }
+      }
+
+      const mulMatch = line.match(/Multiplier set to:\s*(-?[\d\.]+)/i);
+      if (mulMatch) {
+        activeMultiplierVal = mulMatch[1];
+        if (calActiveMultiplier) calActiveMultiplier.textContent = activeMultiplierVal;
+      }
+
+      parseLiveTelemetry(line);
+
+      if (!isSaveInProgress) {
+        parseDeviceConfig(line);
+      }
+    }
+
+    function parseLiveTelemetry(line) {
+      const tMatch = line.match(/(?:Temperature|Temp)\s*[:=]\s*(-?[\d\.]+)\s*(?:°?C)?/i);
+      if (tMatch) {
+        if (liveTemp) liveTemp.textContent = tMatch[1];
+        return;
+      }
+
+      if (/No thermistor/i.test(line)) {
+        if (typeof updateTempSwitchUI === 'function') updateTempSwitchUI(true);
+        if (liveTemp && (liveTemp.textContent === '—' || liveTemp.textContent === '0')) {
+          liveTemp.textContent = '22.5';
+        }
+      } else if (/100K thermistor/i.test(line)) {
+        if (typeof updateTempSwitchUI === 'function') updateTempSwitchUI(false);
+      }
+
+      const cellMatch = line.match(/Cell voltages(?:\(mV\))?\s*[:=]\s*([0-9,\s]+)/i);
+      if (cellMatch) {
+        const parts = cellMatch[1].split(/[,\s]+/).filter(Boolean);
+        if (parts.length >= 2) {
+          let sum = 0;
+          let active = 0;
+          for (let idx = 0; idx < 6; idx++) {
+            const val = parts[idx] !== undefined ? parts[idx] : '0';
+            if (liveCells[idx]) liveCells[idx].textContent = val;
+            if (calC[idx]) calC[idx].textContent = val;
+            const num = parseInt(val, 10);
+            if (!isNaN(num) && num > 0) {
+              sum += num;
+              if (num > 1000) active++;
+            }
+          }
+          if (active >= 2) updateDetectedCellCount(active);
+          calLiveCells.textContent = `Readings: ${parts.slice(0, 6).join(', ')} mV`;
+          if (sum > 0) {
+            livePack.textContent = sum;
+            if (calPackVolt) calPackVolt.textContent = `${sum} mV`;
+          }
+          return;
+        }
+      }
+
+      if (!line.toLowerCase().includes('voltages')) {
+        const cellsMatch = line.match(/(?:^|[\s,])Cells?\s*[:=]\s*([0-6])\b/i);
+        if (cellsMatch) {
+          const c = parseInt(cellsMatch[1], 10);
+          const hasActiveCells = liveCells.some(el => el && parseInt(el.textContent, 10) > 1000);
+          if (c >= 2 && c <= 6) {
+            updateDetectedCellCount(c);
+          } else if (c === 0 && !hasActiveCells) {
+            updateDetectedCellCount(0);
+          }
+          return;
+        }
+      }
+
+      const packMatch = line.match(/Pack voltage\s*(?:\(mV\))?\s*[:=]\s*([0-9]+)/i);
+      if (packMatch) {
+        const pVal = parseInt(packMatch[1], 10);
+        const cellSum = liveCells.reduce((acc, el) => {
+          const v = parseInt(el?.textContent || '0', 10);
+          return acc + (v > 1000 ? v : 0);
+        }, 0);
+
+        if (cellSum <= 0 || pVal >= cellSum * 0.9) {
+          livePack.textContent = pVal;
+          if (calPackVolt) calPackVolt.textContent = `${pVal} mV`;
+        }
+        return;
+      }
+
+      const curMatch = line.match(/Current\s*(?:\(mA\))?\s*[:=]\s*(-?[0-9]+)/i);
+      if (curMatch) {
+        liveCurrent.textContent = curMatch[1];
+        calLiveCurrent.textContent = `Current: ${curMatch[1]} mA`;
+        if (calActiveCurr) calActiveCurr.textContent = `${curMatch[1]} mA`;
+        return;
+      }
+
+      const adMatch = line.match(/AD data C1:\s*(\d+),\s*C2:\s*(\d+),\s*C3:\s*(\d+),\s*C4:\s*(\d+),\s*C5:\s*(\d+),\s*C6:\s*(\d+),\s*I:\s*(-?\d+)/i);
+      if (adMatch) {
+        const adCurr = adMatch[7];
+        if (liveCurrent.textContent === '—' || liveCurrent.textContent === '0') {
+          liveCurrent.textContent = adCurr;
+          calLiveCurrent.textContent = `Current: ${adCurr} mA`;
+          if (calActiveCurr) calActiveCurr.textContent = `${adCurr} mA`;
+        }
+
+        const hasRealVoltages = liveCells.some(el => el && el.textContent !== '—' && parseInt(el.textContent, 10) > 1000);
+        if (!hasRealVoltages) {
+          const adCells = [adMatch[1], adMatch[2], adMatch[3], adMatch[4], adMatch[5], adMatch[6]];
+          let packSum = 0;
+          let activeAd = 0;
+          adCells.forEach((val, idx) => {
+            if (liveCells[idx]) liveCells[idx].textContent = val;
+            if (calC[idx]) calC[idx].textContent = val;
+            const num = parseInt(val, 10);
+            if (!isNaN(num) && num > 0) {
+              packSum += num;
+              if (num > 1000) activeAd++;
+            }
+          });
+          if (activeAd >= 2) updateDetectedCellCount(activeAd);
+          calLiveCells.textContent = `Readings: ${adCells.join(', ')} mV`;
+          if (packSum > 0 && (livePack.textContent === '—' || livePack.textContent === '0')) {
+            livePack.textContent = packSum;
+            if (calPackVolt) calPackVolt.textContent = `${packSum} mV`;
+          }
+        }
+      }
+    }
+
+    function parseDeviceConfig(line) {
+      if (isSaveInProgress) return; // Prevent overwriting values during/immediately after save
+
+      // Only match actual config query dump, NOT transient SV command echo
+      const vMatch = line.match(/(?:^|[^a-zA-Z])Voltage\s+table\s*:\s*([0-9,\s\.]+)/i);
+      if (vMatch) {
+        const nums = vMatch[1].match(/[\d\.]+/g);
+        if (nums && nums.length >= 15) {
+          const rawVals = nums.slice(0, 15).map(n => parseFloat(n));
+          const converted = rawVals.map(n => {
+            if (n > 2000) return n / 1000.0;
+            if (n > 200) return (n / 100.0) / 4.0;
+            if (n > 10) return n / 4.0;
+            return n;
+          });
+
+          banks[currentBank].voltages = converted;
+          log(`✓ Parsed 15 voltage points into Bank ${currentBank}`, 'success');
+          refreshSlidersInPlace();
+          markUnsaved(false);
+          persistBanks();
+        }
+      }
+
+      // Only match actual capacity table dump, NOT transient SP command echo
+      const pMatch = line.match(/(?:^|[^a-zA-Z])(?:Capacity|Percentage|Percent)\s+table\s*:\s*([0-9,\s\.]+)/i);
+      if (pMatch) {
+        const nums = pMatch[1].match(/[\d\.]+/g);
+        if (nums && nums.length >= 15) {
+          banks[currentBank].percentages = nums.slice(0, 15).map(n => Math.round(parseFloat(n)));
+          log(`✓ Parsed 15 percentage points into Bank ${currentBank}`, 'success');
+          refreshSlidersInPlace();
+          markUnsaved(false);
+          persistBanks();
+        }
+      }
+
+      const mMatch = line.match(/(?:Full\s+capacity(?:\s*\(mAh\))?|Set\s+capacity|capacity)\s*[:=]?\s*\(?(?:mAh\)?\s*)?(\d{3,5})/i);
+      if (mMatch) {
+        const cap = parseInt(mMatch[1], 10);
+        if (cap >= 500 && cap <= 50000) {
+          banks[currentBank].mah = cap;
+          mahInput.value = cap;
+          log(`✓ Read battery capacity for Bank ${currentBank}: ${cap} mAh`, 'success');
+          updateRestoreDefaultsState();
+          persistBanks();
+          drawCurveChart();
+          markUnsaved(false);
+        }
+      }
+    }
+
+    // ==========================================
+    // ACTION HANDLERS
+    // ==========================================
+
+    readConfigBtn.addEventListener('click', async () => {
+      if (!isDeviceConnected() || isSaveInProgress) return;
+      readConfigBtn.disabled = true;
+      isExplicitReadRequested = true;
+      log(`▶ Reading configuration for Bank ${currentBank} from BMSOne...`, 'info');
+      try {
+        await sendCmd(`SR${currentBank}`);
+        await delay(500);
+        await sendCmd('SS');
+      } catch (e) {
+        log(`Read error: ${e.message}`, 'err');
+      } finally {
+        setTimeout(() => {
+          isExplicitReadRequested = false;
+          readConfigBtn.disabled = false;
+        }, 2000);
+      }
+    });
+
+    saveBankBtn.addEventListener('click', async () => {
+      if (isSaveInProgress) return;
+      if (!isDeviceConnected()) {
+        log('⚠️ Cannot save to EEPROM: BMSOne is not connected.', 'warn');
+        if (typeof window.AndroidUSB !== 'undefined') {
+          log('Please connect BMSOne via USB OTG cable and tap "Connect" first.', 'info');
+        } else {
+          log('Please click "Connect" to connect your BMSOne via WebSerial first.', 'info');
+        }
+        return;
+      }
+      isSaveInProgress = true;
+
+      const targetBank = parseInt(bankSelect.value, 10) || currentBank;
+      currentBank = targetBank;
+
+      // Ensure mah is synced from input if valid
+      const capVal = parseInt(mahInput.value, 10);
+      if (!isNaN(capVal) && capVal >= 500 && capVal <= 50000) {
+        banks[targetBank].mah = capVal;
+      }
+
+      // Sync voltages & percentages from DOM inputs into banks[targetBank]
+      const voltVals = [];
+      const percVals = [];
+      for (let i = 0; i < 15; i++) {
+        const vEl = document.getElementById(`vInput_${i}`);
+        const pEl = document.getElementById(`pInput_${i}`);
+        const vVal = vEl ? parseFloat(vEl.value) : NaN;
+        const pVal = pEl ? parseInt(pEl.value, 10) : NaN;
+        voltVals.push(!isNaN(vVal) ? Math.max(2.5, Math.min(4.3, vVal)) : banks[targetBank].voltages[i]);
+        percVals.push(!isNaN(pVal) ? Math.max(0, Math.min(100, Math.round(pVal))) : Math.round(banks[targetBank].percentages[i]));
+      }
+      banks[targetBank].voltages = voltVals;
+      banks[targetBank].percentages = percVals;
+      const b = banks[targetBank];
+
+      log(`▶ Writing configuration to Bank ${targetBank} EEPROM...`, 'warn');
+      saveBankBtn.disabled = true;
+      saveBankBtn.textContent = '💾 Saving to EEPROM...';
+
+      try {
+        // Step 1: Ensure device active bank is targetBank
+        await sendCmd(`SR${targetBank}`);
+        await delay(350);
+
+        // Step 2: Capacity (SM)
+        await sendCmd(`SM${Math.round(b.mah)}`);
+        await delay(350);
+
+        // Step 3: Voltage table (SV) - 15 millivolt values
+        const voltList = b.voltages.map(v => Math.round(v * 1000)).join(',');
+        await sendCmd(`SV${voltList}`);
+        await delay(500);
+
+        // Step 4: Percentage table (SP) - 15 integer percentage values
+        const percList = b.percentages.map(p => Math.round(p).toString()).join(',');
+        await sendCmd(`SP${percList}`);
+        await delay(500);
+
+        // Step 5: Commit to target bank in EEPROM (SW<bank>)
+        await sendCmd(`SW${targetBank}`);
+        await delay(800);
+
+        // Step 6: Commit to active bank (SW) for universal firmware compatibility (v2.0, 2.1, 2.9)
+        await sendCmd('SW');
+        await delay(800);
+
+        bootBank = targetBank;
+        localStorage.setItem('bmsone_boot_bank', bootBank);
+        updateBootBankUI();
+
+        persistBanks();
+        markUnsaved(false);
+        log(`✓ Configuration successfully committed to Bank ${targetBank} EEPROM!`, 'success');
+
+      } catch (err) {
+        log(`Error during save sequence: ${err.message}`, 'err');
+      } finally {
+        // Hold isSaveInProgress for 1500ms post-save so asynchronous EEPROM write echo cannot revert sliders
+        setTimeout(() => {
+          isSaveInProgress = false;
+          saveBankBtn.disabled = false;
+          saveBankBtn.textContent = '💾 Save to Selected Bank';
+        }, 1500);
+      }
+    });
+
+    setBootBtn.addEventListener('click', async () => {
+      if (isSaveInProgress) return;
+      isSaveInProgress = true;
+
+      const targetBank = parseInt(bankSelect.value, 10) || currentBank;
+      currentBank = targetBank;
+
+      const capVal = parseInt(mahInput.value, 10);
+      if (!isNaN(capVal) && capVal >= 500 && capVal <= 50000) {
+        banks[targetBank].mah = capVal;
+      }
+
+      const voltVals = [];
+      const percVals = [];
+      for (let i = 0; i < 15; i++) {
+        const vEl = document.getElementById(`vInput_${i}`);
+        const pEl = document.getElementById(`pInput_${i}`);
+        const vVal = vEl ? parseFloat(vEl.value) : NaN;
+        const pVal = pEl ? parseInt(pEl.value, 10) : NaN;
+        voltVals.push(!isNaN(vVal) ? Math.max(2.5, Math.min(4.3, vVal)) : banks[targetBank].voltages[i]);
+        percVals.push(!isNaN(pVal) ? Math.max(0, Math.min(100, Math.round(pVal))) : Math.round(banks[targetBank].percentages[i]));
+      }
+      banks[targetBank].voltages = voltVals;
+      banks[targetBank].percentages = percVals;
+      const b = banks[targetBank];
+
+      log(`▶ Setting Bank ${targetBank} as default boot bank (SW${targetBank})...`, 'warn');
+      setBootBtn.disabled = true;
+
+      try {
+        await sendCmd(`SR${targetBank}`);
+        await delay(350);
+
+        await sendCmd(`SM${Math.round(b.mah)}`);
+        await delay(350);
+
+        const voltList = b.voltages.map(v => Math.round(v * 1000)).join(',');
+        await sendCmd(`SV${voltList}`);
+        await delay(500);
+
+        const percList = b.percentages.map(p => Math.round(p).toString()).join(',');
+        await sendCmd(`SP${percList}`);
+        await delay(500);
+
+        await sendCmd(`SW${targetBank}`);
+        await delay(800);
+
+        await sendCmd('SW');
+        await delay(800);
+
+        bootBank = targetBank;
+        localStorage.setItem('bmsone_boot_bank', bootBank);
+        updateBootBankUI();
+
+        persistBanks();
+        markUnsaved(false);
+        log(`✓ Bank ${targetBank} is now saved and will be active on boot!`, 'success');
+
+      } catch (err) {
+        log(`Error setting boot bank: ${err.message}`, 'err');
+      } finally {
+        setTimeout(() => {
+          isSaveInProgress = false;
+          setBootBtn.disabled = false;
+        }, 1500);
+      }
+    });
+
+    // ==========================================
+    // HARDWARE TOGGLE SWITCH EVENT HANDLERS
+    // ==========================================
+    function updateModeSwitchUI(isCapacity) {
+      if (modeSwitch) modeSwitch.checked = isCapacity;
+      if (modeStateBadge) {
+        modeStateBadge.textContent = isCapacity ? 'Capacity (S1)' : 'Voltage (S0)';
+        modeStateBadge.className = isCapacity ? 'hw-toggle-badge alt' : 'hw-toggle-badge';
+      }
+      if (modeOptS0) modeOptS0.className = isCapacity ? 'hw-toggle-label' : 'hw-toggle-label active';
+      if (modeOptS1) modeOptS1.className = isCapacity ? 'hw-toggle-label active alt' : 'hw-toggle-label';
+    }
+
+    function updateProtoSwitchUI(isOldProto) {
+      if (protoSwitch) protoSwitch.checked = isOldProto;
+      if (protoStateBadge) {
+        protoStateBadge.textContent = isOldProto ? 'Force 4S (SO)' : 'New 2S-6S (SN)';
+        protoStateBadge.className = isOldProto ? 'hw-toggle-badge alt' : 'hw-toggle-badge';
+      }
+      if (protoOptSN) protoOptSN.className = isOldProto ? 'hw-toggle-label' : 'hw-toggle-label active';
+      if (protoOptSO) protoOptSO.className = isOldProto ? 'hw-toggle-label active alt' : 'hw-toggle-label';
+    }
+
+    function updateTempSwitchUI(isFakeTemp) {
+      if (tempSwitch) tempSwitch.checked = isFakeTemp;
+      if (tempStateBadge) {
+        tempStateBadge.textContent = isFakeTemp ? 'Fake 22.5°C (S!)' : '100K NTC (SH)';
+        tempStateBadge.className = isFakeTemp ? 'hw-toggle-badge alt' : 'hw-toggle-badge';
+      }
+      if (tempOptSH) tempOptSH.className = isFakeTemp ? 'hw-toggle-label' : 'hw-toggle-label active';
+      if (tempOptFake) tempOptFake.className = isFakeTemp ? 'hw-toggle-label active alt' : 'hw-toggle-label';
+    }
+
+    modeSwitch.addEventListener('change', async () => {
+      const isCap = modeSwitch.checked;
+      updateModeSwitchUI(isCap);
+      await sendCmd(isCap ? 'S1' : 'S0');
+    });
+    modeOptS0.addEventListener('click', async () => {
+      if (modeSwitch.disabled || !modeSwitch.checked) return;
+      modeSwitch.checked = false;
+      updateModeSwitchUI(false);
+      await sendCmd('S0');
+    });
+    modeOptS1.addEventListener('click', async () => {
+      if (modeSwitch.disabled || modeSwitch.checked) return;
+      modeSwitch.checked = true;
+      updateModeSwitchUI(true);
+      await sendCmd('S1');
+    });
+
+    if (protoSwitch) {
+      protoSwitch.addEventListener('change', async () => {
+        const isOld = protoSwitch.checked;
+        updateProtoSwitchUI(isOld);
+        await sendCmd(isOld ? 'SO' : 'SN');
+      });
+    }
+    if (protoOptSN && protoSwitch) {
+      protoOptSN.addEventListener('click', async () => {
+        if (protoSwitch.disabled || !protoSwitch.checked) return;
+        protoSwitch.checked = false;
+        updateProtoSwitchUI(false);
+        await sendCmd('SN');
+      });
+    }
+    if (protoOptSO && protoSwitch) {
+      protoOptSO.addEventListener('click', async () => {
+        if (protoSwitch.disabled || protoSwitch.checked) return;
+        protoSwitch.checked = true;
+        updateProtoSwitchUI(true);
+        await sendCmd('SO');
+      });
+    }
+
+    tempSwitch.addEventListener('change', async () => {
+      const isFake = tempSwitch.checked;
+      updateTempSwitchUI(isFake);
+      await sendCmd(isFake ? 'S!' : 'SH');
+    });
+    tempOptSH.addEventListener('click', async () => {
+      if (tempSwitch.disabled || !tempSwitch.checked) return;
+      tempSwitch.checked = false;
+      updateTempSwitchUI(false);
+      await sendCmd('SH');
+    });
+    tempOptFake.addEventListener('click', async () => {
+      if (tempSwitch.disabled || tempSwitch.checked) return;
+      tempSwitch.checked = true;
+      updateTempSwitchUI(true);
+      await sendCmd('S!');
+    });
+
+    if (masterResetBtn) {
+      masterResetBtn.addEventListener('click', async () => {
+        if (!isDeviceConnected() || isSaveInProgress) return;
+
+        const confirmReset = confirm(
+          "⚠️ MASTER FULL FACTORY RESET ⚠️\n\n" +
+          "WARNING: This will permanently reset the BMSOne hardware and all 3 memory banks in EEPROM to standard factory defaults:\n\n" +
+          "• Bank 1: Standard LiPo curve (5200 mAh)\n" +
+          "• Bank 2: Standard Li-ion curve (6000 mAh)\n" +
+          "• Bank 3: Standard Li-ion curve (8000 mAh)\n" +
+          "• Default Boot Bank: Bank 1\n" +
+          "• SoC Mode: Voltage-based (S0)\n" +
+          "• ArduPilot Protocol: New 2S-6S multi-cell (SN)\n" +
+          "• Temperature Sensor: 100K NTC Thermistor (SH)\n" +
+          "• Auto Cell Count Detection: Enabled (SY)\n\n" +
+          "This will overwrite all custom bank tables in EEPROM.\n\n" +
+          "Are you sure you want to perform a Full Factory Reset?"
+        );
+        if (!confirmReset) return;
+
+        isSaveInProgress = true;
+        masterResetBtn.disabled = true;
+        masterResetBtn.textContent = '⏳ Resetting All Banks...';
+
+        try {
+          log('⚠️ Initiating Master Full Factory Reset on BMSOne...', 'warn');
+
+          banks[1] = JSON.parse(JSON.stringify(LIPO_DEFAULT));
+          banks[2] = JSON.parse(JSON.stringify(LIION_DEFAULT));
+          banks[2].mah = 6000;
+          banks[3] = JSON.parse(JSON.stringify(LIION_DEFAULT));
+          banks[3].mah = 8000;
+          persistBanks();
+
+          log('▶ Step 1/4: Restoring hardware flags (S0, SN, SH, SY)...', 'info');
+          await sendCmd('S0'); await delay(300);
+          await sendCmd('SN'); await delay(300);
+          await sendCmd('SH'); await delay(300);
+          await sendCmd('SY'); await delay(300);
+
+          log('▶ Step 2/4: Flashing Bank 3 factory defaults (Li-ion 8000 mAh)...', 'info');
+          await sendCmd('SM8000'); await delay(350);
+          await sendCmd('SV' + banks[3].voltages.map(v => Math.round(v * 1000)).join(',')); await delay(450);
+          await sendCmd('SP' + banks[3].percentages.map(p => Math.round(p).toString()).join(',')); await delay(450);
+          await sendCmd('SW3'); await delay(1200);
+
+          log('▶ Step 3/4: Flashing Bank 2 factory defaults (Li-ion 6000 mAh)...', 'info');
+          await sendCmd('SM6000'); await delay(350);
+          await sendCmd('SV' + banks[2].voltages.map(v => Math.round(v * 1000)).join(',')); await delay(450);
+          await sendCmd('SP' + banks[2].percentages.map(p => Math.round(p).toString()).join(',')); await delay(450);
+          await sendCmd('SW2'); await delay(1200);
+
+          log('▶ Step 4/4: Flashing Bank 1 factory defaults (LiPo 5200 mAh)...', 'info');
+          await sendCmd('SM5200'); await delay(350);
+          await sendCmd('SV' + banks[1].voltages.map(v => Math.round(v * 1000)).join(',')); await delay(450);
+          await sendCmd('SP' + banks[1].percentages.map(p => Math.round(p).toString()).join(',')); await delay(450);
+          await sendCmd('SW1'); await delay(1200);
+
+          currentBank = 1;
+          bankSelect.value = 1;
+          bootBank = 1;
+          localStorage.setItem('bmsone_boot_bank', '1');
+          updateBootBankUI();
+          updateModeSwitchUI(false);
+          updateProtoSwitchUI(false);
+          updateTempSwitchUI(false);
+          refreshSlidersInPlace();
+          markUnsaved(false);
+
+          log('🎉 Master Full Factory Reset Complete! All 3 banks written to EEPROM, Bank 1 set as boot default, and hardware settings restored.', 'success');
+
+          isSaveInProgress = false;
+          await sendCmd('SS');
+
+        } catch (err) {
+          log(`Error during master reset: ${err.message}`, 'err');
+          isSaveInProgress = false;
+        } finally {
+          masterResetBtn.disabled = false;
+          masterResetBtn.textContent = '⚠️ Master Full Factory Reset';
+        }
+      });
+    }
+
+    restoreDeviceDefaultsBtn.addEventListener('click', async () => {
+      if (!isDeviceConnected() || isCommandInProgress) return;
+      if (!confirm('Reset BMSOne hardware toggles to defaults?\n\nThis will send:\n• S0 — Voltage-based SoC mode\n• SN — New Protocol (2S-6S support)\n• SH — Enable 100K Thermistor\n\n(Note: This only affects hardware toggles, not the calibration table).')) return;
+
+      isCommandInProgress = true;
+      try {
+        log('↺ Restoring BMSOne device defaults...', 'warn');
+        updateModeSwitchUI(false);
+        updateProtoSwitchUI(false);
+        updateTempSwitchUI(false);
+        await sendCmd('S0');
+        await delay(350);
+        await sendCmd('SN');
+        await delay(350);
+        await sendCmd('SH');
+        await delay(350);
+        log('✓ BMSOne device defaults restored (S0, SN, SH)', 'success');
+      } catch (err) {
+        log(`Error restoring defaults: ${err.message}`, 'err');
+      } finally {
+        isCommandInProgress = false;
+      }
+    });
+
+    cmdSelect.addEventListener('change', () => {
+      const val = cmdSelect.value;
+      if (!val) return;
+
+      if (val === 'SC') {
+        const liveVals = liveCells.map(c => c.textContent).filter(t => t !== '—' && parseInt(t, 10) > 1000);
+        manualCmdInput.value = liveVals.length >= 2 ? `SC${liveVals.join(',')}` : 'SC4200,4200,4200,4200,4200';
+      } else if (val === 'SI') {
+        manualCmdInput.value = 'SI10220';
+      } else if (val === 'SJ') {
+        manualCmdInput.value = activeMultiplierVal ? `SJ${activeMultiplierVal}` : 'SJ-7.5';
+      } else if (val === 'SM') {
+        manualCmdInput.value = `SM${banks[currentBank]?.mah || 5200}`;
+      } else if (val === 'SV') {
+        manualCmdInput.value = 'SV' + banks[currentBank].voltages.map(v => Math.round(v * 1000)).join(',');
+      } else if (val === 'SP') {
+        manualCmdInput.value = 'SP' + banks[currentBank].percentages.map(p => Math.round(p).toString()).join(',');
+      } else {
+        manualCmdInput.value = val;
+      }
+
+      manualCmdInput.focus();
+      cmdSelect.value = '';
+    });
+
+    function sendManualCommand() {
+      const cmd = manualCmdInput.value.trim();
+      if (cmd) {
+        const upper = cmd.toUpperCase();
+        if (upper === 'SS' || upper.startsWith('SR')) {
+          isExplicitReadRequested = true;
+          setTimeout(() => { isExplicitReadRequested = false; }, 2500);
+        }
+        if (upper === 'S0') {
+          updateModeSwitchUI(false);
+        } else if (upper === 'S1') {
+          updateModeSwitchUI(true);
+        } else if (upper === 'SN') {
+          updateProtoSwitchUI(false);
+        } else if (upper === 'SO') {
+          updateProtoSwitchUI(true);
+        } else if (upper === 'SH') {
+          updateTempSwitchUI(false);
+        } else if (upper === 'S!') {
+          updateTempSwitchUI(true);
+        } else if (upper === 'ST') {
+          isCurrentInverted = !isCurrentInverted;
+          if (calActiveDirection) {
+            calActiveDirection.textContent = isCurrentInverted ? 'Inverted' : 'Normal';
+          }
+        }
+        sendCmd(cmd);
+        manualCmdInput.value = '';
+      }
+    }
+
+    sendManualBtn.addEventListener('click', sendManualCommand);
+    manualCmdInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') sendManualCommand();
+    });
+
+    // ==========================================
+    // SENSOR CALIBRATION & UNDO SYSTEM
+    // ==========================================
+    function updateUndoCalBtnState() {
+      if (savedCalibration) {
+        calBaselineLabel.textContent = `Saved (${savedCalibration.timestamp})`;
+        undoCalBtn.disabled = !isDeviceConnected();
+      } else {
+        calBaselineLabel.textContent = 'Not Captured';
+        undoCalBtn.disabled = true;
+      }
+    }
+
+    snapshotCalBtn.addEventListener('click', () => {
+      savedCalibration = {
+        timestamp: new Date().toLocaleTimeString(),
+        voltages: calVoltInput.value.trim() || liveCells.map(c => c.textContent).filter(t => t !== '—').join(','),
+        current: calCurrInput.value.trim() || (liveCurrent.textContent !== '—' ? liveCurrent.textContent : ''),
+        multiplier: activeMultiplierVal,
+        direction: isCurrentInverted
+      };
+      try {
+        localStorage.setItem('bmsone_cal_snapshot_v4', JSON.stringify(savedCalibration));
+      } catch (e) {}
+      updateUndoCalBtnState();
+      log(`📸 Saved sensor calibration baseline snapshot (${savedCalibration.timestamp})`, 'success');
+    });
+
+    undoCalBtn.addEventListener('click', async () => {
+      if (!savedCalibration || isCommandInProgress) return;
+      if (!confirm('Revert sensor calibration back to the saved baseline snapshot?')) return;
+
+      isCommandInProgress = true;
+      log('↺ Reverting sensor calibration to saved baseline...', 'warn');
+
+      try {
+        if (savedCalibration.voltages) {
+          await sendCmd('SC' + savedCalibration.voltages);
+          await delay(400);
+        }
+        if (savedCalibration.current) {
+          await sendCmd('SI' + savedCalibration.current);
+          await delay(400);
+        }
+        if (savedCalibration.multiplier) {
+          await sendCmd('SJ' + savedCalibration.multiplier);
+          await delay(400);
+        }
+        if (savedCalibration.direction !== isCurrentInverted) {
+          await sendCmd('ST');
+          isCurrentInverted = savedCalibration.direction;
+          if (calActiveDirection) calActiveDirection.textContent = isCurrentInverted ? 'Inverted' : 'Normal';
+          await delay(400);
+        }
+        await sendCmd(`SW${currentBank}`);
+        await delay(1200);
+
+        log('✓ Sensor calibration reverted to baseline snapshot and saved to EEPROM.', 'success');
+      } catch (err) {
+        log(`Error reverting calibration: ${err.message}`, 'err');
+      } finally {
+        isCommandInProgress = false;
+      }
+    });
+
+    sendCalVoltBtn.addEventListener('click', async () => {
+      const val = calVoltInput.value.trim();
+      if (val) {
+        await sendCmd('SC' + val);
+        await delay(400);
+        await sendCmd(`SW${currentBank}`);
+        log(`Sent Voltage Calibration: SC${val} and saved to EEPROM (SW${currentBank}).`, 'success');
+      }
+    });
+
+    sendCalCurrBtn.addEventListener('click', async () => {
+      const val = calCurrInput.value.trim();
+      if (val) {
+        await sendCmd('SI' + val);
+        await delay(400);
+        await sendCmd(`SW${currentBank}`);
+        log(`Sent Current Calibration: SI${val} and saved to EEPROM (SW${currentBank}).`, 'success');
+      }
+    });
+
+    sendCalMulBtn.addEventListener('click', async () => {
+      const val = calMulInput.value.trim();
+      if (val) {
+        activeMultiplierVal = val;
+        if (calActiveMultiplier) calActiveMultiplier.textContent = val;
+        await sendCmd('SJ' + val);
+        await delay(400);
+        await sendCmd(`SW${currentBank}`);
+        log(`Sent Current Multiplier: SJ${val} and saved to EEPROM (SW${currentBank}).`, 'success');
+      }
+    });
+
+    // ==========================================
+    // INITIALIZATION
+    // ==========================================
+    buildSliders();
+    initCanvasInteractivity();
+    updateUndoCalBtnState();
+    updateBootBankUI();
+
+    // Android Native USB Callbacks
+    window.onAndroidUsbData = function(chunk) {
+      processIncomingChunk(chunk);
+    };
+
+    window.onAndroidUsbStatus = function(msg, isConnected) {
+      if (isConnected) {
+        statusIndicator.className = 'status-badge on';
+        statusText.textContent = `Connected (${baudSelect.value} baud)`;
+        connectBtn.textContent = 'Disconnect';
+        connectBtn.classList.add('connected');
+        setControlsEnabled(true);
+        log(`✓ ${msg}`, 'success');
+
+        setTimeout(async () => {
+          if (isDeviceConnected()) {
+            log('▶ Querying initial BMSOne state (SS)...', 'info');
+            await sendCmd('SS');
+          }
+        }, 800);
+      } else {
+        statusIndicator.className = 'status-badge off';
+        statusText.textContent = 'Disconnected';
+        connectBtn.textContent = 'Connect';
+        connectBtn.classList.remove('connected');
+        setControlsEnabled(false);
+
+        liveCurrent.textContent = '—';
+        livePack.textContent = '—';
+        liveCells.forEach(el => { if (el) el.textContent = '—'; });
+        detectedCellCount = null;
+        if (detectedCellsText) detectedCellsText.textContent = '—';
+        if (detectedCellsBadge) {
+          detectedCellsBadge.style.background = '#1e293b';
+          detectedCellsBadge.style.borderColor = 'var(--card-border)';
+          detectedCellsBadge.style.color = '#94a3b8';
+        }
+        calLiveCells.textContent = 'Readings: —';
+        calLiveCurrent.textContent = 'Current: — mA';
+        calC.forEach(el => { if (el) el.textContent = '—'; });
+        if (calPackVolt) calPackVolt.textContent = '— mV';
+        if (calActiveCurr) calActiveCurr.textContent = '— mA';
+
+        if (msg) log(msg, 'info');
+      }
+    };
+
+    // Attach native WebSerial disconnect listener for Windows/Electron/Chrome/Edge
+    if ('serial' in navigator) {
+      navigator.serial.addEventListener('disconnect', (event) => {
+        log('⚠️ USB device physically disconnected.', 'warn');
+        disconnectSerial();
+      });
+    }
+
+    const appTypeBadge = document.getElementById('appTypeBadge');
+    if (typeof window.AndroidUSB !== 'undefined' && window.AndroidUSB.isAvailable()) {
+      if (appTypeBadge) appTypeBadge.textContent = 'Android App';
+      log('BMSOne Android App ready. Connect BMSOne via OTG and click Connect.', 'info');
+      connectBtn.disabled = false;
+      setTimeout(() => {
+        if (typeof window.AndroidUSB !== 'undefined' && !window.AndroidUSB.isConnected()) {
+          window.AndroidUSB.connect(parseInt(baudSelect.value, 10) || 115200);
+        }
+      }, 600);
+    } else if (!('serial' in navigator)) {
+      log('WARNING: Web Serial API is not supported in this browser.', 'err');
+      log('Please open this page in Google Chrome or Microsoft Edge (Windows/Mac/Linux).', 'warn');
+      connectBtn.disabled = true;
+    } else {
+      if (appTypeBadge) appTypeBadge.textContent = 'WebSerial';
+      log('BMSOne V3 Configurator ready. Select baud rate and click Connect.', 'info');
+    }
+  </script>
+</body>
+</html>

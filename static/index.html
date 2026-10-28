@@ -1383,7 +1383,7 @@
                 <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 18px;">
                     <a class="btn btn-primary" href="https://jonbrotherton.fws.store/product/bmsone-v2-plug-and-play" target="_blank" rel="noopener">🛒 BMSOne Plug and Play (JB Mod Parts)</a>
                     <a class="btn btn-secondary" href="https://madhacker.org/bmsone-2-universal-2s-6s-bms-for-ardupilot/" target="_blank" rel="noopener">📘 BMSOne manual (Madhacker)</a>
-                    <a class="btn btn-secondary" href="https://bmsone.open-solo.com" target="_blank" rel="noopener">⚙️ BMSOne configurator</a>
+                    <a class="btn btn-secondary" href="#bmsone-configurator">⚙️ BMSOne Configurator</a>
                 </div>
 
                 <h3 style="margin: 0 0 8px 0; font-size: 14px; color: var(--text-main);">Batteries and the preset to apply</h3>
@@ -1416,6 +1416,30 @@
                     </table>
                 </div>
                 <p class="card-desc" style="margin-top: 10px;">The seller recommends Li-ion packs that can deliver at least 30&nbsp;A continuously.</p>
+            </div>
+
+            <div class="card card-full" id="bmsone-configurator" style="margin-top: 20px;">
+                <div class="card-header"><h2>BMSOne Configurator</h2></div>
+                <p class="card-desc">
+                    The BMSOne Configurator (v3.0) sets up the board itself: the 15-point discharge curve, its three battery profile banks and the
+                    default bank, LiPo or Li-ion presets, and pack voltage and current calibration. It also shows live pack voltage, current,
+                    temperature and each cell's voltage. It talks to the BMSOne over its <strong>USB-C</strong> port, so plug the BMSOne into your
+                    computer or phone, not the Solo, while you configure it.
+                </p>
+                <ul style="margin: 10px 0 14px 20px; color: var(--text-muted); font-size: 13px; line-height: 1.7;">
+                    <li><strong>Computer (Chrome, Edge, Opera or Brave):</strong> download the offline copy stored on this Solo, then open the saved file. It works without internet. It will not connect if you open it straight from this page, because browsers only allow USB serial on secure pages and the Solo's page is plain http</li>
+                    <li><strong>Online:</strong> with internet, the same configurator runs at bmsone.open-solo.com</li>
+                    <li><strong>Windows app</strong> (portable .exe, 72&nbsp;MB) or <strong>Android app</strong> (.apk, USB-OTG cable) from open-solo.com</li>
+                    <li>iPhone and iPad browsers cannot use USB serial, so use a computer or an Android phone</li>
+                    <li>After changing the BMSOne, apply the matching preset in the table above</li>
+                </ul>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <a class="btn btn-primary" href="/BMSOne-Configurator.html" download="BMSOne-Configurator.html">⬇️ Download offline configurator (114 KB)</a>
+                    <a class="btn btn-secondary" href="https://bmsone.open-solo.com/BMSOne-Configurator.html" target="_blank" rel="noopener">🌐 Open online configurator</a>
+                    <a class="btn btn-secondary" href="https://downloads.open-solo.com/BMSOne-Configurator-v3.exe?v=3.0.3" target="_blank" rel="noopener">🪟 Windows app</a>
+                    <a class="btn btn-secondary" href="https://bmsone.open-solo.com/downloads/BMSOne-Configurator-v3.apk" target="_blank" rel="noopener">📱 Android app</a>
+                    <a class="btn btn-secondary" href="/BMSOne-User-Manual.pdf" target="_blank">📖 BMSOne user manual (PDF)</a>
+                </div>
             </div>
 
             <div class="card card-full" style="margin-top: 20px;">
@@ -1976,7 +2000,7 @@ The 3DR Solo Web Utility is a free, open-source on-board management console that
 </tr>
 </tbody>
 </table>
-<p><strong>Battery Solutions tab:</strong> original Solo batteries were last made in 2015. This tab compares the three ways to get good batteries today — the ready-built Battery Mod, the do-it-yourself <em>Solo Battery Mod for Dummies</em> guide (stored on the Solo as a PDF), and the BMSOne with off-the-shelf 4S or 5S packs — and applies the matching preset with one click.</p>
+<p><strong>Battery Solutions tab:</strong> original Solo batteries were last made in 2015. This tab compares the three ways to get good batteries today — the ready-built Battery Mod, the do-it-yourself <em>Solo Battery Mod for Dummies</em> guide (stored on the Solo as a PDF), and the BMSOne with off-the-shelf 4S or 5S packs — and applies the matching preset with one click. Its <em>BMSOne Configurator</em> card offers an offline copy of the configurator stored on the Solo (download it, then open the saved file in Chrome or Edge with the BMSOne on USB-C), plus the online version, the Windows and Android apps and the BMSOne user manual.</p>
 <h3 id="287-controller-button-configuration">2.8.7 Controller Button Configuration</h3>
 <p>The Solo Web Utility includes an interactive Artoo Controller Setup interface. An SVG diagram of the 3DR Artoo Controller is displayed in the browser with clickable buttons. You can customize the <strong>Short Hold</strong> and <strong>Long Hold</strong> actions for the A, B, Preset 1, Preset 2, and Camera buttons. Changes are written directly to <code>/usr/bin/extSettings.conf</code> on the Solo Copter.</p>
 <p><strong>Configurable actions per button event:</strong></p>

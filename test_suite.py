@@ -2408,6 +2408,26 @@ class TestSoloWebUtility(unittest.TestCase):
         css = open(os.path.join(root, "static", "style.css"), encoding="utf-8").read()
         self.assertIn(".nav-tabs.open", css)
 
+    def test_32_bmsone_configurator(self):
+        """Battery tab: BMSOne Configurator card with the offline WebSerial configurator and the
+        BMSOne manual stored on the Solo, plus links to the online version and the apps."""
+        root = os.path.dirname(os.path.abspath(__file__))
+        for page in ("static/index.html", "templates/index.html"):
+            html = open(os.path.join(root, page), encoding="utf-8").read()
+            tab = html[html.index('id="tab-battery"'):html.index('id="tab-manual"')]
+            self.assertIn('id="bmsone-configurator"', tab)
+            for needle in ('href="/BMSOne-Configurator.html" download="BMSOne-Configurator.html"',
+                           'href="/BMSOne-User-Manual.pdf"',
+                           "https://bmsone.open-solo.com/BMSOne-Configurator.html",
+                           "BMSOne-Configurator-v3.exe", "BMSOne-Configurator-v3.apk"):
+                self.assertIn(needle, tab)
+        cfg = open(os.path.join(root, "static", "BMSOne-Configurator.html"), "rb").read()
+        self.assertIn(b"BMSOne V3 Configurator", cfg)
+        self.assertIn(b"navigator.serial.requestPort", cfg)
+        self.assertNotIn(b"<script src=", cfg)                       # self-contained, works offline
+        pdf = open(os.path.join(root, "static", "BMSOne-User-Manual.pdf"), "rb").read()
+        self.assertTrue(pdf.startswith(b"%PDF"))
+
 
 def _struct_float(b4):
     """Pack 4 signed bytes into the float the gimbal sends as GMB_SWVER."""

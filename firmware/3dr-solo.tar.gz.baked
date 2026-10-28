@@ -1,4 +1,4 @@
-image 0ab34ac78eed8170023ad37c14d05ba5
+image 9b756f5a6ed1ec9f04b270b16e85bb21
 ecbd052cf4cf20692fa8b09b3769b8ab  (recipe) tools/bake_squashfs.sh
 2baed77a8919d189bdc48c784f618dbf  app.py
 456e45a4a98a5d615a8e809228e2785d  arducopter_builder.py
@@ -48,12 +48,14 @@ cc4dc0568d2b7c0d60fd39e9305cbd19  presets.py
 d467aa145c5cd9196d9fcb95a20c5225  solo.param
 7b295582d08d8eb5c2bce16f4033aa78  solo_web_app.py
 d7f76dd75c19ffd78619845a103d376a  static/3DR_Solo_User_Manual_Updated_2026.pdf
+0a99f75697bfb732c37207c30b32f67b  static/BMSOne-Configurator.html
+8cce400c95b5762203e3a0283714bae3  static/BMSOne-User-Manual.pdf
 234ad01a624d0ef4adca3f1d014951a5  static/Solo_Battery_Mod_for_Dummies.pdf
 a661b0b31bbbc6c0eb14c2ce8d74b6d6  static/Solo_Web_Utility_Owners_Manual.pdf
 58e88a8fc58c597071de988a7f267a4d  static/app.js
 c4534c1cc3dc0769fdbcafe5d1c80d4b  static/cockpit.css
 12a1044ae9ac08207074cd5f0b13300b  static/cockpit.js
-62b4baa0a041a520732bdf8e86340cf9  static/index.html
+2b806db84d081756aa4763f5fcee8611  static/index.html
 075c6c464b218fa88d56eb974bdd98e6  static/jmuxer.min.js
 1e92b911f1729549e7771012bb2626bc  static/manual.html
 4d82f840bc19b80d420e171aa2c201ea  static/solo_drone_manual.html
@@ -61,7 +63,7 @@ d022df64c87d6939a0203ab09a50b4ba  static/solo_icon.png
 d4c5749deda789b47c7e72a46bfd0e61  static/solo_icon_512.png
 9f7d1a45d236f7bca97dc257591de8d7  static/sololink_viewer.apk.bin
 437a2bf0ac2f53db77069b8d6bea9372  static/style.css
-62b4baa0a041a520732bdf8e86340cf9  templates/index.html
+2b806db84d081756aa4763f5fcee8611  templates/index.html
 9ba0e69ed82438d5b621c2d6f7de2149  templates/updates.html
 8af3e84ddd963b2bb5917485ae28447d  version.json
 ba65e63da86b93d1ed42e0132ae649d5  version_mgr.py
