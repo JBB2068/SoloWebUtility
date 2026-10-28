@@ -669,7 +669,7 @@
                     </div>
                 </div>
                 <div class="hw-desc" style="max-width: 440px;">
-                    1-Click toggle dynamically selects between <code>arducopter_solo.apj</code> and <code>arducopter_green.apj</code>. Both share the exact same battle-tested Linux system rootfs.
+                    1-Click toggle dynamically selects between <code>arducopter_CubeSolo_4.7.2.apj</code> and <code>arducopter_CubeGreen_4.7.2.apj</code>, both with the Solo's parameter defaults built in. Both share the exact same battle-tested Linux system rootfs.
                 </div>
             </div>
         </div>
@@ -689,13 +689,13 @@
             <div class="feature-card">
                 <div class="feature-icon amber">⚡</div>
                 <h3>Automated Firmware &amp; Preflight</h3>
-                <p>Complete drone stack deployment across Cube, Copter, and Controller. Compatible with all 3DR Solo Systems, any version. Includes Full Install or Cube-Only modes with live terminal output and an 8-minute reboot timer that survives page refreshes.</p>
+                <p>Complete drone stack deployment across Cube, Copter, and Controller. Compatible with all 3DR Solo Systems, any version. Includes Full Install or Cube-Only modes with live terminal output and a reboot countdown (about 6 minutes) that survives page refreshes.</p>
             </div>
 
             <div class="feature-card">
                 <div class="feature-icon cyan">🎯</div>
                 <h3>Cockpit HUD &amp; Live HDMI Video with FPV OSD</h3>
-                <p>Real-time Primary Flight Display (PFD) artificial horizon, pitch ladder, roll arc, moving airspeed/altitude tape instruments, and ultra-low latency H.264 video streamed directly from the Solo's onboard HDMI capture via JMuxer. Includes toggleable real-time FPV On-Screen Display (OSD) overlay reporting GPS coordinates, satellites, HDOP, home distance/bearing, battery voltage, individual cell voltages (Cell 1–4), current draw, flight time, and signal RSSI.</p>
+                <p>Real-time Primary Flight Display (PFD) artificial horizon, pitch ladder, roll arc, moving airspeed/altitude tape instruments, and ultra-low latency H.264 video streamed directly from the Solo's onboard HDMI capture via JMuxer. Includes toggleable real-time FPV On-Screen Display (OSD) overlay reporting GPS coordinates, satellites, HDOP, home distance/bearing, battery voltage, individual cell voltages (Cell 1–4), current draw, flight time, and signal RSSI. A messages bar shows the Solo's status messages (PreArm, EKF and more) with a recent-message history. The Controller sends video to one app at a time, so the Cockpit video and Solex's video don't play together; telemetry and everything else work alongside Solex.</p>
             </div>
 
             <div class="feature-card">
@@ -731,7 +731,13 @@
             <div class="feature-card">
                 <div class="feature-icon green">🔒</div>
                 <h3>On-Board Security &amp; Password Management</h3>
-                <p>Protected web interface with SHA-256 salted password hashing and 24-hour session management. Built-in modal to change passwords directly in the browser, plus a command-line password reset tool.</p>
+                <p>Protected web interface with SHA-256 salted password hashing and random per-login sessions that expire after 24 hours unused. Prompts you to replace the factory password, pauses logins after repeated wrong passwords, signs out other devices when the password changes, and includes a command-line password reset tool.</p>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon amber">🎥</div>
+                <h3>Gimbal Firmware Update</h3>
+                <p>Brings a replacement 3DR gimbal up to the firmware that ships with Open Solo, which the Solo's own boot-time updater can no longer do on ArduCopter 4.x. Reboots only the Cube to open a path to the gimbal, flashes it with a time limit and retry, and always puts the gimbal driver back, even after a power loss. Restores missing GoPro controls and tilt.</p>
             </div>
         </div>
     </div>
@@ -835,7 +841,7 @@
             </div>
             <div class="step-card">
                 <h4>Run the Installer</h4>
-                <p>Double-click <code>Solo Web Utility v1.2.0 Installer.exe</code>. It automatically connects via SSH, uploads all files, verifies syntax, and starts the web server on port 80.</p>
+                <p>Double-click <code>Solo Web Utility v1.2.0 Installer.exe</code>. It automatically connects via SSH, uploads all files, verifies every file, and starts the web server on port 80. Prefer a phone? <code>Solo Web Utility v1.2.0 Installer.apk</code> does the same from Android.</p>
             </div>
             <div class="step-card">
                 <h4>Open Your Browser</h4>
@@ -861,8 +867,8 @@
                 <p>Written entirely in Python 2.7 for native compatibility with the Solo's embedded Linux environment. Zero external dependencies on the drone side.</p>
                 <ul class="arch-list">
                     <li><span class="dot"></span>Runs directly on the Solo's i.MX6 companion computer</li>
-                    <li><span class="dot"></span>Persists across power cycles via <code>/etc/rc.local</code> auto-start</li>
-                    <li><span class="dot"></span>Installed on <code>/log/SoloWebUtility</code> (6.5 GB persistent ext4 storage)</li>
+                    <li><span class="dot"></span>Starts on every boot from <code>/etc/inittab</code>, which also restarts it if it ever stops</li>
+                    <li><span class="dot"></span>Installed on <code style="word-break: break-all;">/log/SoloWebUtility2</code>, on the 6.5 GB persistent storage</li>
                     <li><span class="dot"></span>Web server on port 80 — accessible from any browser</li>
                     <li><span class="dot"></span>MAVLink telemetry via UDP port 14560 through <code>telem_forwarder</code></li>
                     <li><span class="dot"></span>Direct Pixhawk parameter read/write with ACK verification</li>
@@ -873,7 +879,7 @@
             </div>
             <div class="code-block">
 <span class="comment"># One-time install from Windows PC:</span>
-> deploy_to_solo.exe
+> "Solo Web Utility v1.2.0 Installer.exe"
 
 <span class="comment"># Connects to Solo via SSH (10.1.1.10)</span>
 <span class="comment"># Uploads web server + firmware files</span>
@@ -911,6 +917,12 @@ Browser → <span class="url">http://10.1.1.10</span>
                 <li><strong style="color: var(--text);">ArduCopter 4.7.2 Golden Image:</strong> Golden factory recovery and clean installs now ship with ArduCopter 4.7.2 (with 4.7.1 preserved for immediate rollback).</li>
                 <li><strong style="color: var(--text);">Optimized Cube-Only Updates:</strong> Cube autopilot flashing completes quickly without the standard 6-minute full system reboot wait.</li>
                 <li><strong style="color: var(--text);">Controller Home Wi-Fi Mode:</strong> Native station mode with an arm interlock safety guard and live step-by-step connection diagnostics.</li>
+                <li><strong style="color: var(--text);">Gimbal Firmware Update:</strong> One click brings a replacement gimbal up to Open Solo's gimbal firmware on ArduCopter 4.x, restoring GoPro controls and tilt.</li>
+                <li><strong style="color: var(--text);">Smoother Cockpit Video:</strong> Lower latency, and no more multi-second freezes when the Solo restarts its video stream.</li>
+                <li><strong style="color: var(--text);">Vehicle Messages Bar:</strong> The Solo's status messages (PreArm, EKF and more) appear over the Cockpit display.</li>
+                <li><strong style="color: var(--text);">Works Alongside Solex:</strong> The utility's telemetry link no longer takes over Solex's connection to the Solo.</li>
+                <li><strong style="color: var(--text);">Fast &amp; Default Flight Presets:</strong> Retuned for ArduCopter 4.7 parameter names, replacing the old performance slider.</li>
+                <li><strong style="color: var(--text);">Stronger Login:</strong> Per-login sessions, a prompt to replace the factory password, and a pause after repeated wrong passwords.</li>
             </ul>
         </div>
 
@@ -979,7 +991,7 @@ Browser → <span class="url">http://10.1.1.10</span>
                 <div style="font-size: 32px; margin-bottom: 12px;">💻</div>
                 <h3 style="font-size: 1.25rem; font-weight: 700; margin-bottom: 8px;">Solo Web Utility Manual</h3>
                 <p style="font-size: 0.88rem; color: var(--text-dim); margin-bottom: 24px; line-height: 1.6; flex: 1;">
-                    Complete 11-section documentation for the Solo Web Utility software tool covering system architecture, installation, Wi-Fi NAT router, Cockpit OSD HUD, calibrations, parameters, and controller setup.
+                    Complete 12-section documentation for the Solo Web Utility software tool covering system architecture, installation, Wi-Fi NAT router, Cockpit OSD HUD, calibrations, gimbal firmware update, parameters, and controller setup.
                 </p>
                 <div style="display: flex; gap: 10px; flex-wrap: wrap;">
                     <a href="Solo_Web_Utility_Owners_Manual.pdf" download="Solo_Web_Utility_Owners_Manual.pdf" class="btn-hero btn-hero-primary" style="flex: 1; justify-content: center; font-size: 14px; padding: 12px 16px;">
@@ -1068,7 +1080,7 @@ Browser → <span class="url">http://10.1.1.10</span>
                     btnDrone.style.fontWeight = '600';
 
                     title.textContent = "Solo Web Utility — Official Owner's Manual";
-                    subtitle.textContent = 'Complete 11-section documentation for system architecture, installation, Wi-Fi NAT router, Cockpit OSD HUD, calibrations, parameters & controller mapping.';
+                    subtitle.textContent = 'Complete 12-section documentation for system architecture, installation, Wi-Fi NAT router, Cockpit OSD HUD, calibrations, gimbal firmware update, parameters & controller mapping.';
                     iframe.src = 'manual.html';
                     btnPdf.href = 'Solo_Web_Utility_Owners_Manual.pdf';
                     btnPdf.download = 'Solo_Web_Utility_Owners_Manual.pdf';

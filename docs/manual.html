@@ -288,11 +288,12 @@
             <li><a href="#section-4">4. Wi-Fi &amp; Internet Router</a></li>
             <li><a href="#section-5">5. Telemetry &amp; Cockpit HUD</a></li>
             <li><a href="#section-6">6. Sensor Calibration Wizard</a></li>
-            <li><a href="#section-7">7. Parameters &amp; Presets</a></li>
-            <li><a href="#section-8">8. Artoo Controller Setup</a></li>
-            <li><a href="#section-9">9. Sololink Viewer APK</a></li>
-            <li><a href="#section-10">10. Safety Interlocks</a></li>
-            <li><a href="#section-11">11. Downloads &amp; Resources</a></li>
+            <li><a href="#section-gimbal">7. Gimbal Firmware Update</a></li>
+            <li><a href="#section-7">8. Parameters &amp; Presets</a></li>
+            <li><a href="#section-8">9. Artoo Controller Setup</a></li>
+            <li><a href="#section-9">10. Sololink Viewer APK</a></li>
+            <li><a href="#section-10">11. Safety Interlocks &amp; Security</a></li>
+            <li><a href="#section-11">12. Downloads &amp; Resources</a></li>
         </ul>
     </aside>
 
@@ -305,7 +306,8 @@
 
         <!-- Quick Download Action Bar -->
         <div class="download-action-bar">
-            <a href="/deploy_to_solo.exe" class="btn btn-primary">⚡ Windows One-Click Installer (.exe)</a>
+            <a href="https://open-solo.com/Solo%20Web%20Utility%20v1.2.0%20Installer.exe" class="btn btn-primary">⚡ Windows Installer (.exe)</a>
+            <a href="https://open-solo.com/Solo%20Web%20Utility%20v1.2.0%20Installer.apk" class="btn btn-primary">🤖 Android Installer (.apk)</a>
             <a href="/sololink_viewer.apk" class="btn btn-success">📱 Sololink Viewer Android App (.apk)</a>
             <a href="/manual.html" class="btn btn-warning" target="_blank">🌐 Web Owner's Manual</a>
         </div>
@@ -324,55 +326,60 @@
             <ul>
                 <li><strong>Copter Companion Computer:</strong> <code>10.1.1.10</code> (Web Server &amp; Telemetry Host)</li>
                 <li><strong>Artoo Controller:</strong> <code>10.1.1.1</code> (Internal SSH Gateway &amp; NAT Router)</li>
-                <li><strong>Pixhawk Autopilot:</strong> Connected via internal MAVLink UART bridge (`/dev/ttymxc1` at 57600 baud)</li>
+                <li><strong>Pixhawk Autopilot:</strong> Connected to the Solo's computer by serial link (<code>/dev/ttymxc1</code> at 921600 baud), shared by Open Solo's telemetry forwarder</li>
             </ul>
         </section>
 
         <!-- SECTION 2: INSTALLATION -->
         <section id="section-2" class="doc-section">
             <h2 class="section-heading"><span>2.</span> One-Click Installation &amp; Setup</h2>
-            <p>Deploying the Web Utility onto your Solo requires a single execution of <code>deploy_to_solo.exe</code> from any Windows computer connected to the Solo's Wi-Fi network.</p>
+            <p>The Web Utility is installed once, from a Windows PC with <code>Solo Web Utility v1.2.0 Installer.exe</code> or from an Android phone with <code>Solo Web Utility v1.2.0 Installer.apk</code>. Both are on open-solo.com and install exactly the same files. The Android installer is only an installer: once the utility is on the Solo you can delete it and use a browser.</p>
 
             <h3 class="sub-heading">Step-by-Step Installation Procedure:</h3>
             <ol>
                 <li>Power on your 3DR Solo Copter and Artoo Controller.</li>
-                <li>Connect your Windows PC to the Solo's Wi-Fi access point (e.g. <code>SoloLink_XXXXXX</code>).</li>
-                <li>Launch <a href="/deploy_to_solo.exe"><code>deploy_to_solo.exe</code></a>.</li>
-                <li>The installer automatically detects the Copter at <code>10.1.1.10</code> over SSH, creates the installation directory at <code>/log/SoloWebUtility</code> (utilizing the 6.5 GB partition), and copies all application files.</li>
-                <li>The installer configures <code>/etc/rc.local</code> for automatic startup on every power cycle and launches the live web server immediately.</li>
+                <li>Connect your PC or phone to the Solo's Wi-Fi access point (e.g. <code>SoloLink_XXXXXX</code>).</li>
+                <li>Run <a href="https://open-solo.com/Solo%20Web%20Utility%20v1.2.0%20Installer.exe"><code>Solo Web Utility v1.2.0 Installer.exe</code></a> (or install and open the <a href="https://open-solo.com/Solo%20Web%20Utility%20v1.2.0%20Installer.apk">Android installer</a>).</li>
+                <li>The installer connects to the Copter at <code>10.1.1.10</code> over SSH, copies the application to <code>/log/SoloWebUtility2</code> (on the 6.5 GB <code>/log</code> partition, linked as <code>/usr/bin/SoloWebUtility2</code>) and the firmware files to <code>/log/firmware</code>, and checks every file.</li>
+                <li>The installer adds the web server to <code>/etc/inittab</code>, so it starts on every power-up and restarts by itself if it ever stops, and starts it straight away. Its log is <code>/log/solowebutility.log</code>.</li>
+                <li>Open <code>http://10.1.1.10</code> in a browser on any device connected to SoloLink and log in.</li>
             </ol>
 
             <pre><code># Verification via SSH:
 ssh root@10.1.1.10 (Password: TjSDBkAu)
 ps | grep solo_web_app.py
-# Output: root 1245 python /log/SoloWebUtility/solo_web_app.py --port 80</code></pre>
+# Output: root 1245 /usr/bin/python /usr/bin/SoloWebUtility2/solo_web_app.py</code></pre>
+            <div class="alert alert-info">
+                <strong>Already built into the Open Solo image:</strong><br>
+                A <strong>Full Install</strong> (section 3) installs an Open Solo image that already contains the Web Utility, so it survives the update.
+            </div>
         </section>
 
         <!-- SECTION 3: FIRMWARE UPDATE -->
         <section id="section-3" class="doc-section">
             <h2 class="section-heading"><span>3.</span> Automated Firmware Update Engine</h2>
-            <p>The Web Utility includes an integrated custom ArduPilot compilation engine capable of fetching, building, and flashing the latest ArduCopter stable releases for both Stock Black Cubes and Green Cubes.</p>
+            <p>The Web Utility ships with ArduCopter 4.7.2 for both the stock Black Cube and the Green Cube, with the Solo's parameter defaults built into the firmware. <strong>Check for Updates</strong> builds a newer stable ArduCopter on ArduPilot's custom build server when one is available, adds the Solo defaults, and keeps the older versions so you can go back. You can also upload your own <code>.apj</code> file.</p>
 
             <div class="card-grid">
                 <div class="feature-box">
                     <h4>⬛ Stock Solo Cube (Black)</h4>
-                    <p>Compiles and flashes <code>arducoptercubesolo-latest.apj</code> tailored specifically for the original Stock Black Cube autopilot hardware.</p>
+                    <p>Flashes <code>arducopter_CubeSolo_4.7.2.apj</code>, built for the original Stock Black Cube autopilot.</p>
                 </div>
                 <div class="feature-box">
                     <h4>🟩 Green Cube</h4>
-                    <p>Compiles and flashes <code>arducoptercubegreen-solo-latest.apj</code> optimized for the upgraded Green Cube hardware.</p>
+                    <p>Flashes <code>arducopter_CubeGreen_4.7.2.apj</code>, built for the upgraded Green Cube.</p>
                 </div>
             </div>
 
             <h3 class="sub-heading">Flashing Options:</h3>
             <ul>
-                <li><strong>Full Install:</strong> Flashes the Pixhawk Cube autopilot AND stages the full Open Solo Linux operating system images (`3dr-solo.tar.gz` and `3dr-controller.tar.gz`).</li>
+                <li><strong>Full Install:</strong> Flashes the Pixhawk Cube autopilot AND stages the full Open Solo Linux operating system images (<code>3dr-solo.tar.gz</code> and <code>3dr-controller.tar.gz</code>).</li>
                 <li><strong>Cube Only:</strong> Flashes only the Pixhawk Cube APJ binary while preserving current Linux OS partitions.</li>
             </ul>
 
             <div class="alert alert-warning">
-                <strong>8-Minute Auto Reboot Timer:</strong><br>
-                Full OS installations trigger a sequential reboot of the Copter and Controller. The web UI displays an active countdown timer that survives page refreshes until the system fully settles.
+                <strong>About 6 minutes of rebooting:</strong><br>
+                A Full Install reboots the Copter and the Controller to apply their updates. The page shows a countdown that survives page refreshes. The phone or PC loses its connection meanwhile; reconnect to SoloLink when it has finished.
             </div>
         </section>
 
@@ -382,7 +389,7 @@ ps | grep solo_web_app.py
             <p>The Web Utility features a built-in Wi-Fi manager that connects your Artoo Controller to your home 2.4 GHz Wi-Fi network while maintaining the active SoloLink access point connection.</p>
 
             <h3 class="sub-heading">Bi-Directional IP Forwarding:</h3>
-            <p>When connected to home Wi-Fi, the Controller enables kernel IP forwarding and <code>iptables</code> NAT masquerading. This allows your laptop or tablet on your home network to access the Solo (`10.1.1.10`) directly without disconnecting from home internet.</p>
+            <p>When connected to home Wi-Fi, the Controller enables kernel IP forwarding and <code>iptables</code> NAT masquerading. This allows your laptop or tablet on your home network to access the Solo (<code>10.1.1.10</code>) directly without disconnecting from home internet.</p>
 
             <div class="alert alert-success">
                 <strong>Volatile Credential Safety:</strong><br>
@@ -400,8 +407,13 @@ ps | grep solo_web_app.py
                 <li><strong>Attitude Artificial Horizon:</strong> Live pitch and roll synthetic horizon indicator.</li>
                 <li><strong>Speed &amp; Altitude Tapes:</strong> Real-time Airspeed, Groundspeed, Altitude (MSL/AGL), and Compass Heading.</li>
                 <li><strong>System Gauges:</strong> Battery Voltage, Current Draw, Battery Remaining %, GPS Satellites &amp; HDOP, Flight Mode, and Armed/Disarmed Safety Status.</li>
-                <li><strong>Live Video Stream:</strong> Integrated video canvas supporting seamless video handoff between mobile apps (Solex / Tower) and the web server.</li>
+                <li><strong>Messages Bar:</strong> The Solo's status messages (for example "PreArm: ..." or "EKF ...") appear in a bar over the display, coloured by severity, and dims after a few seconds. Tap or click the bar to see the recent messages.</li>
+                <li><strong>Live Video Stream:</strong> Low-latency H.264 video from the Solo's HDMI input. It recovers by itself when the video stream restarts, and <strong>Restart Video</strong> reconnects it by hand.</li>
             </ul>
+            <div class="alert alert-warning">
+                <strong>One video viewer at a time:</strong><br>
+                The Controller sends the Solo's video to only one app at a time. While Solex (or another app) shows the video, the Cockpit video stays black, and the other way round. Telemetry, parameters and everything else in the Web Utility work alongside Solex.
+            </div>
         </section>
 
         <!-- SECTION 6: CALIBRATIONS -->
@@ -417,23 +429,52 @@ ps | grep solo_web_app.py
             </ol>
         </section>
 
+        <!-- SECTION: GIMBAL FIRMWARE UPDATE -->
+        <section id="section-gimbal" class="doc-section">
+            <h2 class="section-heading"><span>7.</span> Gimbal Firmware Update</h2>
+            <p>On ArduCopter 4.x the Solo's own boot-time gimbal updater can no longer reach the gimbal. A replacement gimbal can therefore be stuck on old firmware: the GoPro controls are missing, or the gimbal does not follow the tilt paddle. <strong>Update Gimbal Firmware</strong>, at the bottom of the Firmware Update tab, installs the gimbal firmware that ships with Open Solo (<code>/firmware/gimbal_firmware_1.3.6.ax</code>).</p>
+
+            <div class="alert alert-danger">
+                <strong>Before you start:</strong><br>
+                Props off and the Solo on the ground. <strong>Do not power off the Solo</strong> until the update has finished (about 5 minutes). The Cube restarts several times and the gimbal does not respond to the tilt paddle meanwhile.
+            </div>
+
+            <h3 class="sub-heading">What it does:</h3>
+            <ol>
+                <li><strong>Checks:</strong> refuses to start while the vehicle is armed or another update or calibration is running, and remembers the Cube's <code>MNT1_TYPE</code>.</li>
+                <li><strong>Opens a path to the gimbal:</strong> sets <code>MNT1_TYPE</code> to 2 and then to 0, rebooting only the Cube each time (the Solo's computer and the web page keep running), and reads the gimbal's firmware version.</li>
+                <li><strong>Flashes:</strong> if the gimbal is older than the file (or <em>Reflash</em> is ticked), uploads the firmware. This takes about 2 minutes, has a time limit, and is retried once.</li>
+                <li><strong>Puts everything back:</strong> sets <code>MNT1_TYPE</code> back and reboots the Cube, even when a step failed.</li>
+            </ol>
+            <p>Afterwards, check that the gimbal levels the camera, follows the tilt paddle, and that the GoPro controls work in your app. The page shows each step and a log; the full log is <code>/log/gimbal_update.log</code>.</p>
+
+            <h3 class="sub-heading">If something goes wrong:</h3>
+            <ul>
+                <li><strong>Closing the browser or losing Wi-Fi</strong> does not stop the update: it runs on the Solo. Reopen the page to watch it.</li>
+                <li><strong>Power lost during the update:</strong> the next time the Solo starts, the Web Utility puts <code>MNT1_TYPE</code> back by itself. A gimbal left without firmware (LED flashing yellow, camera limp) is recovered by running the update again.</li>
+            </ul>
+
+            <h3 class="sub-heading">Boot-time gimbal updater:</h3>
+            <p>Open Solo checks the gimbal at every boot. If a gimbal flash is ever interrupted, the original updater retries it with no time limit and can hold up the Solo's startup (no SSH, no pairing) until it is power-cycled. The card's <strong>Install time-limited updater</strong> button replaces it with a version that has time limits and logs to <code>/log/gimbal_update.log</code>; <strong>Restore original updater</strong> puts the original back. The replacement has not yet been tested on a drone.</p>
+        </section>
+
         <!-- SECTION 7: PARAMETERS & PRESETS -->
         <section id="section-7" class="doc-section">
-            <h2 class="section-heading"><span>7.</span> ArduPilot Parameters &amp; Calibrated Presets</h2>
+            <h2 class="section-heading"><span>8.</span> ArduPilot Parameters &amp; Calibrated Presets</h2>
             <p>Manage, search, edit, and save over 1,000 ArduPilot flight parameters with instant MAVLink ACK verification.</p>
 
             <h3 class="sub-heading">One-Click Hardware Presets:</h3>
             <ul>
-                <li><strong>Here GPS / uBlox M8N:</strong> Sets `GPS_TYPE=1`, `GPS_GNSS_MODE=65`, and `GPS_RATE_MS=200` for high-accuracy satellite tracking.</li>
-                <li><strong>Landing Gear Retracts:</strong> Configures auxiliary servo channels for automatic gear retraction.</li>
-                <li><strong>Speed Modes:</strong> Standard, Sport, and Cinematic flight tuning.</li>
-                <li><strong>Battery Chemistry:</strong> Calibrated voltage curves for standard 4S LiPo and custom 4S Li-ion high-capacity packs.</li>
+                <li><strong>Compass:</strong> Here 1 / Here 2 GPS compass, or the stock Solo leg compass.</li>
+                <li><strong>Retractable Landing Gear</strong> and <strong>Bait Drop / Payload Release</strong> servo setups.</li>
+                <li><strong>Flight Performance:</strong> <em>Fast</em> (quicker, crisper handling, 40&deg; lean, 8 m/s in Fly) or <em>Default</em> (the Solo's stock feel; undoes Fast).</li>
+                <li><strong>Battery:</strong> failsafe thresholds for the stock 4S LiPo or for 4S Li-ion high-capacity packs.</li>
             </ul>
         </section>
 
         <!-- SECTION 8: ARTOO CONTROLLER -->
         <section id="section-8" class="doc-section">
-            <h2 class="section-heading"><span>8.</span> Artoo Controller Button Customization</h2>
+            <h2 class="section-heading"><span>9.</span> Artoo Controller Button Customization</h2>
             <p>The Controller Setup tab presents an interactive SVG diagram of the 3DR Artoo Controller for customizing physical hardware button mappings.</p>
 
             <h3 class="sub-heading">Supported Buttons:</h3>
@@ -442,8 +483,8 @@ ps | grep solo_web_app.py
 
         <!-- SECTION 9: SOLOLINK VIEWER APK -->
         <section id="section-9" class="doc-section">
-            <h2 class="section-heading"><span>9.</span> Sololink Viewer Android APK</h2>
-            <p>For mobile pilots who prefer a dedicated Android app for FPV video and On-Screen Display (OSD), the <a href="/sololink_viewer.apk">Sololink Viewer APK</a> is available for direct installation.</p>
+            <h2 class="section-heading"><span>10.</span> Sololink Viewer Android APK</h2>
+            <p>For mobile pilots who prefer a dedicated Android app for FPV video and On-Screen Display (OSD), the <a href="/sololink_viewer.apk">Sololink Viewer APK</a> is available for direct installation. In the Web Utility, use <strong>📥 Viewer for Android</strong> in the top bar to download it.</p>
 
             <h3 class="sub-heading">Installation Instructions:</h3>
             <ol>
@@ -456,7 +497,7 @@ ps | grep solo_web_app.py
 
         <!-- SECTION 10: SAFETY INTERLOCKS -->
         <section id="section-10" class="doc-section">
-            <h2 class="section-heading"><span>10.</span> Safety Interlocks &amp; Security</h2>
+            <h2 class="section-heading"><span>11.</span> Safety Interlocks &amp; Security</h2>
             <div class="alert alert-danger">
                 <strong>Armed Safety Interlock:</strong><br>
                 Firmware flashing, hostapd cycling, Wi-Fi credential modifications, and autopilot reboots are hard-locked whenever <code>cockpit_mgr.is_vehicle_armed()</code> returns <code>True</code>. Arming the vehicle automatically disconnects home Wi-Fi mode to ensure 100% telemetry link priority.
@@ -464,7 +505,10 @@ ps | grep solo_web_app.py
 
             <h3 class="sub-heading">Authentication &amp; Password Management:</h3>
             <ul>
-                <li>Default password: <code>sololink</code></li>
+                <li>Default password: <code>sololink</code>. While it is still in use, the utility asks you to change it after logging in; <strong>Keep Default</strong> skips this for the rest of the browser session.</li>
+                <li>Change the password with the 🔒 button at the top right. This signs out every other device.</li>
+                <li>Each login gets its own random session that expires after 24 hours without use.</li>
+                <li>After 5 wrong passwords within 5 minutes, logins from that device are paused for 30 seconds, doubling up to 5 minutes for repeated attempts.</li>
                 <li>Passwords are hashed using SHA-256 with random salt strings and stored in <code>auth.json</code>.</li>
                 <li>CLI password reset script: <code>python change_password.py --reset</code></li>
             </ul>
@@ -472,9 +516,10 @@ ps | grep solo_web_app.py
 
         <!-- SECTION 11: DOWNLOADS & RESOURCES -->
         <section id="section-11" class="doc-section">
-            <h2 class="section-heading"><span>11.</span> Official Downloads &amp; Community Links</h2>
+            <h2 class="section-heading"><span>12.</span> Official Downloads &amp; Community Links</h2>
             <div class="download-action-bar">
-                <a href="/deploy_to_solo.exe" class="btn btn-primary">⚡ deploy_to_solo.exe (Windows Installer)</a>
+                <a href="https://open-solo.com/Solo%20Web%20Utility%20v1.2.0%20Installer.exe" class="btn btn-primary">⚡ Solo Web Utility v1.2.0 Installer.exe (Windows)</a>
+                <a href="https://open-solo.com/Solo%20Web%20Utility%20v1.2.0%20Installer.apk" class="btn btn-primary">🤖 Solo Web Utility v1.2.0 Installer.apk (Android)</a>
                 <a href="/sololink_viewer.apk" class="btn btn-success">📱 sololink_viewer.apk (Android App)</a>
                 <a href="/manual.html" class="btn btn-warning">📖 Web Owner's Manual</a>
             </div>

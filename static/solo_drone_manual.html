@@ -565,8 +565,8 @@ The 3DR Solo Web Utility is a free, open-source on-board management console that
 <p>The Solo Web Utility runs natively on the Solo Copter's onboard i.MX6 Linux companion computer. It is written entirely in Python 2.7 for native compatibility with Solo's embedded Linux environment and has zero external dependencies on either the drone or the connecting device.</p>
 <p><strong>Key characteristics:</strong></p>
 <ul>
-<li>Installed to <code>/log/SoloWebUtility</code> on the Solo's 6.5 GB persistent ext4 storage partition</li>
-<li>Starts automatically on every boot via <code>/etc/rc.local</code></li>
+<li>Installed to <code>/log/SoloWebUtility2</code> on the Solo's 6.5 GB persistent storage partition (linked as <code>/usr/bin/SoloWebUtility2</code>), and built into the Open Solo image that a Full Install puts on the Solo</li>
+<li>Starts automatically on every boot from <code>/etc/inittab</code>, which also restarts it if it ever stops; its log is <code>/log/solowebutility.log</code></li>
 <li>Web server on port 80 — accessible from any browser on any phone, tablet, laptop, or desktop connected to SoloLink Wi-Fi</li>
 <li>MAVLink telemetry via UDP port 14560 through Solo's built-in <code>telem_forwarder</code></li>
 <li>Direct Pixhawk parameter read/write with ACK verification</li>
@@ -584,13 +584,14 @@ The 3DR Solo Web Utility is a free, open-source on-board management console that
 <ol>
 <li>Download <strong>Solo Web Utility v1.2.0 Installer.exe</strong> from open-solo.com (approximately 160 MB standalone executable).</li>
 <li>Power on Solo and the Controller and connect your PC to the SoloLink Wi-Fi network as you normally would.</li>
-<li>Double-click <code>Solo Web Utility v1.2.0 Installer.exe</code>. The installer automatically connects to Solo via SSH at 10.1.1.10, uploads all application files and firmware images, verifies file integrity, configures persistent boot startup via <code>/etc/rc.local</code>, and starts the web server on port 80.</li>
+<li>Double-click <code>Solo Web Utility v1.2.0 Installer.exe</code>. The installer automatically connects to Solo via SSH at 10.1.1.10, uploads all application files and firmware images, verifies file integrity, configures startup on every boot via <code>/etc/inittab</code>, and starts the web server on port 80.</li>
 <li>When the installer completes, open any browser on any device connected to SoloLink and navigate to <strong>http://10.1.1.10</strong>. The utility is live and will persist across all future power cycles without reinstallation.</li>
 </ol>
 <blockquote>
 <p>The installer uses SSH/SFTP to transfer files. It uses unpipelined synchronous transfers to prevent the Solo's embedded OpenSSH server buffer from overflowing over Wi-Fi. If a transfer is interrupted, the installer automatically resumes from the exact byte offset on the next run.</p>
 </blockquote>
-<p><strong>Android APK:</strong> A lightweight Android application (<code>Solo Web Utility v1.2.0 Installer.apk</code>, approximately 296 MB) is also available from open-solo.com for Android users who prefer a native app interface for initial setup and direct web console access.</p>
+<p><strong>Android installer:</strong> <code>Solo Web Utility v1.2.0 Installer.apk</code> (approximately 160 MB, from open-solo.com) installs exactly the same files from an Android phone connected to SoloLink. It is only an installer: once the utility is on the Solo, you can delete it and use a browser.</p>
+<p><strong>Sololink Viewer:</strong> the separate Android video viewer can be downloaded with <strong>📥 Viewer for Android</strong> in the utility's top bar.</p>
 <h3 id="283-automated-preflight-update-firmware">2.8.3 Automated Preflight Update (Firmware)</h3>
 <blockquote>
 <p><strong>Updated — 2026:</strong> The Solo Web Utility provides the most complete and automated path to resolving the "Preflight Update Required" prompt following the retirement of 3DR's original cloud update servers. All firmware images are stored permanently on Solo's internal storage. With a single click in the browser, the utility stages and flashes the complete drone stack.</p>
@@ -612,16 +613,16 @@ The 3DR Solo Web Utility is a free, open-source on-board management console that
 <tbody>
 <tr>
 <td>Stock Solo Cube (Black)</td>
-<td><code>arducopter_solo.apj</code> — standard ArduCopter for Solo</td>
+<td><code>arducopter_CubeSolo_*.apj</code> — standard ArduCopter for Solo</td>
 </tr>
 <tr>
 <td>Green Cube upgrade</td>
-<td><code>arducopter_green.apj</code> — latest ArduCopter stable release</td>
+<td><code>arducopter_CubeGreen_*.apj</code> — latest ArduCopter stable release</td>
 </tr>
 </tbody>
 </table>
-<p>A one-click toggle in the browser interface selects between the two autopilot firmware images. Both share the same battle-tested Linux rootfs.</p>
-<p>The update includes a live terminal output window showing real-time flash progress and an 8-minute reboot timer that survives page refreshes. Upon completion, the "Preflight Update Required" lock is permanently cleared.</p>
+<p>A one-click toggle in the browser interface selects between the two autopilot firmware images. Both share the same battle-tested Linux rootfs. The utility ships with ArduCopter 4.7.2 for both Cubes, with the Solo's parameter defaults built into the firmware. <strong>Check for Updates</strong> builds a newer stable ArduCopter on ArduPilot's custom build server (custom.ardupilot.org) when one is available; older versions are kept so you can go back, and you can upload your own <code>.apj</code> file.</p>
+<p>The update includes a live terminal output window showing real-time flash progress and a reboot countdown of about 6 minutes that survives page refreshes. Upon completion, the "Preflight Update Required" lock is permanently cleared.</p>
 <blockquote>
 <p><strong>Always update the Solo vehicle firmware and Controller firmware together.</strong> Mismatched firmware versions between Solo and the Controller can cause pairing and flight issues.</p>
 </blockquote>
@@ -704,14 +705,31 @@ The 3DR Solo Web Utility is a free, open-source on-board management console that
 <li>Moving airspeed tape and altitude tape</li>
 <li>FPV On-Screen Display (OSD) overlay — GPS coordinates, satellite count, HDOP, home distance and bearing, battery voltage, individual cell voltages (Cell 1–4), current draw, flight time, and signal RSSI</li>
 </ul>
-<p><strong>Live video:</strong> Ultra-low latency H.264 video streamed directly from Solo's onboard HDMI capture, displayed in the browser.</p>
+<p><strong>Messages bar:</strong> the Solo's status messages (for example "PreArm: ..." or "EKF ...") appear in a bar over the display, coloured by severity. Tap or click the bar to see the recent messages.</p>
+<p><strong>Live video:</strong> Ultra-low latency H.264 video streamed directly from Solo's onboard HDMI capture, displayed in the browser. It recovers by itself when the Solo restarts its video stream; <strong>Restart Video</strong> reconnects it by hand.</p>
+<blockquote>
+<p>The Controller sends the Solo's video to <strong>only one app at a time</strong>. While Solex or another app shows the video, the Cockpit video stays black, and the other way round. Telemetry, parameters and everything else in the utility work alongside Solex.</p>
+</blockquote>
 <p><strong>Arming:</strong> A two-step confirmation sequence protects against accidental motor arming. The default focus is always on Cancel for safety.</p>
 <p><strong>Units:</strong> Toggle between Metric and Imperial. Preference is remembered across sessions.</p>
 <h3 id="289-wi-fi-nat-router">2.8.9 Wi-Fi NAT Router</h3>
 <p>The Solo Web Utility can configure the Controller to connect to your home 2.4 GHz Wi-Fi network while keeping the SoloLink access point active. Built-in IP forwarding and NAT masquerade allow your home computer to reach Solo's companion computer at 10.1.1.10 directly without disconnecting from your home internet. This enables simultaneous access to Solo's web interface and your home network.</p>
 <h3 id="2810-security">2.8.10 Security</h3>
-<p>The web interface is protected by a password with SHA-256 salted hashing and 24-hour session management. A built-in modal allows changing the password directly in the browser. A command-line password reset tool is also included. The SoloLink Wi-Fi password can still be changed using the procedure described in Section 2.7.4.</p>
-<h3 id="2811-quick-reference">2.8.11 Quick Reference</h3>
+<p>The web interface is protected by a password with SHA-256 salted hashing. Each login gets its own random session that expires after 24 hours without use. While the factory password (<code>sololink</code>) is still in use, the utility asks you to change it after logging in; <strong>Keep Default</strong> skips this for the rest of the browser session. The 🔒 button at the top right changes the password and signs out every other device. After 5 wrong passwords within 5 minutes, logins from that device are paused for 30 seconds, doubling up to 5 minutes for repeated attempts. A command-line password reset tool is also included. The SoloLink Wi-Fi password can still be changed using the procedure described in Section 2.7.4.</p>
+<h3 id="2811-gimbal-firmware-update">2.8.11 Gimbal Firmware Update</h3>
+<p>On ArduCopter 4.x the Solo's own boot-time gimbal updater can no longer reach the gimbal, so a replacement gimbal can be stuck on old firmware (no GoPro controls, or no tilt). <strong>Update Gimbal Firmware</strong>, at the bottom of the Firmware Update tab, installs the gimbal firmware that ships with Open Solo (<code>/firmware/gimbal_firmware_1.3.6.ax</code>) in about 5 minutes.</p>
+<blockquote>
+<p><strong>Props off and the Solo on the ground. Do not power off the Solo until the update has finished.</strong> The Cube restarts several times and the gimbal does not respond to the tilt paddle meanwhile.</p>
+</blockquote>
+<ol>
+<li>The utility checks that the vehicle is disarmed and remembers the Cube's <code>MNT1_TYPE</code>.</li>
+<li>It sets <code>MNT1_TYPE</code> to 2 and then to 0, rebooting only the Cube each time, to open a path to the gimbal, and reads the gimbal's firmware version.</li>
+<li>If the gimbal is older than the file (or <em>Reflash</em> is ticked), it uploads the firmware (about 2 minutes, with a time limit and one retry).</li>
+<li>It always puts <code>MNT1_TYPE</code> back and reboots the Cube, even when a step failed.</li>
+</ol>
+<p>Afterwards, check that the gimbal levels the camera, follows the tilt paddle, and that the GoPro controls work. The update keeps running if the browser is closed or Wi-Fi drops. If the power is lost during the update, the utility puts <code>MNT1_TYPE</code> back the next time the Solo starts; run the update again to recover a gimbal left without firmware (LED flashing yellow, camera limp). The full log is <code>/log/gimbal_update.log</code>.</p>
+<p>The same card can replace Open Solo's boot-time gimbal updater with a time-limited version, so an interrupted gimbal flash can never hold up the Solo's startup. The original is kept and can be put back; the replacement has not yet been tested on a drone.</p>
+<h3 id="2812-quick-reference">2.8.12 Quick Reference</h3>
 <table>
 <thead>
 <tr>
@@ -730,15 +748,15 @@ The 3DR Solo Web Utility is a free, open-source on-board management console that
 </tr>
 <tr>
 <td>Firmware update</td>
-<td>Utility → Firmware tab → select Cube type → click Update</td>
+<td>Utility → Firmware Update tab → select Cube type → Start Automated Installation</td>
 </tr>
 <tr>
 <td>Compass calibration</td>
-<td>Utility → Calibrations → Compass</td>
+<td>Utility → Firmware Update tab → Step 4 — Compass Calibration</td>
 </tr>
 <tr>
 <td>Accelerometer calibration</td>
-<td>Utility → Calibrations → Accelerometer</td>
+<td>Utility → Firmware Update tab → Step 3 — Accelerometer &amp; IMU Calibration</td>
 </tr>
 <tr>
 <td>Edit parameters</td>
@@ -746,7 +764,7 @@ The 3DR Solo Web Utility is a free, open-source on-board management console that
 </tr>
 <tr>
 <td>Apply preset</td>
-<td>Utility → Presets → click preset name</td>
+<td>Utility → Parameters tab → 1-Click Parameter Presets</td>
 </tr>
 <tr>
 <td>Configure controller buttons</td>
@@ -754,7 +772,15 @@ The 3DR Solo Web Utility is a free, open-source on-board management console that
 </tr>
 <tr>
 <td>Change web password</td>
-<td>Utility → Settings → Change Password</td>
+<td>Utility → 🔒 button (top right)</td>
+</tr>
+<tr>
+<td>Update the gimbal firmware</td>
+<td>Utility → Firmware Update tab → Update Gimbal Firmware</td>
+</tr>
+<tr>
+<td>Download the Sololink Viewer</td>
+<td>Utility → 📥 Viewer for Android (top bar)</td>
 </tr>
 </tbody>
 </table>
