@@ -2234,8 +2234,9 @@ class TestSoloWebUtility(unittest.TestCase):
                 f.write("stock loader\n")
             gu.PATHS.update({k: os.path.join(tmp, v) for k, v in {
                 "status": "st.json", "lock": "lock", "state": "state.json", "log": "log",
-                "firmware_glob": "fw/*.ax", "gimbal_dir": "gimbal", "gimbal_setup": "gimbal_setup",
-                "boot_loader": "loadGimbal.py", "version_file": "AXON"}.items()})
+                "firmware_dir": "fw", "gimbal_dir": "gimbal", "gimbal_setup": "gimbal_setup",
+                "boot_loader": "loadGimbal.py", "version_file": "AXON",
+                "boot_updater_enabled": "bu_enabled"}.items()})
             gu.time.sleep = lambda s: None
 
             class Fake(object):
@@ -2244,6 +2245,9 @@ class TestSoloWebUtility(unittest.TestCase):
                     self.armed, self.mnt, self.fail_mount, self.calls = armed, mnt, fail_mount, []
 
                 def cube_info(self):
+                    # the firmware must already be in place and checked before the Cube is touched
+                    fw = os.path.join(tmp, "fw", "gimbal_firmware_1.3.6.ax")
+                    self.fw_ready = os.path.isfile(fw) and gu._file_md5(fw) == gu.FW_MD5
                     return {"armed": self.armed, "mnt1_type": self.mnt, "serial0": 1}
 
                 def set_mount(self, t, settle):
@@ -2262,6 +2266,7 @@ class TestSoloWebUtility(unittest.TestCase):
 
                 def flash(self, fw, progress, timeout=0):
                     self.calls.append(("flash",))
+                    self.flashed = fw
                     progress(50, "Uploading 32.16kB of 64.32kB - 50%")
                     return self.flashes.pop(0), ""
 
@@ -2281,13 +2286,60 @@ class TestSoloWebUtility(unittest.TestCase):
             boot = {"usb": "/dev/x", "sysids": [0], "bootloader": True, "version": None}
             id0 = {"usb": "/dev/x", "sysids": [0], "bootloader": False, "version": None}
 
-            # normal: id 1 (MNT1_TYPE=2), open port (0), flash, restore (2)
+            # bundled firmware: the exact Open Solo file
+            self.assertEqual(os.path.getsize(gu.BUNDLED_FW), 48171)
+            self.assertEqual(gu._file_md5(gu.BUNDLED_FW), "f5fba21a9ebf376566e88fe670546aea")
+            # normal: firmware copied in (the stale .ax replaced, another .ax removed) before the Cube
+            # is touched, then id 1 (MNT1_TYPE=2), open port (0), flash that explicit path, restore (2)
+            with open(os.path.join(tmp, "fw", "gimbal_firmware_0.28.2.ax"), "w") as fh:
+                fh.write("{}")
             r, st, f = run(Fake([none, old]))
             self.assertEqual(r, "updated")
             self.assertEqual(f.calls, [("probe",), ("mount", 2), ("mount", 0), ("probe",), ("flash",), ("mount", 2)])
-            self.assertEqual(open(os.path.join(tmp, "AXON")).read().split(), ["1.3.6", "r"])
+            self.assertTrue(f.fw_ready)
+            fw_dst = os.path.join(tmp, "fw", "gimbal_firmware_1.3.6.ax")
+            self.assertEqual(f.flashed, fw_dst)
+            self.assertEqual(sorted(os.listdir(os.path.join(tmp, "fw"))), ["gimbal_firmware_1.3.6.ax"])
+            self.assertEqual(gu._file_md5(fw_dst), gu.FW_MD5)
+            self.assertEqual(open(os.path.join(tmp, "AXON")).read().split(), ["1.3.6"])
+            # right file already in place: nothing in /firmware is changed, other .ax files included
+            with open(os.path.join(tmp, "fw", "gimbal_firmware_9.9.9.ax"), "w") as fh:
+                fh.write("{}")
+            os.utime(fw_dst, (1000000000, 1000000000))
+            r, st, f = run(Fake([none, old]))
+            self.assertEqual(r, "updated")
+            self.assertEqual(sorted(os.listdir(os.path.join(tmp, "fw"))),
+                             ["gimbal_firmware_1.3.6.ax", "gimbal_firmware_9.9.9.ax"])
+            self.assertEqual(int(os.path.getmtime(fw_dst)), 1000000000)
+            self.assertEqual(f.flashed, fw_dst)
+            os.remove(os.path.join(tmp, "fw", "gimbal_firmware_9.9.9.ax"))
             self.assertFalse(os.path.exists(os.path.join(tmp, "state.json")))
             self.assertEqual(st.data["state"], "done")
+            # /firmware missing: created
+            _shutil.rmtree(os.path.join(tmp, "fw"))
+            r, st, f = run(Fake([none, old]))
+            self.assertEqual((r, f.fw_ready), ("updated", True))
+            # bundled copy damaged: stops in preflight, before the Cube is touched
+            saved_fw = gu.BUNDLED_FW
+            bad = os.path.join(tmp, "bad.ax")
+            with open(bad, "w") as fh:
+                fh.write('{"version": "1.3.6"}')
+            gu.BUNDLED_FW = bad
+            try:
+                r, st, f = run(Fake([none, old]))
+            finally:
+                gu.BUNDLED_FW = saved_fw
+            self.assertEqual((r, f.calls), ("failed", []))
+            self.assertFalse(hasattr(f, "fw_ready"))
+            self.assertIn("damaged", st.data["message"])
+            # /firmware cannot be created (a file is in the way): clear message, Cube untouched
+            _shutil.rmtree(os.path.join(tmp, "fw"))
+            open(os.path.join(tmp, "fw"), "w").close()
+            r, st, f = run(Fake([none, old]))
+            self.assertEqual((r, f.calls), ("failed", []))
+            self.assertIn("is not a folder", st.data["message"])
+            os.remove(os.path.join(tmp, "fw"))
+            os.makedirs(os.path.join(tmp, "fw"))
             # already current: no flash unless forced; MNT1_TYPE still restored
             r, st, f = run(Fake([none, cur]))
             self.assertEqual(r, "current")
@@ -2330,8 +2382,13 @@ class TestSoloWebUtility(unittest.TestCase):
             self.assertTrue(setup.startswith(b"#!/usr/bin/env python\n"))
             self.assertNotIn(b"\r\n", setup)
             self.assertEqual(open(os.path.join(tmp, "gimbal", "setup.py.orig"), "rb").read(), b"stock\r\n")
-            # boot updater install / restore
+            # boot updater install: refused until the setting is on (it is untested on a drone)
             self.assertEqual(gu.boot_updater_state()["state"], "original")
+            self.assertFalse(gu.boot_updater_state()["install_enabled"])
+            self.assertRaises(gu.GimbalUpdateError, gu.install_boot_updater)
+            self.assertEqual(open(os.path.join(tmp, "loadGimbal.py")).read(), "stock loader\n")
+            self.assertEqual(gu.set_boot_updater_install_enabled(True), "on")
+            self.assertTrue(gu.boot_updater_state()["install_enabled"])
             self.assertEqual(gu.install_boot_updater(), "installed")
             self.assertEqual(gu.boot_updater_state()["state"], "fixed")
             self.assertEqual(gu.install_boot_updater(), "current")
@@ -2342,7 +2399,9 @@ class TestSoloWebUtility(unittest.TestCase):
                 _json.dump({"state": "running", "pid": 999999, "lines": []}, fh)
             st = gu.get_status()
             self.assertEqual((st["state"], st["result"], st["running"]), ("failed", "interrupted", False))
-            self.assertEqual(st["firmware_version"], "1.3.6")
+            self.assertEqual((st["firmware_version"], st["firmware_file"]), ("1.3.6", "gimbal_firmware_1.3.6.ax"))
+            self.assertEqual(gu.set_boot_updater_install_enabled(False), "off")
+            self.assertFalse(gu.boot_updater_state()["install_enabled"])
             self.assertEqual(gu.decode_swver(_struct_float((1, 3, 6, 0))), "1.3.6")
         finally:
             gu.PATHS.clear()
@@ -2363,8 +2422,10 @@ class TestSoloWebUtility(unittest.TestCase):
         for page in ("static/index.html", "templates/index.html"):
             html = open(os.path.join(root, page), encoding="utf-8").read()
             for el_id in ("gimbalUpdateCard", "btnStartGimbalUpdate", "chkGimbalForce", "gimbalTerminal",
-                          "btnInstallGimbalBootUpdater", "btnRestoreGimbalBootUpdater"):
+                          "btnInstallGimbalBootUpdater", "btnRestoreGimbalBootUpdater", "chkGimbalBootUpdaterEnable"):
                 self.assertIn('id="%s"' % el_id, html)
+            self.assertIn('id="btnInstallGimbalBootUpdater" style="display: none;"', html)   # hidden by default
+        self.assertIn("'enable_install'", swa)
         js = open(os.path.join(root, "static", "app.js"), encoding="utf-8").read()
         self.assertIn("/api/gimbal/start", js)
         self.assertIn("refreshGimbalStatus();", js)
@@ -2450,6 +2511,64 @@ class TestSoloWebUtility(unittest.TestCase):
             txt = apj_tool.to_ascii(d.contents())
             vals = dict(l.split()[:2] for l in txt.splitlines() if len(l.split()) >= 2)
             self.assertEqual(float(vals.get("FENCE_MARGIN", "nan")), 0.0, apj)
+
+    def test_34_video_yields_to_solex(self):
+        """Cockpit gives the Controller's single video slot to Solex: an ESTABLISHED connection from
+        another device to the shot manager (TCP 5507) makes the video worker let go, and it takes the
+        video back only APP_GONE_SECS after that app has gone."""
+        import tempfile
+        import cockpit_mgr as cm
+        hdr = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n"
+        listen = "   0: 00000000:1583 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 1 1\n"
+        solex = "   1: 0A01010A:1583 9101010A:947A 01 00000000:00000000 00:00000000 00000000     0        0 2 1\n"
+        local = "   2: 0100007F:1583 0100007F:A000 01 00000000:00000000 00:00000000 00000000     0        0 3 1\n"
+        fd, path = tempfile.mkstemp()
+        os.close(fd)
+        try:
+            open(path, "w").write(hdr + listen + local)
+            self.assertIsNone(cm.find_app_on_shotmanager(proc_file=path))
+            open(path, "w").write(hdr + listen + local + solex)
+            self.assertEqual(cm.find_app_on_shotmanager(proc_file=path), "10.1.1.145")
+        finally:
+            os.remove(path)
+        self.assertIsNone(cm.find_app_on_shotmanager(proc_file="/nonexistent/tcp"))
+
+        vm = cm.SoloVideoManager()
+        orig = cm.find_app_on_shotmanager
+        try:
+            cm.find_app_on_shotmanager = lambda *a, **k: "10.1.1.145"
+            self.assertTrue(vm._app_wants_video())
+            self.assertEqual(vm.get_status()["yielded_to_app"], "10.1.1.145")
+            cm.find_app_on_shotmanager = lambda *a, **k: None
+            self.assertTrue(vm._app_wants_video())          # still within APP_GONE_SECS
+            vm._app_last_seen -= cm.APP_GONE_SECS + 0.1
+            self.assertFalse(vm._app_wants_video())
+            self.assertIsNone(vm.get_status()["yielded_to_app"])
+        finally:
+            cm.find_app_on_shotmanager = orig
+        src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "cockpit_mgr.py")).read()
+        worker = src[src.index("def _handshake_worker"):src.index("def run(self)", src.index("def _handshake_worker"))]
+        self.assertEqual(worker.count("self._app_wants_video()"), 2)   # before connecting and while holding
+        js = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "cockpit.js")).read()
+        self.assertIn("yielded_to_app", js)
+
+    def test_35_version_everywhere(self):
+        """tools/bump_version.py: every file that names the version (page header, cache-busters, manuals,
+        installer names, build scripts, website) shows the version in version.json."""
+        import re as _re
+        root = os.path.dirname(os.path.abspath(__file__))
+        sys.path.insert(0, os.path.join(root, "tools"))
+        try:
+            import bump_version as bv
+        finally:
+            sys.path.pop(0)
+        # other tests raise version.json's iteration, so take the release version from the page header
+        html = open(os.path.join(root, "static", "index.html"), encoding="utf-8").read()
+        version = _re.search(r'id="headerVersionTag">v(\d+\.\d+\.\d+)<', html).group(1)
+        self.assertEqual(bv.check(version), [])
+        self.assertTrue(os.path.isfile(os.path.join(root, "release", "Solo Web Utility v%s.spec" % version)))
+        self.assertEqual(bv.version_code("1.2.1"), 10201)
+        self.assertGreater(bv.version_code("1.3.0"), bv.version_code("1.2.99"))
 
 
 def _struct_float(b4):

@@ -1,7 +1,7 @@
 {
-  "version": "1.2.0",
-  "iteration": 72,
-  "updated_at": 1792176842,
+  "version": "1.2.1",
+  "iteration": 73,
+  "updated_at": 1793377112,
   "changelog": [
     {
       "version": "1.0.67",
@@ -406,6 +406,12 @@
       "iteration": 72,
       "date": "2026-10-16 13:54:02",
       "description": "Firmware tab: revert to any of the last 3 ArduCopter builds or flash a custom .apj uploaded from the browser (older builds are archived to firmware/previous instead of deleted). Cube Only installs no longer start the 6-minute reboot countdown. Golden image ships ArduCopter 4.7.2 (4.7.1 kept for reverting). Controller home Wi-Fi uses the stock station mode, session-only with an arm interlock and step diagnostics."
+    },
+    {
+      "version": "1.2.1",
+      "iteration": 73,
+      "date": "2026-10-30 11:18:32",
+      "description": "Gimbal update: bundled gimbal_firmware_1.3.6.ax copied and MD5-checked into /firmware before the Cube is touched; time-limited boot updater install hidden behind a setting. Cockpit video hands over to Solex as soon as Solex connects and comes back when it closes. FENCE_MARGIN 0 restored in the Solo defaults (fixes 'Circle FENCE_MARGIN is greater than FENCE_RADIUS'). Battery tab: BMSOne Configurator card with an offline copy and the BMSOne manual. Version numbers now raised with tools/bump_version.py."
     }
   ]
 }

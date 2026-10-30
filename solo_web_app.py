@@ -529,9 +529,14 @@ class SoloApiHandler(BaseHTTPRequestHandler):
                 res = gimbal_update.install_boot_updater()
             elif action == 'restore':
                 res = gimbal_update.restore_boot_updater()
+            elif action in ('enable_install', 'disable_install'):
+                res = "install button " + gimbal_update.set_boot_updater_install_enabled(action == 'enable_install')
             else:
                 self._send_error("Unknown action.", 400)
                 return
+        except gimbal_update.GimbalUpdateError as e:
+            self._send_error(str(e)[:1].upper() + str(e)[1:] + ".", 409)
+            return
         except Exception as e:
             self._send_error("Could not change the boot updater: %s" % e, 500)
             return

@@ -41,6 +41,41 @@ STREAM_MISSING_SECS = 3.0       # only ask for telemetry streams when ATTITUDE i
 SOLO_CONTROLLER_IP = "10.1.1.1"
 SOLO_VIDEO_TCP_PORT = 5502
 SOLO_VIDEO_UDP_PORT = 5600
+# The Controller's app_server gives video to ONE app at a time and only takes the next one when
+# the current app disconnects. Solex (or the 3DR app) also connects to the Solo's shot manager on
+# TCP 5507, so a connection there from another device means an app wants video: the utility
+# then gives up the video slot and only takes it back once that app has gone.
+SOLO_SHOTMGR_PORT = 5507
+APP_GONE_SECS = 3.0             # app must be gone this long before the utility takes video back
+
+
+def find_app_on_shotmanager(port=SOLO_SHOTMGR_PORT, proc_file="/proc/net/tcp"):
+    """IP of a device with an ESTABLISHED TCP connection to the Solo's shot manager, or None.
+    Local (127.x) connections and the Solo's own address are ignored."""
+    try:
+        f = open(proc_file)
+        try:
+            lines = f.readlines()[1:]
+        finally:
+            f.close()
+    except Exception:
+        return None
+    for line in lines:
+        parts = line.split()
+        if len(parts) < 4 or parts[3] != "01":          # 01 = ESTABLISHED
+            continue
+        try:
+            lport = int(parts[1].split(":")[1], 16)
+            rhex = parts[2].split(":")[0]
+        except Exception:
+            continue
+        if lport != port or len(rhex) != 8:
+            continue
+        ip = ".".join(str(int(rhex[i:i + 2], 16)) for i in (6, 4, 2, 0))   # little-endian
+        if ip.startswith("127.") or ip in ("0.0.0.0", "10.1.1.10"):
+            continue
+        return ip
+    return None
 
 # ArduCopter Flight Modes
 ARDUCOPTER_MODES = {
@@ -1131,6 +1166,8 @@ class SoloVideoManager(threading.Thread):
         # Diagnostics
         self.handshake_connected = False
         self.streaming_active = False
+        self.app_holding_video = None     # IP of the app (Solex) the video slot was given to
+        self._app_last_seen = 0.0
         self.packet_count = 0
         self.bytes_received = 0
         self.last_packet_time = 0.0
@@ -1220,6 +1257,7 @@ class SoloVideoManager(threading.Thread):
         is_active = (now - self.last_packet_time < 2.5) if self.last_packet_time > 0 else False
         return {
             "handshake_connected": self.handshake_connected,
+            "yielded_to_app": self.app_holding_video,
             "streaming_active": is_active,
             "packet_count": self.packet_count,
             "kbps": round(self.kbps, 1),
@@ -1238,11 +1276,28 @@ class SoloVideoManager(threading.Thread):
             "last_packet_sec_ago": round(now - self.last_packet_time, 1) if self.last_packet_time > 0 else None
         }
 
+    def _app_wants_video(self):
+        """True while Solex (or another app) is connected to the shot manager, plus APP_GONE_SECS."""
+        now = time.time()
+        ip = find_app_on_shotmanager()
+        if ip:
+            if self.app_holding_video != ip:
+                print("[video] %s connected to the shot manager: giving the video to it" % ip)
+            self.app_holding_video = ip
+            self._app_last_seen = now
+            return True
+        if self.app_holding_video and now - self._app_last_seen < APP_GONE_SECS:
+            return True
+        if self.app_holding_video:
+            print("[video] %s has gone: the utility can take the video back" % self.app_holding_video)
+        self.app_holding_video = None
+        return False
+
     def _handshake_worker(self):
         """Background worker keeping the TCP handshake alive to 10.1.1.1:5502."""
         while self.running:
             sock = None
-            if len(self.subscribers) == 0:
+            if len(self.subscribers) == 0 or self._app_wants_video():
                 self.handshake_connected = False
                 import time
                 time.sleep(1.0)
@@ -1258,6 +1313,8 @@ class SoloVideoManager(threading.Thread):
                 while self.running:
                     if len(self.subscribers) == 0:
                         break
+                    if self._app_wants_video():
+                        break             # Solex is here: free the slot so it gets the video
 
                     now = time.time()
                     if now - last_ping >= 2.0:

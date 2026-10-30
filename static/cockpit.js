@@ -1196,16 +1196,19 @@
             const vid = telem.video || {};
             const vActive = Boolean(vid.streaming_active || (Date.now() - lastVideoPacketTime < 3000));
             if (videoDot) videoDot.classList.toggle('offline', !vActive);
+            const appIp = vid.yielded_to_app || null;
             if (videoTxt) {
                 if (vActive) {
                     const rateStr = vid.kbps > 0 ? (' ' + Math.round(vid.kbps) + 'k') : '';
                     videoTxt.textContent = 'HDMI LIVE' + rateStr;
                 } else {
-                    videoTxt.textContent = 'NO VIDEO';
+                    videoTxt.textContent = appIp ? 'VIDEO IN SOLEX' : 'NO VIDEO';
                 }
             }
             if (videoSignalBadge && !vActive) {
-                videoSignalBadge.textContent = 'WAITING FOR HDMI FEED';
+                videoSignalBadge.textContent = appIp
+                    ? ('VIDEO IS WITH SOLEX (' + appIp + ') - IT COMES BACK HERE WHEN SOLEX CLOSES')
+                    : 'WAITING FOR HDMI FEED';
             }
             if (vActive && videoStandbyOverlay) {
                 videoStandbyOverlay.classList.add('hidden');

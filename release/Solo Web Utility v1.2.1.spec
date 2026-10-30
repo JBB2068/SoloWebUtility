@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-# PyInstaller spec for "Solo Web Utility v1.2.0 Installer.exe"
+# PyInstaller spec for "Solo Web Utility v1.2.1 Installer.exe"
 # One self-contained Windows installer: deploy_to_drone.py + paramiko, the
 # SoloWebUtility2 app files it installs on the Solo, and the firmware it stages.
 # Build with build_exe.bat (run from this folder). Nothing else is packed.
@@ -8,7 +8,7 @@ import os
 import glob
 
 ROOT = os.path.abspath(os.path.join(SPECPATH, ".."))
-NAME = "Solo Web Utility v1.2.0 Installer"
+NAME = "Solo Web Utility v1.2.1 Installer"
 
 
 def rel(*p):
@@ -79,5 +79,5 @@ exe = EXE(
     strip=False,
     upx=False,
     console=True,
-    version=os.path.join(SPECPATH, "version_info_1.2.0.txt"),
+    version=os.path.join(SPECPATH, "version_info_1.2.1.txt"),
 )

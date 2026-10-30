@@ -7,8 +7,11 @@ On ArduCopter 4.x the stock boot-time gimbal updater cannot reach the gimbal (th
 driver makes the gimbal's port private, and a freshly powered gimbal uses MAVLink system id 0).
 This runs the procedure from HANDOFF_SoloWebUtility.md, verified on a drone on 2026-10-27:
 
-  1. preflight      lock, not armed, Open Solo gimbal tools present, a 4.x Cube, /firmware/*.ax;
-                    remember MNT1_TYPE (persistently, so it is put back even after a power loss)
+  1. preflight      before anything touches the Cube: put the bundled gimbal_firmware_1.3.6.ax
+                    (MD5-checked) in /firmware and remove any other .ax there (nothing is changed when
+                    the right file is already in place); then lock, not armed,
+                    Open Solo gimbal tools present, a 4.x Cube; remember MNT1_TYPE (persistently, so it
+                    is put back even after a power loss)
   2. probe          is the gimbal already in its bootloader? then go straight to 6
   3. id 1           MNT1_TYPE=2 + Cube-only reboot: the driver gives the gimbal system id 1 (in RAM)
   4. open port      MNT1_TYPE=0 + Cube-only reboot: port no longer private, gimbal keeps id 1;
@@ -16,6 +19,9 @@ This runs the procedure from HANDOFF_SoloWebUtility.md, verified on a drone on 2
   5. version        skip the flash when the gimbal already runs the .ax version (unless forced)
   6. flash          fixed gimbal_setup with a 300 s limit, one retry; write /AXON_VERSION
   7. restore        (always, in finally) MNT1_TYPE back + Cube-only reboot, Cube USB link off
+
+Tested on real gimbals: once by hand (separate scripts over SSH plus the stock boot updater) and
+once with this tool from the web page.
 
 Only the Cube reboots; the iMX6 (and the web server) keep running. The web server starts this
 file detached (python -u gimbal_update.py --run [--force]) and polls STATUS_FILE, so a browser
@@ -45,7 +51,7 @@ PATHS = {
     "lock": "/tmp/gimbal_update.lock",
     "state": "/log/gimbal_update_state.json",            # persistent: MNT1_TYPE to put back
     "log": "/log/gimbal_update.log",
-    "firmware_glob": "/firmware/*.ax",
+    "firmware_dir": "/firmware",
     "gimbal_dir": "/usr/bin/gimbal",
     "gimbal_setup": "/usr/bin/gimbal_setup",
     "boot_loader": "/usr/bin/loadGimbal.py",
@@ -53,6 +59,8 @@ PATHS = {
     "gpio": "/sys/class/gpio",
     "usb_glob": "/dev/serial/by-id/usb*",
     "python": "/usr/bin/python",
+    # persistent setting: the "Install time-limited updater" button is offered only when this exists
+    "boot_updater_enabled": "/log/gimbal_boot_updater_enabled",
 }
 # Tests (and bench setups) can move these with GIMBAL_UPDATE_PATHS='{"status": "...", ...}'
 try:
@@ -62,6 +70,12 @@ except ValueError:
 FIXED_SETUP = os.path.join(HERE, "gimbal_setup_fixed.py")
 FIXED_LOADER = os.path.join(HERE, "loadGimbal_fixed.py")
 CUBE_MOUNT = os.path.join(HERE, "cube_mount.py")
+
+# Gimbal firmware bundled with the utility (byte-identical to Open Solo's /firmware copy)
+FW_NAME = "gimbal_firmware_1.3.6.ax"
+FW_SIZE = 48171
+FW_MD5 = "f5fba21a9ebf376566e88fe670546aea"
+BUNDLED_FW = os.path.join(HERE, FW_NAME)
 
 SELECT_GPIO, ENABLE_GPIO = "21", "19"
 GIMBAL_COMP = 154
@@ -125,14 +139,95 @@ def decode_swver(value):
     return "%d.%d.%d" % (major, minor, rev)
 
 
-def firmware_file():
-    """(path, version, release) of the newest /firmware/*.ax, or None."""
-    files = sorted(glob.glob(PATHS["firmware_glob"]), key=os.path.getmtime)
-    if not files:
+def _file_md5(path):
+    with open(path, "rb") as f:
+        return _md5(f.read())
+
+
+def _bundled_fw_bytes():
+    """The bundled .ax, or raise GimbalUpdateError when it is missing or not the expected file."""
+    if not os.path.isfile(BUNDLED_FW):
+        raise GimbalUpdateError("the utility's copy of %s is missing: reinstall the Solo Web Utility" % FW_NAME)
+    with open(BUNDLED_FW, "rb") as f:
+        data = f.read()
+    if len(data) != FW_SIZE or _md5(data) != FW_MD5:
+        raise GimbalUpdateError("the utility's copy of %s is damaged (%d bytes, MD5 %s; expected %d bytes, MD5 %s): "
+                                "reinstall the Solo Web Utility" % (FW_NAME, len(data), _md5(data), FW_SIZE, FW_MD5))
+    return data
+
+
+def bundled_firmware():
+    """(name, version, release) of the bundled .ax when it is intact, else None (for the web page)."""
+    try:
+        _bundled_fw_bytes()
+    except GimbalUpdateError:
         return None
-    path = files[-1]
-    data = _read_json(path) or {}
-    return path, str(data.get("version", "")), str(data.get("release", ""))
+    meta = _read_json(BUNDLED_FW) or {}
+    return FW_NAME, str(meta.get("version", "")), str(meta.get("release", ""))
+
+
+def _sync():
+    try:
+        subprocess.call(["sync"])
+    except Exception:
+        pass
+
+
+def prepare_firmware(log):
+    """Step-1 preflight from the brief, before anything touches the Cube: mkdir -p /firmware; if the
+    .ax there is missing or has the wrong MD5, copy the bundled one to .tmp, check its MD5, mv, sync,
+    and remove every other .ax in /firmware; read the version from the file's JSON. When the right file
+    is already in place nothing is changed (other .ax files are left alone too).
+    Returns (path, version, release); raises GimbalUpdateError with a clear message on any problem."""
+    data = _bundled_fw_bytes()
+    fw_dir = PATHS["firmware_dir"]
+    if os.path.exists(fw_dir) and not os.path.isdir(fw_dir):
+        raise GimbalUpdateError("%s exists but is not a folder" % fw_dir)
+    try:
+        if not os.path.isdir(fw_dir):
+            os.makedirs(fw_dir)
+    except OSError as e:
+        raise GimbalUpdateError("could not create %s: %s" % (fw_dir, e))
+    dst = os.path.join(fw_dir, FW_NAME)
+    if os.path.isfile(dst) and _file_md5(dst) == FW_MD5:
+        log("%s is in place (MD5 %s): nothing changed" % (dst, FW_MD5))
+    else:
+        log("Copying the bundled %s to %s" % (FW_NAME, dst) if not os.path.isfile(dst)
+            else "%s has the wrong MD5 (%s): replacing it with the bundled copy" % (dst, _file_md5(dst)))
+        tmp = dst + ".tmp"
+        try:
+            with open(tmp, "wb") as f:
+                f.write(data)
+                f.flush()
+                os.fsync(f.fileno())
+            got = _file_md5(tmp)
+            if got != FW_MD5:
+                raise GimbalUpdateError("the copy %s has MD5 %s, expected %s (is %s full?)" % (tmp, got, FW_MD5, fw_dir))
+            os.rename(tmp, dst)
+        except (IOError, OSError) as e:
+            raise GimbalUpdateError("could not copy %s to %s: %s" % (FW_NAME, fw_dir, e))
+        finally:
+            if os.path.exists(tmp):
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+        _sync()
+        if _file_md5(dst) != FW_MD5:
+            raise GimbalUpdateError("%s still has the wrong MD5 after copying" % dst)
+        log("Copied and checked: MD5 %s" % FW_MD5)
+        for other in sorted(glob.glob(os.path.join(fw_dir, "*.ax"))):
+            if os.path.abspath(other) != os.path.abspath(dst):
+                try:
+                    os.remove(other)
+                    log("Removed other gimbal firmware %s" % other)
+                except OSError as e:
+                    raise GimbalUpdateError("could not remove %s: %s" % (other, e))
+        _sync()
+    meta = _read_json(dst)
+    if not isinstance(meta, dict) or not str(meta.get("version", "")):
+        raise GimbalUpdateError("could not read the firmware version from %s" % dst)
+    return dst, str(meta["version"]), str(meta.get("release", ""))
 
 
 # ---------------------------------------------------------------------------------------------
@@ -170,13 +265,31 @@ def _file_state(dst, fixed):
     return "original"
 
 
+def boot_updater_install_enabled():
+    return os.path.isfile(PATHS["boot_updater_enabled"])
+
+
+def set_boot_updater_install_enabled(on):
+    """The setting that offers "Install time-limited updater" (off by default: it is untested on a drone)."""
+    if on:
+        with open(PATHS["boot_updater_enabled"], "w") as f:
+            f.write("enabled %s\n" % time.strftime("%Y-%m-%d %H:%M:%S"))
+    elif os.path.exists(PATHS["boot_updater_enabled"]):
+        os.remove(PATHS["boot_updater_enabled"])
+    return "on" if on else "off"
+
+
 def boot_updater_state():
     return {"state": _file_state(PATHS["boot_loader"], FIXED_LOADER),
             "backup": os.path.isfile(PATHS["boot_loader"] + ".orig"),
+            "install_enabled": boot_updater_install_enabled(),
             "setup_state": _file_state(os.path.join(PATHS["gimbal_dir"], "setup.py"), FIXED_SETUP)}
 
 
 def install_boot_updater():
+    if not boot_updater_install_enabled():
+        raise GimbalUpdateError("the time-limited boot updater is untested on a drone: turn on the setting "
+                                "after testing it by hand before installing it")
     if not os.path.isfile(PATHS["boot_loader"]):
         raise GimbalUpdateError("%s not found: this is not Open Solo's gimbal boot updater" % PATHS["boot_loader"])
     return _install_file(FIXED_LOADER, PATHS["boot_loader"])
@@ -499,10 +612,8 @@ def _run_update(hw, st, force):
     try:
         # ---- 1. preflight ----------------------------------------------------------------
         st.step(1, "Preflight checks", 2)
-        fw = firmware_file()
-        if fw is None:
-            raise GimbalUpdateError("no gimbal firmware (%s) on the Solo" % PATHS["firmware_glob"])
-        fw_path, fw_version, fw_release = fw
+        # the firmware file first: nothing touches the Cube until it is in place and checked
+        fw_path, fw_version, fw_release = prepare_firmware(st.log)
         st.data["file_version"] = fw_version
         st.log("Firmware file %s is version %s" % (fw_path, fw_version))
         setup_py = os.path.join(PATHS["gimbal_dir"], "setup.py")
@@ -669,9 +780,10 @@ def get_status():
                          "Run it again: it puts MNT1_TYPE back and recovers the gimbal")
     st["running"] = st.get("state") == "running"
     st["pending_restore"] = os.path.isfile(PATHS["state"])
-    fw = firmware_file()
-    st["firmware_file"] = os.path.basename(fw[0]) if fw else None
+    fw = bundled_firmware()
+    st["firmware_file"] = fw[0] if fw else None
     st["firmware_version"] = fw[1] if fw else None
+    st["firmware_md5"] = FW_MD5
     try:
         with open(PATHS["version_file"]) as f:
             st["installed_version"] = f.readline().strip() or None
@@ -699,8 +811,10 @@ def start(force=False):
     """Start a detached run. Returns (ok, message)."""
     if running_pid() is not None:
         return False, "A gimbal update is already running."
-    if firmware_file() is None:
-        return False, "No gimbal firmware (%s) on the Solo." % PATHS["firmware_glob"]
+    try:
+        _bundled_fw_bytes()
+    except GimbalUpdateError as e:
+        return False, str(e)[:1].upper() + str(e)[1:] + "."
     _write_json(PATHS["status"], {"state": "running", "mode": "update", "step": 0, "steps": STEPS,
                                   "label": "Starting", "percent": 0, "message": "", "force": bool(force),
                                   "pid": None, "started": time.time(), "updated": time.time(),

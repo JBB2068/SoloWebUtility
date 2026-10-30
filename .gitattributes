@@ -1,0 +1,2 @@
+# Gimbal firmware must stay byte-exact (MD5-checked on the Solo): never convert line endings
+*.ax binary

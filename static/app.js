@@ -3419,7 +3419,7 @@ function setUploadProgressVisible(visible) {
         if (!badge || !st) { return; }
         var running = !!st.running;
         var fw = el('gimbalFwVersion');
-        if (fw) { fw.textContent = st.firmware_version ? (st.firmware_version + ' (' + st.firmware_file + ')') : 'none found'; }
+        if (fw) { fw.textContent = st.firmware_version ? (st.firmware_version + ' (' + st.firmware_file + ', MD5 checked)') : 'missing or damaged - reinstall the utility'; }
         var inst = el('gimbalInstalledVersion');
         if (inst) { inst.textContent = st.installed_version || 'unknown'; }
         var bu = el('gimbalBootUpdaterState');
@@ -3427,7 +3427,12 @@ function setUploadProgressVisible(visible) {
         var btnInst = el('btnInstallGimbalBootUpdater');
         var btnRest = el('btnRestoreGimbalBootUpdater');
         var b = st.boot_updater || {};
-        if (btnInst) { btnInst.disabled = running || b.state !== 'original'; }
+        var chkBu = el('chkGimbalBootUpdaterEnable');
+        if (chkBu) { chkBu.checked = !!b.install_enabled; chkBu.disabled = running; }
+        if (btnInst) {
+            btnInst.style.display = b.install_enabled ? '' : 'none';
+            btnInst.disabled = running || b.state !== 'original';
+        }
         if (btnRest) { btnRest.disabled = running || !(b.state === 'fixed' && b.backup); }
 
         var pct = Math.max(0, Math.min(100, st.percent || 0));
@@ -3553,6 +3558,23 @@ function setUploadProgressVisible(visible) {
             gimbalBootUpdater('install', 'Replace /usr/bin/loadGimbal.py with the time-limited version?\n\n' +
                 'It has not yet been tested on a drone. The original is kept as loadGimbal.py.orig and can be put back here.\n' +
                 'Check /log/gimbal_update.log after the next boot.');
+        });
+    }
+    var chkGimbalBootUpdaterEnable = el('chkGimbalBootUpdaterEnable');
+    if (chkGimbalBootUpdaterEnable) {
+        chkGimbalBootUpdaterEnable.addEventListener('change', function () {
+            var on = chkGimbalBootUpdaterEnable.checked;
+            if (on && !confirm('Only turn this on after you have tested the time-limited loadGimbal.py by hand on this drone.\n\n' +
+                    'Show the "Install time-limited updater" button?')) {
+                chkGimbalBootUpdaterEnable.checked = false;
+                return;
+            }
+            apiRequest('/api/gimbal/boot-updater', 'POST', { action: on ? 'enable_install' : 'disable_install' })
+                .then(function () { refreshGimbalStatus(); })
+                .catch(function (err) {
+                    chkGimbalBootUpdaterEnable.checked = !on;
+                    showToast('Boot updater: ' + err.message, true);
+                });
         });
     }
     var btnRestoreGimbalBootUpdater = el('btnRestoreGimbalBootUpdater');

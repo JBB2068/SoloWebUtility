@@ -58,8 +58,9 @@ export default {
     }
 
     // Installers: one file each in R2, served under its own name
-    const EXE_NAME = 'Solo Web Utility v1.2.0 Installer.exe';
-    const APK_NAME = 'Solo Web Utility v1.2.0 Installer.apk';
+    const EXE_NAME = 'Solo Web Utility v1.2.1 Installer.exe';
+    const APK_NAME = 'Solo Web Utility v1.2.1 Installer.apk';
+    const MAC_NAME = 'Solo Web Utility v1.2.1 (Mac).zip';
 
     if (decodedPath === '/' + EXE_NAME) {
       return await handleR2Request(request, env, EXE_NAME, 'application/octet-stream', 'attachment', EXE_NAME);
@@ -67,20 +68,23 @@ export default {
     if (decodedPath === '/' + APK_NAME) {
       return await handleR2Request(request, env, APK_NAME, 'application/vnd.android.package-archive', 'attachment', APK_NAME);
     }
-
-    // Old installer links (earlier names) redirect to the current files
-    if (
-      decodedPath === '/Solo Web Utility v1.2.0.exe' ||
-      decodedPath === '/Solo Web Utility Installer.exe' ||
-      url.pathname === '/deploy_to_solo.exe'
-    ) {
-      return Response.redirect(new URL('/' + encodeURIComponent(EXE_NAME), url).toString(), 301);
+    if (decodedPath === '/' + MAC_NAME) {
+      return await handleR2Request(request, env, MAC_NAME, 'application/zip', 'attachment', MAC_NAME);
     }
-    if (
-      decodedPath === '/Solo Web Utility v1.2.0.apk' ||
-      decodedPath === '/Solo Web Utility Installer.apk'
-    ) {
-      return Response.redirect(new URL('/' + encodeURIComponent(APK_NAME), url).toString(), 301);
+
+    // Old installer links (earlier names, and any earlier version such as
+    // "Solo Web Utility v1.2.1 Installer.exe" in an older built-in manual) redirect to the current files
+    const OLD_EXE = /^\/Solo Web Utility (v\d+\.\d+\.\d+ )?Installer\.exe$|^\/Solo Web Utility v\d+\.\d+\.\d+\.exe$/;
+    const OLD_APK = /^\/Solo Web Utility (v\d+\.\d+\.\d+ )?Installer\.apk$|^\/Solo Web Utility v\d+\.\d+\.\d+\.apk$/;
+    if (OLD_EXE.test(decodedPath) || url.pathname === '/deploy_to_solo.exe') {
+      return Response.redirect(new URL('/' + encodeURIComponent(EXE_NAME), url).toString(), 302);
+    }
+    if (OLD_APK.test(decodedPath)) {
+      return Response.redirect(new URL('/' + encodeURIComponent(APK_NAME), url).toString(), 302);
+    }
+    const OLD_MAC = /^\/Solo Web Utility (v\d+\.\d+\.\d+ )?\(Mac\)\.zip$/;
+    if (OLD_MAC.test(decodedPath)) {
+      return Response.redirect(new URL('/' + encodeURIComponent(MAC_NAME), url).toString(), 302);
     }
 
     // SoloLink Viewer app (separate app, not the installer)

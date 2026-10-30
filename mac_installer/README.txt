@@ -1,4 +1,4 @@
-Solo Web Utility v1.2.0 -- Mac installer
+Solo Web Utility v1.2.1 -- Mac installer
 =========================================
 
 Installs Solo Web Utility and its firmware on your 3DR Solo over SoloLink Wi-Fi,
