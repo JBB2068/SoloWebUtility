@@ -1,7 +1,7 @@
 {
-  "version": "1.2.2",
-  "iteration": 74,
-  "updated_at": 1793386547,
+  "version": "1.2.3",
+  "iteration": 75,
+  "updated_at": 1793398213,
   "changelog": [
     {
       "version": "1.0.67",
@@ -418,6 +418,12 @@
       "iteration": 74,
       "date": "2026-10-30 13:55:47",
       "description": "Gimbal update: the Cube's USB port (SERIAL0_PROTOCOL) runs MAVLink 1 during the update and is set back to 2 afterwards, also after a failed or interrupted run; fixes very slow uploads that hit the time limit when SERIAL0_PROTOCOL was 2."
+    },
+    {
+      "version": "1.2.3",
+      "iteration": 75,
+      "date": "2026-10-30 17:10:13",
+      "description": "Gimbal update: gives the gimbal system ID 1 directly (gimbal_set_sysid.py) with the driver off, so gimbals that never send GIMBAL_REPORT no longer fail with 'still system ID 0'; normal runs need two fewer Cube reboots. Header: the ArduCopter version always comes from the Cube (the status poll asks the Cube again when its last answer is old), so it no longer sticks on 'checking...' or an old version."
     }
   ]
 }

@@ -1,4 +1,4 @@
-image e754ed89a4b7ae6670015f94571ea000
+image b5e91b2af6f6f5af5a63c8536bc96010
 ecbd052cf4cf20692fa8b09b3769b8ab  (recipe) tools/bake_squashfs.sh
 2baed77a8919d189bdc48c784f618dbf  app.py
 456e45a4a98a5d615a8e809228e2785d  arducopter_builder.py
@@ -10,14 +10,15 @@ e644df248c60c4c4137070864f4eb6aa  bin/gimbal_update/REPORT.md
 7c0f104fa564c44da0e34dacf5b7edb4  bin/gimbal_update/fix_cube_serial.py
 f5fba21a9ebf376566e88fe670546aea  bin/gimbal_update/gimbal_firmware_1.3.6.ax
 8dc5b300ac937f24eb28cf7dd636b230  bin/gimbal_update/gimbal_probe.py
+26c7f8dfe2a42981383404729263e8ef  bin/gimbal_update/gimbal_set_sysid.py
 05c331ec5e352888b8ed3c556e4e56fc  bin/gimbal_update/gimbal_setup_fixed.py
-126b5381d0fdd65f85390c88dbbea95b  bin/gimbal_update/gimbal_update.py
+0735a9180a5445a7cd8f547c36d4c258  bin/gimbal_update/gimbal_update.py
 cb693e6f8ff4bf733af678291c3e3cfd  bin/gimbal_update/loadGimbal_fixed.py
 6f5de6979580953cb0f9507b80482d84  bin/pixhawk.py
 6571f4ec8ac1eff07f768d1b8256a0cf  bin/uploader.py
 e377ee917663f6636541005d66dcad39  calib_mgr.py
 4b865d86eb34df1667ed7e40345bc8a6  change_password.py
-e85afe91cff9c74efb312ccddeb94e85  cockpit_mgr.py
+26db207260594c0915407e3ee9b54ec7  cockpit_mgr.py
 f0e5f52ffc2e83218f5e2460ebfa48d0  compat.py
 05f7f0e5dfaff09161af85b769f34706  controller_mgr.py
 6b116278690caf341f8026d88e529b8e  firmware/Solo.param
@@ -56,17 +57,17 @@ a661b0b31bbbc6c0eb14c2ce8d74b6d6  static/Solo_Web_Utility_Owners_Manual.pdf
 1e1468fdfae5968c19f35f3fad62c9af  static/app.js
 c4534c1cc3dc0769fdbcafe5d1c80d4b  static/cockpit.css
 5ab77e93edc014f1603b5628613d2d81  static/cockpit.js
-c8d33c062a77d21b6aa02fa5eabd43dc  static/index.html
+e02ea40902cc7148df265d3963f917d1  static/index.html
 075c6c464b218fa88d56eb974bdd98e6  static/jmuxer.min.js
-aae281e52283131fc4735218de1c3fdc  static/manual.html
-cdfee9a8663eb30a368f42be95110680  static/solo_drone_manual.html
+d31cf48eac558412cf78d4af0b5e688a  static/manual.html
+922a73b555c14c79b5d2cc3aacb80a96  static/solo_drone_manual.html
 d022df64c87d6939a0203ab09a50b4ba  static/solo_icon.png
 d4c5749deda789b47c7e72a46bfd0e61  static/solo_icon_512.png
 9f7d1a45d236f7bca97dc257591de8d7  static/sololink_viewer.apk.bin
 437a2bf0ac2f53db77069b8d6bea9372  static/style.css
-c8d33c062a77d21b6aa02fa5eabd43dc  templates/index.html
+e02ea40902cc7148df265d3963f917d1  templates/index.html
 9ba0e69ed82438d5b621c2d6f7de2149  templates/updates.html
-10a82375b305041796324fe64e06d45e  version.json
+374c3ed39dc3992b94e95f340916c062  version.json
 ba65e63da86b93d1ed42e0132ae649d5  version_mgr.py
 213496a3823c54db7a5b656776f66c5a  webcore.py
 a85f2d4f485912b64751985af54d76df  wifi_mgr.py

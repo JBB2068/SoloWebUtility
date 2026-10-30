@@ -2219,7 +2219,8 @@ class TestSoloWebUtility(unittest.TestCase):
         for needle in ("serial0 = int(sys.argv[3]) if len(sys.argv) > 3 else None", "SERIAL0_PROTOCOL now",
                        "[CUBE_FAILED] SERIAL0_PROTOCOL not accepted", "[CUBE_DONE]"):
             self.assertIn(needle, cm)
-        for f in ("gimbal_update.py", "cube_mount.py", "gimbal_setup_fixed.py", "loadGimbal_fixed.py"):
+        for f in ("gimbal_update.py", "cube_mount.py", "gimbal_setup_fixed.py", "loadGimbal_fixed.py",
+                  "gimbal_set_sysid.py"):
             src = open(os.path.join(gdir, f)).read()
             self.assertIsNone(_re.search(r'(?<![\w>\'"])[fF]("[^"\n]*\{|\'[^\'\n]*\{)', src),
                               "%s: f-string (Solo runs Python 2.7)" % f)
@@ -2274,6 +2275,16 @@ class TestSoloWebUtility(unittest.TestCase):
                     self.calls.append(("probe",))
                     return self.probes.pop(0)
 
+                def set_sysid(self):
+                    # gimbal_set_sysid.py: answers from the same list as the probes
+                    self.calls.append(("sysid",))
+                    p = self.probes.pop(0)
+                    if p.get("bootloader"):
+                        return {"result": "bootloader", "version": None, "reason": "the gimbal is in its bootloader"}
+                    if 1 in p.get("sysids", []) and p.get("version"):
+                        return {"result": "done", "version": p["version"], "reason": ""}
+                    return {"result": "failed", "version": None, "reason": "the gimbal did not take system ID 1"}
+
                 def flash(self, fw, progress, timeout=0):
                     self.calls.append(("flash",))
                     self.flashed = fw
@@ -2305,7 +2316,8 @@ class TestSoloWebUtility(unittest.TestCase):
                 fh.write("{}")
             r, st, f = run(Fake([none, old]))
             self.assertEqual(r, "updated")
-            self.assertEqual(f.calls, [("probe",), ("mount", 2), ("mount", 0), ("probe",), ("flash",), ("mount", 2, 2)])
+            # driver off + MAVLink 1 in one Cube reboot, check, system ID 1 directly (no driver reboots), flash, restore
+            self.assertEqual(f.calls, [("mount", 0, 1), ("probe",), ("sysid",), ("flash",), ("mount", 2, 2)])
             self.assertEqual(f.serial0, 2)                 # MAVLink 2 on the Cube's USB port afterwards, always
             self.assertTrue(f.fw_ready)
             fw_dst = os.path.join(tmp, "fw", "gimbal_firmware_1.3.6.ax")
@@ -2362,11 +2374,32 @@ class TestSoloWebUtility(unittest.TestCase):
             # gimbal in its bootloader: flash straight away
             r, st, f = run(Fake([boot]))
             self.assertEqual(r, "updated")
-            self.assertEqual(f.calls[:2], [("probe",), ("flash",)])
+            self.assertEqual(f.calls[:3], [("mount", 0, 1), ("probe",), ("flash",)])
             # gimbal still id 0 after the dance: steps 3-4 repeated once
             r, st, f = run(Fake([none, id0, old]))
             self.assertEqual(r, "updated")
-            self.assertEqual(f.calls.count(("mount", 0)), 2)
+            self.assertEqual(f.calls, [("mount", 0, 1), ("probe",), ("sysid",), ("mount", 2), ("mount", 0),
+                                       ("sysid",), ("flash",), ("mount", 2, 2)])
+            # system ID 1 fails again after the fallback: stops with a clear message, restores
+            r, st, f = run(Fake([none, id0, id0]))
+            self.assertEqual(r, "failed")
+            self.assertIn("did not take system ID 1", st.data["message"])
+            self.assertNotIn(("flash",), f.calls)
+            self.assertEqual(f.calls[-1], ("mount", 2, 2))
+            log = "\n".join(st.data["lines"])
+            self.assertIn("giving up", log)
+            self.assertNotIn("starting again", log)
+            # the gimbal turns out to be in its bootloader at step 3: straight to the flash
+            r, st, f = run(Fake([none, boot]))
+            self.assertEqual((r, f.calls[2:4]), ("updated", [("sysid",), ("flash",)]))
+            # version from gimbal_set_sysid.py's output
+            self.assertEqual(gu.parse_sysid_output(0, "before: ...\n[SYSID_DONE] gimbal is system 1, version 1.3.6\n"),
+                             {"result": "done", "version": "1.3.6", "reason": ""})
+            self.assertEqual(gu.parse_sysid_output(4, "[SYSID_FAILED] the gimbal is in its bootloader: no ID needed, "
+                                                      "flash it directly\n")["result"], "bootloader")
+            self.assertEqual(gu.parse_sysid_output(5, "[SYSID_FAILED] the gimbal did not take system ID 1\n"),
+                             {"result": "failed", "version": None, "reason": "the gimbal did not take system ID 1"})
+            self.assertEqual(gu.parse_sysid_output(-9, "before: ...\n")["reason"], "stopped after the time limit")
             # flash fails twice: failed, but MNT1_TYPE is put back
             r, st, f = run(Fake([none, old], flashes=(False, False)))
             self.assertEqual(r, "failed")
@@ -2375,12 +2408,12 @@ class TestSoloWebUtility(unittest.TestCase):
             # SERIAL0_PROTOCOL=2 before the run: set to 1 (MNT1_TYPE kept) before the gimbal check, 2 at the end
             r, st, f = run(Fake([none, old], serial0=2))
             self.assertEqual(r, "updated")
-            self.assertEqual(f.calls[:2], [("mount", 2, 1), ("probe",)])
+            self.assertEqual(f.calls[:2], [("mount", 0, 1), ("probe",)])
             self.assertEqual((f.calls[-1], f.serial0), (("mount", 2, 2), 2))
             self.assertIn("SERIAL0_PROTOCOL = 2", "\n".join(st.data["lines"]))
             # ... also on the bootloader path (step 2 -> step 5)
             r, st, f = run(Fake([boot], serial0=2))
-            self.assertEqual(f.calls, [("mount", 2, 1), ("probe",), ("flash",), ("mount", 2, 2)])
+            self.assertEqual(f.calls, [("mount", 0, 1), ("probe",), ("flash",), ("mount", 2, 2)])
             # the Cube refuses SERIAL0_PROTOCOL=1: stops, MNT1_TYPE and SERIAL0_PROTOCOL=2 still restored
             r, st, f = run(Fake([none, old], serial0=2, fail_serial0=1))
             self.assertEqual(r, "failed")
@@ -2602,6 +2635,45 @@ class TestSoloWebUtility(unittest.TestCase):
         self.assertTrue(os.path.isfile(os.path.join(root, "release", "Solo Web Utility v%s.spec" % version)))
         self.assertEqual(bv.version_code("1.2.1"), 10201)
         self.assertGreater(bv.version_code("1.3.0"), bv.version_code("1.2.99"))
+
+    def test_36_header_cube_version_always_current(self):
+        """The header's ArduCopter version: the Cube's own answer while it is fresh; otherwise the status poll
+        wakes the MAVLink link so the Cube is asked again within seconds (no endless 'checking...' when no
+        Cockpit is open), and the newest stored version is shown meanwhile."""
+        import tempfile
+        import time as _time
+        import cockpit_mgr as cm
+        tmp = tempfile.mkdtemp()
+        saved = (cm.telemetry.cube_version, cm.telemetry.cube_version_time, cm._last_demand[0],
+                 cm.CUBE_VERSION_RECORD, cm.PIX_VERSION_FILE)
+        try:
+            cm.CUBE_VERSION_RECORD = os.path.join(tmp, "rec")
+            cm.PIX_VERSION_FILE = os.path.join(tmp, "pix")
+            with open(cm.CUBE_VERSION_RECORD, "w") as f:
+                f.write("4.7.1\n")
+            # fresh live answer: shown, nothing woken
+            cm.telemetry.cube_version, cm.telemetry.cube_version_time = "4.7.2", _time.time()
+            cm._last_demand[0] = 0.0
+            self.assertEqual(cm.get_cube_version(), "ArduCopter 4.7.2")
+            self.assertEqual(cm._last_demand[0], 0.0)
+            # stale live answer (link idle, Cube may have been reflashed): wake the link, show the record meanwhile
+            cm.telemetry.cube_version_time = _time.time() - cm.CUBE_VERSION_FRESH_SECS - 1
+            self.assertEqual(cm.get_cube_version(), "ArduCopter 4.7.1")
+            self.assertTrue(cm.mavlink_wanted())
+            # just flashed (empty record) and no live answer yet: unknown, and the link is woken to ask
+            cm.telemetry.cube_version = None
+            cm._last_demand[0] = 0.0
+            with open(cm.CUBE_VERSION_RECORD, "w") as f:
+                f.write("")
+            self.assertEqual(cm.get_cube_version(), "")
+            self.assertGreater(cm._last_demand[0], 0.0)
+            # background callers can read it without waking anything
+            cm._last_demand[0] = 0.0
+            cm.get_cube_version(wake=False)
+            self.assertEqual(cm._last_demand[0], 0.0)
+        finally:
+            (cm.telemetry.cube_version, cm.telemetry.cube_version_time, cm._last_demand[0],
+             cm.CUBE_VERSION_RECORD, cm.PIX_VERSION_FILE) = saved
 
 
 def _struct_float(b4):

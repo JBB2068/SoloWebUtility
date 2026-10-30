@@ -192,6 +192,7 @@ class TelemetryState(object):
         self.armed = False
         # ArduCopter version reported live by the Cube (AUTOPILOT_VERSION / boot banner)
         self.cube_version = None
+        self.cube_version_time = 0.0      # when the Cube last confirmed it
         self.flight_mode = "LOITER"
         self.custom_mode = 5
         self.system_status = 3
@@ -810,6 +811,7 @@ class LiveMAVLinkClient(threading.Thread):
                         m = _ARDUCOPTER_BANNER.search(raw_text)
                         if m and compid == 1:
                             self.state.cube_version = m.group(1)
+                            self.state.cube_version_time = now
                             _remember_cube_version(m.group(1))
 
                 # AUTOPILOT_VERSION (148): flight_sw_version = major<<24 | minor<<16 | patch<<8 | type
@@ -819,6 +821,7 @@ class LiveMAVLinkClient(threading.Thread):
                     major, minor, patch = (fsw >> 24) & 0xff, (fsw >> 16) & 0xff, (fsw >> 8) & 0xff
                     if major:
                         self.state.cube_version = "%d.%d.%d" % (major, minor, patch)
+                        self.state.cube_version_time = now
                         _remember_cube_version(self.state.cube_version)
 
                 # RC_CHANNELS_RAW (35)
@@ -1514,19 +1517,25 @@ def _mtime(path):
         return None
 
 
-def get_cube_version():
+CUBE_VERSION_FRESH_SECS = 90.0     # the link re-asks every 60 s while it is up
+
+
+def get_cube_version(wake=True):
     """'ArduCopter x.y.z' as installed on the Cube, or "" while it is not known.
-    1. Live MAVLink answer from the Cube.
-    2. Otherwise the NEWER of: the last live answer (our record) and /PIX_VERSION (Open Solo,
-       written at boot). An empty record (Cube just flashed) means unknown, so a /PIX_VERSION
-       from before the flash is never shown."""
+    1. The Cube's own answer, if it confirmed it in the last CUBE_VERSION_FRESH_SECS.
+    2. Otherwise wake the MAVLink link (wake=True, e.g. the page's status poll) so the Cube is
+       asked again within seconds, and meanwhile show the NEWER of: the last live answer (our
+       record) and /PIX_VERSION (Open Solo, written at boot). An empty record (Cube just flashed)
+       means unknown, so a /PIX_VERSION from before the flash is never shown."""
     try:
         with telemetry.lock:
-            live = telemetry.cube_version
-        if live:
+            live, live_t = telemetry.cube_version, getattr(telemetry, "cube_version_time", 0.0)
+        if live and time.time() - live_t < CUBE_VERSION_FRESH_SECS:
             return "ArduCopter %s" % live
     except Exception:
         pass
+    if wake:
+        note_demand()      # nobody else may have the link up (no Cockpit open): ask the Cube now
     rec_t, pix_t = _mtime(CUBE_VERSION_RECORD), _mtime(PIX_VERSION_FILE)
     try:
         if rec_t is not None and (pix_t is None or rec_t >= pix_t):

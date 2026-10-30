@@ -1,6 +1,6 @@
 """Stage the files the phone installer copies to the Solo, plus assets/manifest.txt.
 
-Uses the same file list as the Windows installer (release/Solo Web Utility v1.2.2.spec),
+Uses the same file list as the Windows installer (release/Solo Web Utility v1.2.3.spec),
 so the .exe and the .apk always install exactly the same files.
 Usage: python stage_assets.py <assets_dir>
 """
@@ -10,7 +10,7 @@ import shutil
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SPEC = os.path.join(HERE, "..", "release", "Solo Web Utility v1.2.2.spec")
+SPEC = os.path.join(HERE, "..", "release", "Solo Web Utility v1.2.3.spec")
 
 
 def md5(path):

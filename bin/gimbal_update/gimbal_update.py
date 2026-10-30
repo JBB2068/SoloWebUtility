@@ -13,14 +13,17 @@ This runs the procedure from HANDOFF_SoloWebUtility.md, verified on a drone on 2
                     Open Solo gimbal tools present, a 4.x Cube; remember MNT1_TYPE (persistently, so it
                     is put back even after a power loss)
   2. probe          is the gimbal already in its bootloader? then go straight to 6
-  3. id 1           MNT1_TYPE=2 + Cube-only reboot: the driver gives the gimbal system id 1 (in RAM)
-  4. open port      MNT1_TYPE=0 + Cube-only reboot: port no longer private, gimbal keeps id 1;
-                    check the gimbal now sends from sys 1 / comp 154 and answers GMB_SWVER
+  3. id 1           gimbal_set_sysid.py: PARAM_SET GMB_SYSID=1 to system 0 / comp 154 (what the driver
+                    sends; the driver itself only does it after a GIMBAL_REPORT, which a gimbal in a bad
+                    state may never send). It reads GMB_SWVER, or finds the gimbal in its bootloader.
+  4. fallback       only if step 3 failed: the old pair MNT1_TYPE=2 + Cube reboot (the driver gives the
+                    gimbal id 1), MNT1_TYPE=0 + Cube reboot, then gimbal_set_sysid.py once more
   5. version        skip the flash when the gimbal already runs the .ax version (unless forced)
   6. flash          fixed gimbal_setup with a 300 s limit, one retry; write /AXON_VERSION
-                    if SERIAL0_PROTOCOL is not 1: set it to 1 (keeping MNT1_TYPE) with a Cube-only reboot,
-                    before step 2, so every path talks MAVLink 1 on the Cube's USB port (the Solo's
-                    pymavlink only reads MAVLink 1; with 2 about 14% of the gimbal's frames are lost)
+                    then MNT1_TYPE=0 and SERIAL0_PROTOCOL=1 in one Cube-only reboot (cube_mount.py 0 5 1),
+                    before step 2, in every case: the gimbal port is no longer private and every path talks
+                    MAVLink 1 on the Cube's USB port (the Solo's pymavlink only reads MAVLink 1; with 2 about
+                    14% of the gimbal's frames are lost)
   7. restore        (always, in finally) MNT1_TYPE back and SERIAL0_PROTOCOL=2 + Cube-only reboot,
                     Cube USB link off
 
@@ -74,6 +77,8 @@ except ValueError:
 FIXED_SETUP = os.path.join(HERE, "gimbal_setup_fixed.py")
 FIXED_LOADER = os.path.join(HERE, "loadGimbal_fixed.py")
 CUBE_MOUNT = os.path.join(HERE, "cube_mount.py")
+SET_SYSID = os.path.join(HERE, "gimbal_set_sysid.py")
+SET_SYSID_TIMEOUT = 90          # gimbal_set_sysid.py: USB wait + about 25 s of listening
 
 # Gimbal firmware bundled with the utility (byte-identical to Open Solo's /firmware copy)
 FW_NAME = "gimbal_firmware_1.3.6.ax"
@@ -435,6 +440,12 @@ class SoloHardware(object):
     def install_setup_fix(self):
         return _install_file(FIXED_SETUP, os.path.join(PATHS["gimbal_dir"], "setup.py"))
 
+    def set_sysid(self):
+        """gimbal_set_sysid.py (tested on a drone 2026-10-30). Returns {'result': 'done' | 'bootloader' |
+        'failed', 'version': 'X.Y.Z' or None, 'reason': text}."""
+        rc, out = run_logged([PATHS["python"], "-u", SET_SYSID], SET_SYSID_TIMEOUT, self.log)
+        return parse_sysid_output(rc, out)
+
     def flash(self, fw_path, progress, timeout=FLASH_TIMEOUT):
         """Fixed gimbal_setup with the USB link on. Returns (ok, output)."""
         dev = self.usb_enable()
@@ -448,6 +459,21 @@ class SoloHardware(object):
         finally:
             self.usb_disable()
         return rc == 0 and "Upload successful" in out, out
+
+
+SYSID_DONE_RE = re.compile(r"\[SYSID_DONE\] gimbal is system 1, version (\d+\.\d+\.\d+)")
+
+
+def parse_sysid_output(rc, out):
+    """Result of gimbal_set_sysid.py from its exit code and output."""
+    m = SYSID_DONE_RE.search(out)
+    if rc == 0 and m:
+        return {"result": "done", "version": m.group(1), "reason": ""}
+    failed = re.search(r"\[SYSID_FAILED\] ([^\r\n]*)", out)
+    reason = failed.group(1).strip() if failed else ("stopped after the time limit" if rc == -9 else "no result (exit %d)" % rc)
+    if "in its bootloader" in reason:
+        return {"result": "bootloader", "version": None, "reason": reason}
+    return {"result": "failed", "version": None, "reason": reason}
 
 
 def run_logged(cmd, timeout, log, progress=None):
@@ -661,14 +687,14 @@ def _run_update(hw, st, force):
         serial0 = info.get("serial0")
         st.log("MNT1_TYPE = %d, SERIAL0_PROTOCOL = %s (afterwards: MNT1_TYPE %d, SERIAL0_PROTOCOL %d)"
                % (current, "unknown" if serial0 is None else int(serial0), original, SERIAL0_AFTER))
-        if serial0 is None or int(serial0) != SERIAL0_UPDATE:
-            st.log("Setting SERIAL0_PROTOCOL=%d (MAVLink 1 on the Cube's USB port) for the update (Cube reboot)"
-                   % SERIAL0_UPDATE)
-            outcome = hw.set_mount(current, 5, SERIAL0_UPDATE)
-            if outcome == MOUNT_SERIAL0_FAILED:
-                raise GimbalUpdateError("the Cube did not accept SERIAL0_PROTOCOL=%d" % SERIAL0_UPDATE)
-            if outcome != MOUNT_DONE:
-                raise GimbalUpdateError("could not set SERIAL0_PROTOCOL=%d and reboot the Cube" % SERIAL0_UPDATE)
+        st.log("Gimbal driver off (MNT1_TYPE=0) and SERIAL0_PROTOCOL=%d (MAVLink 1 on the Cube's USB port) "
+               "for the update (Cube reboot)" % SERIAL0_UPDATE)
+        outcome = hw.set_mount(0, 5, SERIAL0_UPDATE)
+        if outcome == MOUNT_SERIAL0_FAILED:
+            raise GimbalUpdateError("the Cube did not accept SERIAL0_PROTOCOL=%d" % SERIAL0_UPDATE)
+        if outcome != MOUNT_DONE:
+            raise GimbalUpdateError("could not set MNT1_TYPE=0 and SERIAL0_PROTOCOL=%d and reboot the Cube"
+                                    % SERIAL0_UPDATE)
         st.log("Fixed gimbal_setup: %s" % hw.install_setup_fix())
 
         # ---- 2. already in the bootloader? ------------------------------------------------
@@ -682,29 +708,29 @@ def _run_update(hw, st, force):
         if in_boot:
             st.log("The gimbal is in its bootloader (no application): going straight to the flash")
         else:
-            # ---- 3 + 4. id 1, then open the port ------------------------------------------
-            for attempt in (1, 2):
-                st.step(3, "Giving the gimbal system ID 1 (Cube reboot)", 15)
-                restore_to = original
+            # ---- 3. system ID 1 without the driver --------------------------------------
+            st.step(3, "Giving the gimbal system ID 1", 15)
+            sid = hw.set_sysid()
+            if sid["result"] == "failed":
+                # ---- 4. fallback: the old pair (the driver sets the ID), then try again ----
+                st.log("[!] %s: trying the gimbal driver once (two Cube reboots), then system ID 1 again"
+                       % sid["reason"])
+                st.step(4, "Fallback: gimbal driver on, then off (Cube reboots)", 25)
                 if hw.set_mount(2, 25) != MOUNT_DONE:
                     raise GimbalUpdateError("could not set MNT1_TYPE=2 and reboot the Cube")
-                st.step(4, "Opening the gimbal port (Cube reboot)", 35)
                 if hw.set_mount(0, 5) != MOUNT_DONE:
                     raise GimbalUpdateError("could not set MNT1_TYPE=0 and reboot the Cube")
-                probe = hw.probe()
-                st.log("Gimbal probe: %s" % json.dumps(probe))
-                if probe.get("bootloader"):
-                    in_boot = True
-                    break
-                if 1 in probe.get("sysids", []) and probe.get("version"):
-                    version = probe["version"]
-                    break
-                if probe.get("sysids") == [0]:
-                    st.log("[!] The gimbal is still system ID 0 (it lost power?): starting again at step 3")
-                else:
-                    st.log("[!] No answer from the gimbal: trying steps 3-4 once more")
+                st.step(3, "Giving the gimbal system ID 1 (second try)", 35)
+                sid = hw.set_sysid()
+                if sid["result"] == "failed":
+                    st.log("[!] %s: giving up (no retry left)" % sid["reason"])
+                    raise GimbalUpdateError("the gimbal did not take system ID 1 (%s). The gimbal's messages "
+                                            "before the attempt are in the log ('before:' line)" % sid["reason"])
+            if sid["result"] == "bootloader":
+                in_boot = True
+                st.log("The gimbal is in its bootloader (no application): going straight to the flash")
             else:
-                raise GimbalUpdateError("the gimbal did not answer through the Cube (is it connected and powered?)")
+                version = sid["version"]
 
         # ---- 5. version decision ----------------------------------------------------------
         st.step(5, "Checking the gimbal version", 45)

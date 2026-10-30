@@ -263,12 +263,12 @@ This document is an updated edition of the original <em>3DR Solo User Manual V9<
 <p>The 3-Axis Solo Gimbal provides greater control of GoPro® HERO cameras. The Gimbal is included, fully installed, in the package Solo with 3-Axis Gimbal, and is also available separately for Solo. This powerful accessory is fully covered in Chapter 3 of this manual.</p>
 <hr />
 <h3 id="12-aircraft-overview">1.2 Aircraft Overview</h3>
-<h4 id="121-smart-battery">1.2.2 Smart Battery</h4>
+<h4 id="121-smart-battery">1.2.3 Smart Battery</h4>
 <blockquote>
 <p><strong>Updated — 2026:</strong> Original 3DR Solo Smart Batteries are no longer manufactured. Existing batteries have limited remaining service life. For current replacement and alternative battery options, see <strong>Section 2.3</strong> and <strong>Section 10</strong> (Maintenance).</p>
 </blockquote>
 <p>The battery connects to Solo's battery bay. Solo's power button is located on the battery; Solo can be powered only when the battery is connected.</p>
-<h4 id="122-motors-and-propellers">1.2.2 Motors and Propellers</h4>
+<h4 id="122-motors-and-propellers">1.2.3 Motors and Propellers</h4>
 <p>Solo's arms are labeled 1 through 4 on the ends of the arms. Motors on arms #1 and #2 spin counterclockwise and use clockwise-tightening propellers with silver tops. Motors on arms #3 and #4 spin clockwise and use counterclockwise-tightening propellers with black tops.</p>
 <h4 id="123-orientation-leds">1.2.3 Orientation LEDs</h4>
 <p>Each arm contains an LED for ground-to-air directional awareness; when armed for flight, the two front arms (#1 and #3) display white, and the two rear arms (#2 and #4) display red. This LED scheme mimics the headlight and taillight style of a car.</p>
@@ -582,15 +582,15 @@ The 3DR Solo Web Utility is a free, open-source on-board management console that
 </ul>
 <p><strong>Installation steps:</strong></p>
 <ol>
-<li>Download <strong>Solo Web Utility v1.2.2 Installer.exe</strong> from open-solo.com (approximately 160 MB standalone executable).</li>
+<li>Download <strong>Solo Web Utility v1.2.3 Installer.exe</strong> from open-solo.com (approximately 160 MB standalone executable).</li>
 <li>Power on Solo and the Controller and connect your PC to the SoloLink Wi-Fi network as you normally would.</li>
-<li>Double-click <code>Solo Web Utility v1.2.2 Installer.exe</code>. The installer automatically connects to Solo via SSH at 10.1.1.10, uploads all application files and firmware images, verifies file integrity, configures startup on every boot via <code>/etc/inittab</code>, and starts the web server on port 80.</li>
+<li>Double-click <code>Solo Web Utility v1.2.3 Installer.exe</code>. The installer automatically connects to Solo via SSH at 10.1.1.10, uploads all application files and firmware images, verifies file integrity, configures startup on every boot via <code>/etc/inittab</code>, and starts the web server on port 80.</li>
 <li>When the installer completes, open any browser on any device connected to SoloLink and navigate to <strong>http://10.1.1.10</strong>. The utility is live and will persist across all future power cycles without reinstallation.</li>
 </ol>
 <blockquote>
 <p>The installer uses SSH/SFTP to transfer files. It uses unpipelined synchronous transfers to prevent the Solo's embedded OpenSSH server buffer from overflowing over Wi-Fi. If a transfer is interrupted, the installer automatically resumes from the exact byte offset on the next run.</p>
 </blockquote>
-<p><strong>Android installer:</strong> <code>Solo Web Utility v1.2.2 Installer.apk</code> (approximately 160 MB, from open-solo.com) installs exactly the same files from an Android phone connected to SoloLink. It is only an installer: once the utility is on the Solo, you can delete it and use a browser.</p>
+<p><strong>Android installer:</strong> <code>Solo Web Utility v1.2.3 Installer.apk</code> (approximately 160 MB, from open-solo.com) installs exactly the same files from an Android phone connected to SoloLink. It is only an installer: once the utility is on the Solo, you can delete it and use a browser.</p>
 <p><strong>Sololink Viewer:</strong> the separate Android video viewer can be downloaded with <strong>📥 Viewer for Android</strong> in the utility's top bar.</p>
 <h3 id="283-automated-preflight-update-firmware">2.8.3 Automated Preflight Update (Firmware)</h3>
 <blockquote>
@@ -1338,7 +1338,7 @@ Drone regulations in the United States have changed significantly since this man
 </blockquote>
 <h4 id="612-main-interface">6.1.2 Main Interface</h4>
 <p>This is the screen you'll use most of the time when flying Solo. It's available by accessing the fly/video screen in Solex or SidePilot. The main screen provides the live video feed from the GoPro camera, telemetry statistics, access to Smart Shots, and more.</p>
-<p><em>Figure 6.1.2.2: App — Main Interface</em></p>
+<p><em>Figure 6.1.2.3: App — Main Interface</em></p>
 <table>
 <thead>
 <tr>
@@ -1597,7 +1597,7 @@ The original Map Tile Provider setting is no longer applicable. Map settings and
 <em>Figure 7.1.1.4: Controller — Calibration Error Alert</em></p>
 <h4 id="712-service-alerts">7.1.2 Service Alerts</h4>
 <p>The following alerts indicate a system error that requires service. Consult community resources at 3DRPilots.com. A control stick error can occur either in flight or before takeoff. If the control stick error is received in flight, Solo will return home and land.</p>
-<p><em>Figure 7.1.2.2: Controller — Service Alerts</em></p>
+<p><em>Figure 7.1.2.3: Controller — Service Alerts</em></p>
 <table>
 <thead>
 <tr>

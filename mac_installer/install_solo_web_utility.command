@@ -1,5 +1,5 @@
 #!/bin/bash
-# Solo Web Utility v1.2.2 -- Mac installer.
+# Solo Web Utility v1.2.3 -- Mac installer.
 #
 # Installs Solo Web Utility on a 3DR Solo over SoloLink Wi-Fi with the ssh that ships
 # with macOS: same files, target folders, /etc/inittab respawn entry and firmware
@@ -151,7 +151,7 @@ bad_md5s() {
 # ------------------------------------------------------------------ install
 
 say "=========================================================="
-say "  Solo Web Utility v1.2.2 -- Mac installer"
+say "  Solo Web Utility v1.2.3 -- Mac installer"
 say "=========================================================="
 say "1. Turn on the Solo and the Controller."
 say "2. Join the SoloLink_... Wi-Fi on this Mac (it has no internet; that is normal)."

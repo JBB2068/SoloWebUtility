@@ -1,9 +1,9 @@
 @echo off
 setlocal
-title Build Solo Web Utility v1.2.2 Installer.exe
+title Build Solo Web Utility v1.2.3 Installer.exe
 cd /d "%~dp0"
 echo ======================================================================
-echo   Building "Solo Web Utility v1.2.2 Installer.exe"
+echo   Building "Solo Web Utility v1.2.3 Installer.exe"
 echo   (needs internet the first time, to install PyInstaller and paramiko)
 echo ======================================================================
 python -c "import PyInstaller, paramiko" 2>NUL
@@ -13,11 +13,11 @@ if errorlevel 1 (
 )
 echo [*] Making sure the firmware image holds this version of Solo Web Utility...
 python "%~dp0..\bake_into_firmware.py" --auto || goto bakefail
-python -m PyInstaller --noconfirm --clean --distpath "%~dp0dist" --workpath "%~dp0build" "Solo Web Utility v1.2.2.spec" || goto fail
-if not exist "dist\Solo Web Utility v1.2.2 Installer.exe" goto fail
+python -m PyInstaller --noconfirm --clean --distpath "%~dp0dist" --workpath "%~dp0build" "Solo Web Utility v1.2.3.spec" || goto fail
+if not exist "dist\Solo Web Utility v1.2.3 Installer.exe" goto fail
 rmdir /s /q build 2>NUL
 echo.
-echo [OK] Built: %~dp0dist\Solo Web Utility v1.2.2 Installer.exe
+echo [OK] Built: %~dp0dist\Solo Web Utility v1.2.3 Installer.exe
 pause
 exit /b 0
 :bakefail
