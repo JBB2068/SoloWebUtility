@@ -58,9 +58,9 @@ export default {
     }
 
     // Installers: one file each in R2, served under its own name
-    const EXE_NAME = 'Solo Web Utility v1.2.1 Installer.exe';
-    const APK_NAME = 'Solo Web Utility v1.2.1 Installer.apk';
-    const MAC_NAME = 'Solo Web Utility v1.2.1 (Mac).zip';
+    const EXE_NAME = 'Solo Web Utility v1.2.2 Installer.exe';
+    const APK_NAME = 'Solo Web Utility v1.2.2 Installer.apk';
+    const MAC_NAME = 'Solo Web Utility v1.2.2 (Mac).zip';
 
     if (decodedPath === '/' + EXE_NAME) {
       return await handleR2Request(request, env, EXE_NAME, 'application/octet-stream', 'attachment', EXE_NAME);
@@ -73,7 +73,7 @@ export default {
     }
 
     // Old installer links (earlier names, and any earlier version such as
-    // "Solo Web Utility v1.2.1 Installer.exe" in an older built-in manual) redirect to the current files
+    // "Solo Web Utility v1.2.2 Installer.exe" in an older built-in manual) redirect to the current files
     const OLD_EXE = /^\/Solo Web Utility (v\d+\.\d+\.\d+ )?Installer\.exe$|^\/Solo Web Utility v\d+\.\d+\.\d+\.exe$/;
     const OLD_APK = /^\/Solo Web Utility (v\d+\.\d+\.\d+ )?Installer\.apk$|^\/Solo Web Utility v\d+\.\d+\.\d+\.apk$/;
     if (OLD_EXE.test(decodedPath) || url.pathname === '/deploy_to_solo.exe') {

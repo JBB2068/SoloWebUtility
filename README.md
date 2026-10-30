@@ -2,7 +2,7 @@
 
 A concise, self-contained on-board web server and management portal for the **3DR Solo** drone running **Open Solo 4.0.0 / latest ArduCopter stable version**.
 
-> **Version 1.2.1** — Runs on Solo Copter i.MX6 (Python 2.7, zero external deps). Zero framework dependencies in the browser (vanilla JS/CSS/HTML).
+> **Version 1.2.2** — Runs on Solo Copter i.MX6 (Python 2.7, zero external deps). Zero framework dependencies in the browser (vanilla JS/CSS/HTML).
 
 ---
 
@@ -55,7 +55,7 @@ A concise, self-contained on-board web server and management portal for the **3D
 - CLI utility: `python change_password.py` or `python change_password.py --reset`
 
 ### 🏷️ Versioning
-- Version: **1.2.1**
+- Version: **1.2.2**
 - Version visible in header, footer, and REST API (`version.json`).
 
 ### 🎯 Cockpit HUD & Live Flight Deck

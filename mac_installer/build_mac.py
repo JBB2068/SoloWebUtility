@@ -1,9 +1,9 @@
-"""Build "Solo Web Utility v1.2.1 (Mac).zip": the Mac installer for Solo Web Utility.
+"""Build "Solo Web Utility v1.2.2 (Mac).zip": the Mac installer for Solo Web Utility.
 
 Packs install_solo_web_utility.command (as "Install Solo Web Utility.command") with the
 files staged by android_installer/stage_assets.py, so the Mac installer copies exactly
 the same files as the .exe and the .apk. Runs on Windows, macOS or Linux (Python 3).
-Output: ../release/dist/Solo Web Utility v1.2.1 (Mac).zip
+Output: ../release/dist/Solo Web Utility v1.2.2 (Mac).zip
 """
 import os
 import shutil
@@ -16,8 +16,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 STAGE = os.path.join(ROOT, "android_installer", "stage_assets.py")
 DIST = os.path.join(ROOT, "release", "dist")
-ZIP_NAME = "Solo Web Utility v1.2.1 (Mac).zip"
-TOP = "Solo Web Utility v1.2.1 Installer"
+ZIP_NAME = "Solo Web Utility v1.2.2 (Mac).zip"
+TOP = "Solo Web Utility v1.2.2 Installer"
 SCRIPT_NAME = "Install Solo Web Utility.command"
 NO_COMPRESS = (".gz", ".zip", ".png", ".jpg", ".jpeg", ".apj")
 

@@ -1,6 +1,6 @@
 @echo off
 setlocal
-title Build Solo Web Utility v1.2.1 (Mac).zip
+title Build Solo Web Utility v1.2.2 (Mac).zip
 python "%~dp0..\mac_installer\build_mac.py"
 if errorlevel 1 (
     echo.

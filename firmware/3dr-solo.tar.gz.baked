@@ -1,4 +1,4 @@
-image 448d8fb9896395cbedc169833c235fb0
+image e754ed89a4b7ae6670015f94571ea000
 ecbd052cf4cf20692fa8b09b3769b8ab  (recipe) tools/bake_squashfs.sh
 2baed77a8919d189bdc48c784f618dbf  app.py
 456e45a4a98a5d615a8e809228e2785d  arducopter_builder.py
@@ -6,12 +6,12 @@ ce84941928534e99bc32f866d3ded9c3  auth.py
 11663aeef440a45f46b2e50ecc2a5810  bin/apj_tool.py
 92d579a7b54fbf764039f2ea798f2b9d  bin/gimbal_update/HANDOFF_SoloWebUtility.md
 e644df248c60c4c4137070864f4eb6aa  bin/gimbal_update/REPORT.md
-65a3f707b2a8b51a8620392dbea24504  bin/gimbal_update/cube_mount.py
+938e91a6d0fec6a3f7f4859540cef36c  bin/gimbal_update/cube_mount.py
 7c0f104fa564c44da0e34dacf5b7edb4  bin/gimbal_update/fix_cube_serial.py
 f5fba21a9ebf376566e88fe670546aea  bin/gimbal_update/gimbal_firmware_1.3.6.ax
 8dc5b300ac937f24eb28cf7dd636b230  bin/gimbal_update/gimbal_probe.py
 05c331ec5e352888b8ed3c556e4e56fc  bin/gimbal_update/gimbal_setup_fixed.py
-40f3fd20fd974c6ea37ce5e4685a1391  bin/gimbal_update/gimbal_update.py
+126b5381d0fdd65f85390c88dbbea95b  bin/gimbal_update/gimbal_update.py
 cb693e6f8ff4bf733af678291c3e3cfd  bin/gimbal_update/loadGimbal_fixed.py
 6f5de6979580953cb0f9507b80482d84  bin/pixhawk.py
 6571f4ec8ac1eff07f768d1b8256a0cf  bin/uploader.py
@@ -56,17 +56,17 @@ a661b0b31bbbc6c0eb14c2ce8d74b6d6  static/Solo_Web_Utility_Owners_Manual.pdf
 1e1468fdfae5968c19f35f3fad62c9af  static/app.js
 c4534c1cc3dc0769fdbcafe5d1c80d4b  static/cockpit.css
 5ab77e93edc014f1603b5628613d2d81  static/cockpit.js
-a3ae9afa15c5a696727d46fac1da4485  static/index.html
+c8d33c062a77d21b6aa02fa5eabd43dc  static/index.html
 075c6c464b218fa88d56eb974bdd98e6  static/jmuxer.min.js
-63087e454314bd76cfeff423750e4cfd  static/manual.html
-d07b5a592e3243179d33c7886e336795  static/solo_drone_manual.html
+aae281e52283131fc4735218de1c3fdc  static/manual.html
+cdfee9a8663eb30a368f42be95110680  static/solo_drone_manual.html
 d022df64c87d6939a0203ab09a50b4ba  static/solo_icon.png
 d4c5749deda789b47c7e72a46bfd0e61  static/solo_icon_512.png
 9f7d1a45d236f7bca97dc257591de8d7  static/sololink_viewer.apk.bin
 437a2bf0ac2f53db77069b8d6bea9372  static/style.css
-a3ae9afa15c5a696727d46fac1da4485  templates/index.html
+c8d33c062a77d21b6aa02fa5eabd43dc  templates/index.html
 9ba0e69ed82438d5b621c2d6f7de2149  templates/updates.html
-56b8ce56b66e09aaece61c9a009b3937  version.json
+10a82375b305041796324fe64e06d45e  version.json
 ba65e63da86b93d1ed42e0132ae649d5  version_mgr.py
 213496a3823c54db7a5b656776f66c5a  webcore.py
 a85f2d4f485912b64751985af54d76df  wifi_mgr.py

@@ -1,7 +1,7 @@
 {
-  "version": "1.2.1",
-  "iteration": 73,
-  "updated_at": 1793377112,
+  "version": "1.2.2",
+  "iteration": 74,
+  "updated_at": 1793386547,
   "changelog": [
     {
       "version": "1.0.67",
@@ -412,6 +412,12 @@
       "iteration": 73,
       "date": "2026-10-30 11:18:32",
       "description": "Gimbal update: bundled gimbal_firmware_1.3.6.ax copied and MD5-checked into /firmware before the Cube is touched; time-limited boot updater install hidden behind a setting. Cockpit video hands over to Solex as soon as Solex connects and comes back when it closes. FENCE_MARGIN 0 restored in the Solo defaults (fixes 'Circle FENCE_MARGIN is greater than FENCE_RADIUS'). Battery tab: BMSOne Configurator card with an offline copy and the BMSOne manual. Version numbers now raised with tools/bump_version.py."
+    },
+    {
+      "version": "1.2.2",
+      "iteration": 74,
+      "date": "2026-10-30 13:55:47",
+      "description": "Gimbal update: the Cube's USB port (SERIAL0_PROTOCOL) runs MAVLink 1 during the update and is set back to 2 afterwards, also after a failed or interrupted run; fixes very slow uploads that hit the time limit when SERIAL0_PROTOCOL was 2."
     }
   ]
 }

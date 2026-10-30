@@ -2215,6 +2215,10 @@ class TestSoloWebUtility(unittest.TestCase):
         for f in ("gimbal_update.py", "cube_mount.py", "gimbal_setup_fixed.py", "loadGimbal_fixed.py",
                   "gimbal_probe.py", "fix_cube_serial.py", "HANDOFF_SoloWebUtility.md"):
             self.assertTrue(os.path.isfile(os.path.join(gdir, f)), f)
+        cm = open(os.path.join(gdir, "cube_mount.py")).read()
+        for needle in ("serial0 = int(sys.argv[3]) if len(sys.argv) > 3 else None", "SERIAL0_PROTOCOL now",
+                       "[CUBE_FAILED] SERIAL0_PROTOCOL not accepted", "[CUBE_DONE]"):
+            self.assertIn(needle, cm)
         for f in ("gimbal_update.py", "cube_mount.py", "gimbal_setup_fixed.py", "loadGimbal_fixed.py"):
             src = open(os.path.join(gdir, f)).read()
             self.assertIsNone(_re.search(r'(?<![\w>\'"])[fF]("[^"\n]*\{|\'[^\'\n]*\{)', src),
@@ -2240,22 +2244,28 @@ class TestSoloWebUtility(unittest.TestCase):
             gu.time.sleep = lambda s: None
 
             class Fake(object):
-                def __init__(self, probes, flashes=(True,), armed=False, mnt=2, fail_mount=None):
+                def __init__(self, probes, flashes=(True,), armed=False, mnt=2, fail_mount=None, serial0=1,
+                             fail_serial0=None):
                     self.probes, self.flashes = list(probes), list(flashes)
                     self.armed, self.mnt, self.fail_mount, self.calls = armed, mnt, fail_mount, []
+                    self.serial0, self.fail_serial0 = serial0, fail_serial0
 
                 def cube_info(self):
                     # the firmware must already be in place and checked before the Cube is touched
                     fw = os.path.join(tmp, "fw", "gimbal_firmware_1.3.6.ax")
                     self.fw_ready = os.path.isfile(fw) and gu._file_md5(fw) == gu.FW_MD5
-                    return {"armed": self.armed, "mnt1_type": self.mnt, "serial0": 1}
+                    return {"armed": self.armed, "mnt1_type": self.mnt, "serial0": self.serial0}
 
-                def set_mount(self, t, settle):
-                    self.calls.append(("mount", t))
+                def set_mount(self, t, settle, serial0=None):
+                    self.calls.append(("mount", t) if serial0 is None else ("mount", t, serial0))
                     if t == self.fail_mount:
-                        return False
+                        return gu.MOUNT_FAILED
                     self.mnt = t
-                    return True
+                    if serial0 is not None:
+                        if serial0 == self.fail_serial0:
+                            return gu.MOUNT_SERIAL0_FAILED
+                        self.serial0 = serial0
+                    return gu.MOUNT_DONE
 
                 def install_setup_fix(self):
                     return gu._install_file(gu.FIXED_SETUP, os.path.join(gu.PATHS["gimbal_dir"], "setup.py"))
@@ -2295,7 +2305,8 @@ class TestSoloWebUtility(unittest.TestCase):
                 fh.write("{}")
             r, st, f = run(Fake([none, old]))
             self.assertEqual(r, "updated")
-            self.assertEqual(f.calls, [("probe",), ("mount", 2), ("mount", 0), ("probe",), ("flash",), ("mount", 2)])
+            self.assertEqual(f.calls, [("probe",), ("mount", 2), ("mount", 0), ("probe",), ("flash",), ("mount", 2, 2)])
+            self.assertEqual(f.serial0, 2)                 # MAVLink 2 on the Cube's USB port afterwards, always
             self.assertTrue(f.fw_ready)
             fw_dst = os.path.join(tmp, "fw", "gimbal_firmware_1.3.6.ax")
             self.assertEqual(f.flashed, fw_dst)
@@ -2344,7 +2355,7 @@ class TestSoloWebUtility(unittest.TestCase):
             r, st, f = run(Fake([none, cur]))
             self.assertEqual(r, "current")
             self.assertNotIn(("flash",), f.calls)
-            self.assertEqual(f.calls[-1], ("mount", 2))
+            self.assertEqual(f.calls[-1], ("mount", 2, 2))
             r, st, f = run(Fake([none, cur]), force=True)
             self.assertEqual(r, "updated")
             self.assertIn(("flash",), f.calls)
@@ -2360,7 +2371,28 @@ class TestSoloWebUtility(unittest.TestCase):
             r, st, f = run(Fake([none, old], flashes=(False, False)))
             self.assertEqual(r, "failed")
             self.assertEqual(f.calls.count(("flash",)), 2)
-            self.assertEqual((f.calls[-1], f.mnt), (("mount", 2), 2))
+            self.assertEqual((f.calls[-1], f.mnt, f.serial0), (("mount", 2, 2), 2, 2))
+            # SERIAL0_PROTOCOL=2 before the run: set to 1 (MNT1_TYPE kept) before the gimbal check, 2 at the end
+            r, st, f = run(Fake([none, old], serial0=2))
+            self.assertEqual(r, "updated")
+            self.assertEqual(f.calls[:2], [("mount", 2, 1), ("probe",)])
+            self.assertEqual((f.calls[-1], f.serial0), (("mount", 2, 2), 2))
+            self.assertIn("SERIAL0_PROTOCOL = 2", "\n".join(st.data["lines"]))
+            # ... also on the bootloader path (step 2 -> step 5)
+            r, st, f = run(Fake([boot], serial0=2))
+            self.assertEqual(f.calls, [("mount", 2, 1), ("probe",), ("flash",), ("mount", 2, 2)])
+            # the Cube refuses SERIAL0_PROTOCOL=1: stops, MNT1_TYPE and SERIAL0_PROTOCOL=2 still restored
+            r, st, f = run(Fake([none, old], serial0=2, fail_serial0=1))
+            self.assertEqual(r, "failed")
+            self.assertNotIn(("probe",), f.calls)
+            self.assertEqual(f.calls[-1], ("mount", 2, 2))
+            self.assertIn("SERIAL0_PROTOCOL=1", st.data["message"])
+            # restore with SERIAL0_PROTOCOL refused: MNT1_TYPE back, reported, note cleared (no reboot loop)
+            r, st, f = run(Fake([none, old], fail_serial0=2))
+            self.assertEqual(r, "failed")
+            self.assertEqual(f.mnt, 2)
+            self.assertIn("SERIAL0_PROTOCOL could NOT be set to 2", st.data["message"])
+            self.assertFalse(os.path.exists(os.path.join(tmp, "state.json")))
             # armed: refused before anything changes
             r, st, f = run(Fake([], armed=True))
             self.assertEqual((r, f.calls), ("failed", []))
@@ -2373,9 +2405,10 @@ class TestSoloWebUtility(unittest.TestCase):
             # restore-only run (web server start after a power loss)
             with open(os.path.join(tmp, "state.json"), "w") as fh:
                 _json.dump({"restore_mnt1_type": 2}, fh)
-            fk = Fake([], mnt=0)
+            fk = Fake([], mnt=0, serial0=1)
             self.assertEqual(gu.run_restore(fk, gu.Status(mode="restore")), "restored")
-            self.assertEqual((fk.mnt, os.path.exists(os.path.join(tmp, "state.json"))), (2, False))
+            self.assertEqual((fk.mnt, fk.serial0, os.path.exists(os.path.join(tmp, "state.json"))), (2, 2, False))
+            self.assertEqual(fk.calls, [("mount", 2, 2)])
 
             # fixed 3DR setup.py installed with LF line endings, original kept once
             setup = open(os.path.join(tmp, "gimbal", "setup.py"), "rb").read()
