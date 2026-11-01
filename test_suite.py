@@ -2675,6 +2675,218 @@ class TestSoloWebUtility(unittest.TestCase):
             (cm.telemetry.cube_version, cm.telemetry.cube_version_time, cm._last_demand[0],
              cm.CUBE_VERSION_RECORD, cm.PIX_VERSION_FILE) = saved
 
+    def test_38_telemetry_resumes_after_cube_only_install(self):
+        """flash_mgr pauses the MAVLink link before flashing the Cube and never un-pauses it. After a Cube Only
+        install (no Solo reboot) the link must come back by itself once flashing has finished, or the Cockpit
+        and the header's ArduCopter version ('checking...') stay dead until the next restart."""
+        import types
+        import time as _time
+        import cockpit_mgr as cm
+        fake = types.ModuleType("flash_mgr")
+        fake.flash_engine = types.SimpleNamespace(is_flashing=True)
+        saved_mod = sys.modules.get("flash_mgr")
+        saved_demand = cm._last_demand[0]
+        sys.modules["flash_mgr"] = fake
+        cl = cm.LiveMAVLinkClient(cm.TelemetryState())
+        try:
+            cm.note_demand()
+            cl.paused = True
+            cl.start()
+            _time.sleep(0.5)
+            self.assertTrue(cl.paused)                     # still flashing: stays paused
+            fake.flash_engine.is_flashing = False
+            for _ in range(30):
+                cm.note_demand()
+                if not cl.paused:
+                    break
+                _time.sleep(0.1)
+            self.assertFalse(cl.paused)                    # flashing over: resumed
+        finally:
+            cl.running = False
+            cm._last_demand[0] = saved_demand
+            if saved_mod is not None:
+                sys.modules["flash_mgr"] = saved_mod
+            else:
+                sys.modules.pop("flash_mgr", None)
+
+    def test_37_factory_reset_partition_tool(self):
+        """Update Factory Reset Partition (bin/golden_update): golden_write.sh backs GOLDEN up, stages and MD5-checks
+        the running boot files, never reformats GOLDEN (keeps .reg), writes each file as .new then renames, deletes
+        the old squashfs first only when there is no room, marks and resumes an unfinished run, restores the backup,
+        and refuses when the files do not fit or the device is not running its system partition. The runner reports
+        what GOLDEN holds; the web server puts it behind login and interlocks."""
+        import hashlib
+        import re
+        import shutil as _shutil
+        import subprocess as _sp
+        import tempfile
+        root = os.path.dirname(os.path.abspath(__file__))
+        gdir = os.path.join(root, "bin", "golden_update")
+        script = os.path.join(gdir, "golden_write.sh")
+        self.assertTrue(os.path.isfile(script))
+        src = open(os.path.join(gdir, "golden_update.py")).read()
+        self.assertNotIn("mkfs", open(script).read().split("Test hooks")[1])       # never reformats GOLDEN
+        sh = _shutil.which("sh") if hasattr(_shutil, "which") else None
+        if sh:
+            tmp = tempfile.mkdtemp()
+            try:
+                boot, gold, log = [os.path.join(tmp, d) for d in ("boot", "golden", "log")]
+                for d in (boot, gold, log):
+                    os.makedirs(d)
+
+                def mk(path, size, seed):
+                    with open(path, "wb") as f:
+                        f.write((hashlib.md5(seed.encode()).digest() * (size // 16 + 1))[:size])
+
+                mk(os.path.join(boot, "u-boot.imx"), 30000, "b1"); mk(os.path.join(boot, "uImage"), 90000, "b2")
+                mk(os.path.join(boot, "imx6solo-3dr-1080p.dtb"), 4000, "b3")
+                mk(os.path.join(boot, "3dr-solo-imx6solo-3dr-1080p.squashfs"), 2000000, "b4")
+                mk(os.path.join(gold, "u-boot.imx"), 30000, "g1"); mk(os.path.join(gold, "uImage"), 88000, "g2")
+                mk(os.path.join(gold, "imx6solo-3dr-1080p.dtb"), 4000, "g3")
+                mk(os.path.join(gold, "3dr-solo-imx6solo-3dr-1080p.squashfs"), 1800000, "g4")
+                with open(os.path.join(gold, ".reg"), "w") as f:
+                    f.write("US\n")
+                old = dict((n, hashlib.md5(open(os.path.join(gold, n), "rb").read()).hexdigest()) for n in os.listdir(gold))
+                env = dict(os.environ, SWU_GOLDEN_TEST="1", GOLDEN_DEV=gold, BOOT_DIR=boot, LOG_DIR=log,
+                           GOLDEN_TEST_TOTAL_KB="2800")    # room for the new set, not for two squashfs
+
+                def run(action, **extra):
+                    e = dict(env); e.update(extra)
+                    p = _sp.Popen([sh, script, action], stdout=_sp.PIPE, stderr=_sp.STDOUT, env=e)
+                    return p.communicate()[0].decode("utf-8", "replace")
+
+                def md5s(d):
+                    return dict((n, hashlib.md5(open(os.path.join(d, n), "rb").read()).hexdigest())
+                                for n in os.listdir(d) if os.path.isfile(os.path.join(d, n)))
+
+                out = run("write")
+                self.assertIn("[GOLDEN_DONE] write", out, out)
+                self.assertIn("removing the old one first", out)          # the only unprotected moment
+                g = md5s(gold)
+                for n, m in md5s(boot).items():
+                    self.assertEqual(g[n], m, n)
+                self.assertEqual(g[".reg"], old[".reg"])                   # not a boot file: kept
+                self.assertFalse([n for n in g if n.endswith(".new")])
+                bk = md5s(os.path.join(log, "golden_backup"))
+                for n, m in old.items():
+                    self.assertEqual(bk[n], m, n)
+                self.assertFalse(os.path.exists(os.path.join(log, "golden_update.marker")))
+                self.assertFalse(os.path.exists(os.path.join(log, "golden_stage")))
+                # status
+                sys.path.insert(0, gdir)
+                try:
+                    import golden_update as gu
+                finally:
+                    sys.path.remove(gdir)
+                st = gu.parse_status(run("status"))
+                self.assertTrue(st["ok"] and st["same_as_running"])
+                self.assertEqual(st["backup_files"], 5)
+                # an interrupted run (marker, squashfs gone): status says so; running again keeps the first backup
+                with open(os.path.join(log, "golden_update.marker"), "w") as f:
+                    f.write("write x\n")
+                os.remove(os.path.join(gold, "3dr-solo-imx6solo-3dr-1080p.squashfs"))
+                st = gu.parse_status(run("status"))
+                self.assertTrue(st["marker"])
+                self.assertIn("Unfinished", st["summary"])
+                out = run("write")
+                self.assertIn("keeping the existing backup", out)
+                self.assertIn("[GOLDEN_DONE] write", out)
+                self.assertEqual(md5s(os.path.join(log, "golden_backup")), bk)
+                # restore puts the old files back
+                out = run("restore")
+                self.assertIn("[GOLDEN_DONE] restore", out, out)
+                self.assertEqual(md5s(gold), old)
+                # does not fit: refused before GOLDEN is touched
+                out = run("write", GOLDEN_TEST_TOTAL_KB="2000")
+                self.assertIn("do not fit", out)
+                self.assertEqual(md5s(gold), old)
+                # not running the system partition
+                fake = os.path.join(tmp, "slc")
+                with open(fake, "w") as f:
+                    f.write("#!/bin/sh\necho golden\n")
+                os.chmod(fake, 0o755)
+                e2 = dict(env); e2.pop("SWU_GOLDEN_TEST"); e2.update(SOLOLINK_CONFIG=fake, GOLDEN_DEV="/nonexistent")
+                p = _sp.Popen([sh, script, "write"], stdout=_sp.PIPE, stderr=_sp.STDOUT, env=e2)
+                self.assertIn("not running its system partition", p.communicate()[0].decode())
+            finally:
+                _shutil.rmtree(tmp, ignore_errors=True)
+
+        # runner: summaries and a job with a fake device
+        sys.path.insert(0, gdir)
+        try:
+            import golden_update as gu
+        finally:
+            sys.path.remove(gdir)
+        out = "\n".join(["[GOLDEN] image latest", "[GOLDEN] backup 5 files",
+                         "[GOLDEN] boot uImage 10 aa", "[GOLDEN] boot x.squashfs 20 bb",
+                         "[GOLDEN] boot_versions os=4.0.0 swu=1.2.4",
+                         "[GOLDEN] space total=89918 used=75210 avail=14708",
+                         "[GOLDEN] golden uImage 10 cc", "[GOLDEN] golden x.squashfs 20 dd", "[GOLDEN] golden .reg 3 ee",
+                         "[GOLDEN] golden_versions os=2.4.2 swu=-", "[GOLDEN_DONE] status"])
+        st = gu.parse_status(out)
+        self.assertEqual((st["summary"], st["same_as_running"]), ("3DR 2.4.2", False))
+        st = gu.parse_status(out.replace(" cc", " aa").replace(" dd", " bb"))
+        self.assertEqual(st["summary"], "Same as the running system (Open Solo 4.0.0 with Solo Web Utility v1.2.4)")
+        tmp = tempfile.mkdtemp()
+        saved = dict(gu.PATHS)
+        try:
+            gu.PATHS.update({"status": os.path.join(tmp, "st.json"), "info": os.path.join(tmp, "info.json"),
+                             "lock": os.path.join(tmp, "lock")})
+            calls = []
+
+            def fake(action, on_line, timeout):
+                calls.append(action)
+                if action == "status":
+                    return out
+                on_line("[GOLDEN] step 4 Writing the factory reset partition")
+                return "[GOLDEN] step 4 x\n[GOLDEN_DONE] write"
+            self.assertEqual(gu.run_job("controller", "write", runner=fake), "done")
+            self.assertEqual(calls, ["write", "status"])                     # always read back afterwards
+            self.assertEqual(gu.get_status()["partitions"]["controller"]["summary"], "3DR 2.4.2")
+
+            def bad(action, on_line, timeout):
+                return "[GOLDEN_FAILED] could not reach the Controller over SSH (x)" if action == "write" else ""
+            self.assertEqual(gu.run_job("controller", "write", runner=bad), "failed")
+            self.assertIn("could not reach the Controller", gu.get_status()["message"])
+            self.assertFalse(gu.get_status()["tested_on_drone"])
+            # both: the Solo first, then the Controller, each on its own (one failing does not stop the other)
+            seen = []
+
+            def per_dev(action, on_line, timeout, _calls=seen):
+                _calls.append(action)
+                if action == "status":
+                    return out
+                return "[GOLDEN_FAILED] boom" if len(_calls) == 1 else "[GOLDEN_DONE] write"
+            self.assertEqual(gu.run_job("both", "write", runner=per_dev), "failed")
+            self.assertEqual(seen, ["write", "status", "write", "status"])
+            st2 = gu.get_status()
+            self.assertIn("Solo: boom", st2["message"])
+            self.assertIn("Controller: the factory reset partition now holds the running system", st2["message"])
+            self.assertEqual(set(st2["partitions"]), {"solo", "controller"})
+            del seen[:]
+            self.assertEqual(gu.run_job("both", "status", runner=lambda a, o, t: out), "done")
+        finally:
+            gu.PATHS.clear(); gu.PATHS.update(saved)
+            _shutil.rmtree(tmp, ignore_errors=True)
+        for f in ("golden_update.py",):
+            s2 = open(os.path.join(gdir, f)).read()
+            self.assertIsNone(re.search(r'(?<![\w>\'"])[fF]("[^"\n]*\{|\'[^\'\n]*\{)', s2), "%s: f-string" % f)
+        # web server and page
+        swa = open(os.path.join(root, "solo_web_app.py")).read()
+        self.assertGreater(swa.index("if path == '/api/golden/status':"), swa.index("# Require Auth for all other API endpoints"))
+        self.assertGreater(swa.index("self._handle_golden_post(path, body)"), swa.index("if not self._is_authenticated(allow_cookie=False):"))
+        self.assertIn("the factory reset partition cannot be changed while the vehicle is ARMED", swa)
+        self.assertIn("GOLDEN_BUSY_BLOCKS = ('/api/flash/start', '/api/firmware/update', '/api/gimbal/start')", swa)
+        golden_post = swa[swa.index("def _handle_golden_post"):swa.index("def _handle_gimbal_post")]
+        self.assertNotIn("battery", golden_post)                       # no battery limit (user's choice)
+        for page in ("static/index.html", "templates/index.html"):
+            html = open(os.path.join(root, page), encoding="utf-8").read()
+            for i in ("goldenCard", "btnGoldenSoloWrite", "btnGoldenControllerWrite", "btnGoldenSoloRestore",
+                      "btnGoldenBothWrite", "btnGoldenBothCheck",
+                      "btnGoldenControllerCheck", "goldenTerminal"):
+                self.assertIn('id="%s"' % i, html)
+        self.assertIn("/api/golden/start", open(os.path.join(root, "static", "app.js"), encoding="utf-8").read())
+
 
 def _struct_float(b4):
     """Pack 4 signed bytes into the float the gimbal sends as GMB_SWVER."""

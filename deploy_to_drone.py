@@ -60,10 +60,10 @@ def get_installer_version():
         vpath = get_local_path("version.json")
         if os.path.exists(vpath):
             with open(vpath, "r") as f:
-                return json.load(f).get("version", "1.2.3")
+                return json.load(f).get("version", "1.2.4")
     except Exception:
         pass
-    return "1.2.3"
+    return "1.2.4"
 
 
 def format_size(n):

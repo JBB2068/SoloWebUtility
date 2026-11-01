@@ -1,2 +1,4 @@
 # Gimbal firmware must stay byte-exact (MD5-checked on the Solo): never convert line endings
 *.ax binary
+# Shell scripts run on the Solo and the Controller: LF only
+*.sh text eol=lf

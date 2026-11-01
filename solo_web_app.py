@@ -87,6 +87,25 @@ def gimbal_update_running():
         return gimbal_update is not None and gimbal_update.running_pid() is not None
     except Exception:
         return False
+
+
+# Factory reset (GOLDEN) partition update for the Solo and the Controller (bin/golden_update/)
+sys.path.insert(0, os.path.join(BASE_DIR, "bin", "golden_update"))
+try:
+    import golden_update
+except Exception as _e:
+    golden_update = None
+    print("[!] Factory reset partition tool unavailable: %s" % _e)
+
+# Endpoints that must wait while a factory reset partition is being written (they change partitions too)
+GOLDEN_BUSY_BLOCKS = ('/api/flash/start', '/api/firmware/update', '/api/gimbal/start')
+
+
+def golden_update_running():
+    try:
+        return golden_update is not None and golden_update.running_pid() is not None
+    except Exception:
+        return False
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 VIEWER_APK_URL = "/sololink_viewer.apk"
 VIEWER_APK_FILE = os.path.join(STATIC_DIR, "sololink_viewer.apk.bin")
@@ -421,6 +440,14 @@ class SoloApiHandler(BaseHTTPRequestHandler):
                 self._send_error("Could not list firmware files: %s" % e, 500)
             return
 
+        # Factory reset partitions (polled by the Firmware Update tab)
+        if path == '/api/golden/status':
+            if golden_update is None:
+                self._send_error("Factory reset partition tool is not installed.", 404)
+                return
+            self._send_json(golden_update.get_status())
+            return
+
         # Gimbal firmware update status (polled by the Firmware Update tab)
         if path == '/api/gimbal/status':
             if gimbal_update is None:
@@ -485,6 +512,44 @@ class SoloApiHandler(BaseHTTPRequestHandler):
             return
 
         self._send_error("Endpoint not found", 404)
+
+    def _handle_golden_post(self, path, body):
+        if golden_update is None:
+            self._send_error("Factory reset partition tool is not installed.", 404)
+            return
+        if path == '/api/golden/reset':
+            if golden_update.reset_status():
+                self._send_json({"success": True, "message": "Status cleared."})
+            else:
+                self._send_error("A factory reset partition job is still running.", 409)
+            return
+        target = body.get('target', '')
+        action = body.get('action', '')
+        if action in ('write', 'restore'):
+            try:
+                if cockpit_mgr.is_vehicle_armed():
+                    self._send_error("SAFETY INTERLOCK: the factory reset partition cannot be changed while the vehicle is ARMED!", 403)
+                    return
+            except Exception:
+                pass
+            if flash_mgr.flash_engine.is_flashing:
+                self._send_error("Firmware flashing is in progress. Wait until it has finished.", 409)
+                return
+            if gimbal_update_running():
+                self._send_error("A gimbal firmware update is running. Wait until it has finished.", 409)
+                return
+            try:
+                if calib_mgr.calib_engine.is_running:
+                    self._send_error("A calibration is running. Wait until it has finished.", 409)
+                    return
+            except Exception:
+                pass
+        ok, msg = golden_update.start(target, action)
+        print("[golden] %s %s requested: %s" % (target, action, msg))
+        if ok:
+            self._send_json({"success": True, "message": msg})
+        else:
+            self._send_error(msg, 409)
 
     def _handle_gimbal_post(self, path, body):
         if gimbal_update is None:
@@ -591,9 +656,19 @@ class SoloApiHandler(BaseHTTPRequestHandler):
             self._send_error("A gimbal firmware update is running. Wait until it has finished.", 409)
             return
 
+        # Writing a factory reset partition: no firmware install or gimbal update meanwhile
+        if path in GOLDEN_BUSY_BLOCKS and golden_update_running():
+            self._send_error("A factory reset partition is being updated. Wait until it has finished.", 409)
+            return
+
         # Gimbal firmware update
         if path in ('/api/gimbal/start', '/api/gimbal/reset', '/api/gimbal/boot-updater'):
             self._handle_gimbal_post(path, body)
+            return
+
+        # Factory reset partitions
+        if path in ('/api/golden/start', '/api/golden/reset'):
+            self._handle_golden_post(path, body)
             return
 
         # Cockpit Action (Mode Change / Disarm / Arm)

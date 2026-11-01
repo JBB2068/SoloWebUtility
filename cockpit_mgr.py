@@ -561,6 +561,12 @@ class LiveMAVLinkClient(threading.Thread):
             if self.state.mavlink_idle:
                 with self.state.lock:
                     self.state.mavlink_idle = False
+            if getattr(self, 'paused', False) and not _flash_running():
+                # flash_mgr pauses this link before flashing the Cube and never un-pauses it. A Full
+                # Install reboots the Solo anyway, but after a Cube Only install the link (and with it
+                # the Cockpit and the header's ArduCopter version) stayed dead until the next restart.
+                self.paused = False
+                print("[telemetry] Cube flashing finished: MAVLink link resumed")
             if getattr(self, 'paused', False):
                 # Telemetry hold released (e.g. during native calibration)
                 if self.sock is not None:
@@ -1418,6 +1424,15 @@ telemetry = TelemetryState()
 mav_client = LiveMAVLinkClient(telemetry)
 video_manager = SoloVideoManager()
 _started = False
+
+
+def _flash_running():
+    """True while flash_mgr is flashing (only checked if flash_mgr is loaded; never imported here)."""
+    fm = sys.modules.get("flash_mgr")
+    try:
+        return bool(fm is not None and fm.flash_engine.is_flashing)
+    except Exception:
+        return False
 
 
 _last_demand = [0.0]

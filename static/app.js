@@ -3323,6 +3323,7 @@ function setUploadProgressVisible(visible) {
             refreshWifiStatus();
             loadFirmwareChoices();
             refreshGimbalStatus();
+            refreshGoldenStatus();
             return;
         }
         appDataStarted = true;
@@ -3337,6 +3338,7 @@ function setUploadProgressVisible(visible) {
         initControllerSetup();
         loadFirmwareChoices();
         refreshGimbalStatus();
+        refreshGoldenStatus();
 
         // Check calibration status on load
         apiRequest('/api/calib/status')
@@ -3577,6 +3579,148 @@ function setUploadProgressVisible(visible) {
                 });
         });
     }
+    // =========================================================================
+    // Factory reset (GOLDEN) partitions of the Solo and the Controller (runs detached on the Solo)
+    // =========================================================================
+    var goldenPollTimer = null;
+    var goldenWasRunning = false;
+    var GOLDEN_NAMES = { solo: 'Solo', controller: 'Controller' };
+
+    function goldenDevKey(t) { return t === 'solo' ? 'Solo' : 'Controller'; }
+
+    function updateGoldenUI(st) {
+        if (!st || !el('goldenCard')) { return; }
+        var running = !!st.running;
+        var parts = st.partitions || {};
+        ['solo', 'controller'].forEach(function (t) {
+            var k = goldenDevKey(t);
+            var info = parts[t];
+            var stateEl = el('golden' + k + 'State');
+            var detEl = el('golden' + k + 'Detail');
+            if (info) {
+                stateEl.textContent = info.summary || 'unknown';
+                stateEl.style.color = info.marker ? 'var(--accent-red, #ef4444)' :
+                    (info.same_as_running ? 'var(--accent-green, #10b981)' : 'var(--accent-amber, #f59e0b)');
+                var sp = info.space || {};
+                var when = info.checked ? new Date(info.checked * 1000).toLocaleString() : '';
+                detEl.textContent = 'Checked ' + when + (sp.total ? ' · ' + Math.round(sp.avail / 1024) + ' of ' +
+                    Math.round(sp.total / 1024) + ' MB free' : '') + (info.backup_files ? ' · backup kept' : '');
+            }
+            var bw = el('btnGolden' + k + 'Write');
+            var bc = el('btnGolden' + k + 'Check');
+            var br = el('btnGolden' + k + 'Restore');
+            if (bw) {
+                bw.disabled = running;
+                bw.textContent = (info && info.marker) ? 'Run update again' : ('Update ' + GOLDEN_NAMES[t]);
+            }
+            if (bc) { bc.disabled = running; }
+            if (br) { br.style.display = (info && info.backup_files) ? '' : 'none'; br.disabled = running; }
+        });
+        ['Check', 'Write'].forEach(function (a) {
+            var b = el('btnGoldenBoth' + a);
+            if (b) { b.disabled = running; }
+        });
+        var badge = el('goldenStatusBadge');
+        var pct = Math.max(0, Math.min(100, st.percent || 0));
+        el('goldenProgressBar').style.width = pct + '%';
+        el('goldenPercentLabel').textContent = pct + '%';
+        var stage = st.label || 'Ready';
+        var dev = st.device || st.target;
+        if (dev && GOLDEN_NAMES[dev] && st.state && st.state !== 'idle' && running) {
+            stage = GOLDEN_NAMES[dev] + (st.device_count > 1 ? ' (' + st.device_index + ' of ' + st.device_count + ')' : '') + ': ' + stage;
+        }
+        if (!running && (st.state === 'idle' || !st.state)) { stage = 'Ready'; }
+        el('goldenStageLabel').textContent = stage;
+        if (running) {
+            badge.textContent = 'Running';
+        } else if (st.state === 'failed') {
+            badge.textContent = 'Stopped';
+        } else if (st.state === 'done') {
+            badge.textContent = 'Done';
+        } else {
+            badge.textContent = 'Ready';
+        }
+        var fail = el('goldenFailBanner');
+        if (fail) {
+            fail.style.display = (!running && st.state === 'failed') ? '' : 'none';
+            if (st.state === 'failed') { el('goldenFailText').textContent = st.message || ''; }
+        }
+        var term = el('goldenTerminal');
+        if (term && st.lines && st.lines.length && (running || goldenWasRunning || st.state !== 'idle')) {
+            var atBottom = term.scrollTop + term.clientHeight >= term.scrollHeight - 20;
+            term.innerHTML = st.lines.map(function (l) { return '<div>' + esc(l) + '</div>'; }).join('');
+            if (atBottom || running) { term.scrollTop = term.scrollHeight; }
+        }
+        goldenWasRunning = running;
+    }
+
+    function refreshGoldenStatus() {
+        if (!el('goldenCard')) { return; }
+        apiRequest('/api/golden/status')
+            .then(function (st) {
+                updateGoldenUI(st);
+                if (st.running) { startGoldenPolling(); }
+                else if (goldenPollTimer) { clearInterval(goldenPollTimer); goldenPollTimer = null; }
+            }).catch(function () {});
+    }
+
+    function startGoldenPolling() {
+        if (goldenPollTimer) { return; }
+        goldenPollTimer = setInterval(function () {
+            if (document.hidden) { return; }
+            refreshGoldenStatus();
+        }, 1500);
+    }
+
+    function startGolden(target, action, question) {
+        if (question && !confirm(question)) { return; }
+        apiRequest('/api/golden/start', 'POST', { target: target, action: action })
+            .then(function () {
+                var term = el('goldenTerminal');
+                if (term) { term.innerHTML = '<div style="color: var(--text-muted);">[System] Starting...</div>'; }
+                goldenWasRunning = true;
+                refreshGoldenStatus();
+                startGoldenPolling();
+            }).catch(function (err) { showToast(err.message, true); });
+    }
+
+    var btnGoldenBothCheck = el('btnGoldenBothCheck');
+    if (btnGoldenBothCheck) { btnGoldenBothCheck.addEventListener('click', function () { startGolden('both', 'status', null); }); }
+    var btnGoldenBothWrite = el('btnGoldenBothWrite');
+    if (btnGoldenBothWrite) {
+        btnGoldenBothWrite.addEventListener('click', function () {
+            startGolden('both', 'write', 'Copy the running system onto the factory reset partitions of BOTH the Solo and the Controller?\n\n' +
+                '- The Solo is done first, then the Controller (a few minutes each).\n' +
+                '- The old recovery files are backed up first and can be put back.\n' +
+                '- Keep both powered until it has finished. Nothing is factory-reset or restarted.\n\n' +
+                'This tool has not yet been tested on a drone.');
+        });
+    }
+
+    ['solo', 'controller'].forEach(function (t) {
+        var k = goldenDevKey(t);
+        var name = GOLDEN_NAMES[t];
+        var bc = el('btnGolden' + k + 'Check');
+        if (bc) { bc.addEventListener('click', function () { startGolden(t, 'status', null); }); }
+        var bw = el('btnGolden' + k + 'Write');
+        if (bw) {
+            bw.addEventListener('click', function () {
+                startGolden(t, 'write', 'Copy the system the ' + name + ' is running now onto its factory reset partition?\n\n' +
+                    '- The old recovery files are backed up first and can be put back.\n' +
+                    '- Keep the ' + name + ' powered until it has finished (a few minutes).\n' +
+                    '- Nothing is factory-reset or restarted.\n\n' +
+                    'This tool has not yet been tested on a drone.');
+            });
+        }
+        var br = el('btnGolden' + k + 'Restore');
+        if (br) {
+            br.addEventListener('click', function () {
+                startGolden(t, 'restore', 'Put the backed-up recovery files back on the ' + name + "'s factory reset partition?\n\n" +
+                    'Keep the ' + name + ' powered until it has finished.');
+            });
+        }
+    });
+
     var btnRestoreGimbalBootUpdater = el('btnRestoreGimbalBootUpdater');
     if (btnRestoreGimbalBootUpdater) {
         btnRestoreGimbalBootUpdater.addEventListener('click', function () {
