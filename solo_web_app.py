@@ -14,6 +14,7 @@ import threading
 import socket
 import signal
 import shutil
+import subprocess
 import mimetypes
 
 # /log/solowebutility.log is this process's stdout (inittab / deploy redirect).
@@ -99,6 +100,71 @@ except Exception as _e:
 
 # Endpoints that must wait while a factory reset partition is being written (they change partitions too)
 GOLDEN_BUSY_BLOCKS = ('/api/flash/start', '/api/firmware/update', '/api/gimbal/start')
+
+
+# ---------------------------------------------------------------------------------------------
+# Uninstall (the page's "Uninstall Web Utility" button). The route used to exist only in app.py,
+# which the Solo does not run (init starts solo_web_app.py), so the button got "Endpoint not found".
+# ---------------------------------------------------------------------------------------------
+UNINSTALL_DIRS = ["/usr/bin/SoloWebUtility2", "/log/SoloWebUtility2", "/home/root/SoloWebUtility2"]
+
+
+def uninstall_utility(inittab="/etc/inittab", rc_local="/etc/rc.local", dirs=None, teardown=True):
+    """Remove the start-up entries now; delete the program folders and stop this server a moment later
+    (after the HTTP answer has gone out). Firmware packages in /log/firmware and the logs are kept.
+    Returns a list of what was done."""
+    done = []
+    if os.path.exists(inittab):
+        try:
+            with open(inittab, "r") as f:
+                lines = f.readlines()
+            keep = [l for l in lines if not l.startswith("SWU:") and "solo_web_app" not in l
+                    and "SoloWebUtility2 web server" not in l]
+            if keep != lines:
+                with open(inittab + ".swu-new", "w") as f:
+                    f.writelines(keep)
+                os.rename(inittab + ".swu-new", inittab)
+                done.append("start-up entry removed from %s" % inittab)
+        except Exception as e:
+            done.append("could not change %s: %s" % (inittab, e))
+    if os.path.exists(rc_local):
+        try:
+            with open(rc_local, "r") as f:
+                lines = f.readlines()
+            keep = [l for l in lines if "SoloWebUtility" not in l and "solo_web_app" not in l]
+            if keep != lines:
+                with open(rc_local, "w") as f:
+                    f.writelines(keep)
+                os.chmod(rc_local, 0o755)
+                done.append("start-up entry removed from %s" % rc_local)
+        except Exception as e:
+            done.append("could not change %s: %s" % (rc_local, e))
+    for legacy in ("/etc/init.d/solowebutility", "/etc/rc5.d/S99solowebutility"):
+        if os.path.exists(legacy):
+            try:
+                os.remove(legacy)
+            except Exception:
+                pass
+    dirs = UNINSTALL_DIRS if dirs is None else dirs
+
+    def _teardown():
+        time.sleep(1.5)                     # let the HTTP answer reach the browser
+        try:
+            subprocess.call("telinit q 2>/dev/null || init q 2>/dev/null || true", shell=True)  # init forgets SWU
+        except Exception:
+            pass
+        for d in dirs:
+            subprocess.call(["rm", "-rf", d])
+        print("[uninstall] Solo Web Utility removed; web server stopping")
+        sys.stdout.flush()
+        os._exit(0)
+
+    if teardown:
+        t = threading.Thread(target=_teardown)
+        t.daemon = True
+        t.start()
+    done.append("program folders %s are deleted and the web server stops in a moment" % ", ".join(dirs))
+    return done
 
 
 def golden_update_running():
@@ -654,6 +720,24 @@ class SoloApiHandler(BaseHTTPRequestHandler):
         # The gimbal update reboots the Cube and uses its USB link: keep other Cube work out
         if path in GIMBAL_BUSY_BLOCKS and gimbal_update_running():
             self._send_error("A gimbal firmware update is running. Wait until it has finished.", 409)
+            return
+
+        # Uninstall the utility (start-up entries, program folders, this server)
+        if path == '/api/uninstall':
+            busy = None
+            if flash_mgr.flash_engine.is_flashing:
+                busy = "Firmware flashing is in progress"
+            elif gimbal_update_running():
+                busy = "A gimbal firmware update is running"
+            elif golden_update_running():
+                busy = "A factory reset partition is being updated"
+            if busy:
+                self._send_error("%s. Wait until it has finished, then uninstall." % busy, 409)
+                return
+            done = uninstall_utility()
+            print("[uninstall] requested from the web page: %s" % "; ".join(done))
+            self._send_json({"success": True, "message": "Solo Web Utility uninstalled. The web server is stopping.",
+                             "done": done})
             return
 
         # Writing a factory reset partition: no firmware install or gimbal update meanwhile

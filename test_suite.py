@@ -2709,6 +2709,37 @@ class TestSoloWebUtility(unittest.TestCase):
             else:
                 sys.modules.pop("flash_mgr", None)
 
+    def test_39_uninstall_and_every_page_endpoint_exists(self):
+        """The Solo runs solo_web_app.py (not app.py): every /api/... path the pages call must be handled there.
+        /api/uninstall was only in app.py, so the Uninstall button got "Endpoint not found". Uninstall removes the
+        start-up entries (other lines kept) and is behind login."""
+        import re as _re
+        import tempfile
+        root = os.path.dirname(os.path.abspath(__file__))
+        js = "".join(open(os.path.join(root, "static", f), encoding="utf-8").read()
+                     for f in ("app.js", "cockpit.js", "index.html"))
+        swa = open(os.path.join(root, "solo_web_app.py"), encoding="utf-8").read()
+        missing = [p for p in sorted(set(_re.findall(r"""['"](/api/[A-Za-z0-9_\-/]+)""", js)))
+                   if ("'%s'" % p) not in swa and ('"%s"' % p) not in swa]
+        self.assertEqual(missing, [])
+        self.assertGreater(swa.index("if path == '/api/uninstall':"), swa.index("if not self._is_authenticated(allow_cookie=False):"))
+        import solo_web_app as swa_mod
+        tmp = tempfile.mkdtemp()
+        try:
+            it, rc = os.path.join(tmp, "inittab"), os.path.join(tmp, "rc.local")
+            with open(it, "w") as f:
+                f.write("id:5:initdefault:\n# SoloWebUtility2 web server on port 80 (respawned by init)\n"
+                        "SWU:345:respawn:/usr/bin/python /usr/bin/SoloWebUtility2/solo_web_app.py >>/log/x 2>&1\nS0:12345:respawn:/bin/getty\n")
+            with open(rc, "w") as f:
+                f.write("#!/bin/sh\npython /log/SoloWebUtility2/solo_web_app.py &\nexit 0\n")
+            done = swa_mod.uninstall_utility(inittab=it, rc_local=rc, dirs=[os.path.join(tmp, "x")], teardown=False)
+            self.assertEqual(open(it).read(), "id:5:initdefault:\nS0:12345:respawn:/bin/getty\n")
+            self.assertEqual(open(rc).read(), "#!/bin/sh\nexit 0\n")
+            self.assertTrue(any("inittab" in d for d in done))
+        finally:
+            import shutil as _sh
+            _sh.rmtree(tmp, ignore_errors=True)
+
     def test_37_factory_reset_partition_tool(self):
         """Update Factory Reset Partition (bin/golden_update): golden_write.sh backs GOLDEN up, stages and MD5-checks
         the running boot files, never reformats GOLDEN (keeps .reg), writes each file as .new then renames, deletes

@@ -1,6 +1,6 @@
 @echo off
 setlocal
-title Build Solo Web Utility v1.2.4 Installer.apk
+title Build Solo Web Utility v1.2.5 Installer.apk
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0..\android_installer\build.ps1"
 if errorlevel 1 (
     echo.

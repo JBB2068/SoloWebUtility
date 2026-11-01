@@ -3354,12 +3354,14 @@ function setUploadProgressVisible(visible) {
         if (btnUninstall) {
             btnUninstall.addEventListener('click', function () {
                 var confirmed = window.confirm(
-                    "Are you sure you want to completely uninstall SoloWebUtility2 from the drone?\n\n" +
+                    "Are you sure you want to uninstall Solo Web Utility from the Solo?\n\n" +
                     "This will:\n" +
-                    "• Remove the auto-start entry from /etc/rc.local\n" +
+                    "• Remove its start-up entry (/etc/inittab)\n" +
                     "• Delete /usr/bin/SoloWebUtility2 and /log/SoloWebUtility2\n" +
-                    "• Stop the web server process\n\n" +
-                    "Click OK to proceed with uninstallation."
+                    "• Stop the web server\n\n" +
+                    "Firmware packages in /log/firmware and the logs are kept. A later Full Install, or a factory reset " +
+                    "after the factory reset partition was updated, installs the utility again.\n\n" +
+                    "Click OK to uninstall."
                 );
                 if (!confirmed) return;
 
@@ -3369,7 +3371,7 @@ function setUploadProgressVisible(visible) {
                 apiRequest('/api/uninstall', 'POST', {})
                     .then(function (res) {
                         showToast("SoloWebUtility2 uninstalled successfully. Server is shutting down.");
-                        document.body.innerHTML = '<div style="display:flex;justify-content:center;align-items:center;height:100vh;background:#0b101b;color:#fca5a5;font-family:sans-serif;text-align:center;"><div><h1>🗑️ SoloWebUtility2 Uninstalled</h1><p style="color:#cbd5e1;margin-top:10px;">The application files and /etc/rc.local startup entry have been completely removed from the drone.</p><p style="color:#94a3b8;margin-top:5px;">The server process has shut down. You may now close this tab.</p></div></div>';
+                        document.body.innerHTML = '<div style="display:flex;justify-content:center;align-items:center;height:100vh;background:#0b101b;color:#fca5a5;font-family:sans-serif;text-align:center;"><div><h1>🗑️ SoloWebUtility2 Uninstalled</h1><p style="color:#cbd5e1;margin-top:10px;">Its start-up entry and program files have been removed from the Solo.</p><p style="color:#94a3b8;margin-top:5px;">The server process has shut down. You may now close this tab.</p></div></div>';
                     })
                     .catch(function (err) {
                         showToast("Uninstall error: " + err.message, 'error');
