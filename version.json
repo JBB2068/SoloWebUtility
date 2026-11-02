@@ -1,7 +1,7 @@
 {
-  "version": "1.2.5",
-  "iteration": 77,
-  "updated_at": 1793560372,
+  "version": "1.2.6",
+  "iteration": 78,
+  "updated_at": 1793650104,
   "changelog": [
     {
       "version": "1.0.67",
@@ -436,6 +436,12 @@
       "iteration": 77,
       "date": "2026-11-01 13:12:52",
       "description": "Uninstall Web Utility button works again (the Solo's web server had no /api/uninstall); test_39 checks every page endpoint exists on the Solo's server."
+    },
+    {
+      "version": "1.2.6",
+      "iteration": 78,
+      "date": "2026-11-02 14:08:24",
+      "description": "Gimbal update back to the v1.2.0 procedure verified on fresh gimbals (reverts v1.2.2 SERIAL0_PROTOCOL switching and v1.2.3 gimbal_set_sysid)."
     }
   ]
 }

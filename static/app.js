@@ -3517,13 +3517,12 @@ function setUploadProgressVisible(visible) {
     var btnStartGimbalUpdate = el('btnStartGimbalUpdate');
     if (btnStartGimbalUpdate) {
         btnStartGimbalUpdate.addEventListener('click', function () {
-            var force = el('chkGimbalForce') && el('chkGimbalForce').checked;
             if (!confirm('Update the gimbal firmware now?\n\n' +
                          '- Props off, Solo on the ground.\n' +
                          '- Do NOT power off the Solo until it has finished (about 5 minutes).\n' +
                          '- The Cube restarts several times and the gimbal will not respond to tilt meanwhile.')) { return; }
             btnStartGimbalUpdate.disabled = true;
-            apiRequest('/api/gimbal/start', 'POST', { force: !!force })
+            apiRequest('/api/gimbal/start', 'POST', {})
                 .then(function () {
                     showToast('🎥 Gimbal update started. Keep the Solo powered on.');
                     gimbalWasRunning = true;

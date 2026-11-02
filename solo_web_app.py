@@ -637,8 +637,8 @@ class SoloApiHandler(BaseHTTPRequestHandler):
                     return
             except Exception:
                 pass
-            ok, msg = gimbal_update.start(force=bool(body.get('force')))
-            print("[gimbal] start requested (force=%s): %s" % (bool(body.get('force')), msg))
+            ok, msg = gimbal_update.start()
+            print("[gimbal] start requested: %s" % msg)
             if ok:
                 self._send_json({"success": True, "message": msg})
             else:
