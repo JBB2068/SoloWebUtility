@@ -721,11 +721,13 @@ The 3DR Solo Web Utility is a free, open-source on-board management console that
 </blockquote>
 <p><strong>Arming:</strong> A two-step confirmation sequence protects against accidental motor arming. The default focus is always on Cancel for safety.</p>
 <p><strong>Units:</strong> Toggle between Metric and Imperial. Preference is remembered across sessions.</p>
-<p><strong>Smart Shots:</strong> 🎬 SMART SHOTS opens a row of shots: Orbit, Cable Cam, Pano, Zip Line, Rewind, Transect and Return Home. Arm and fly, then tap a shot. The Solo's shot manager runs it just as when it is started from Solex, and you fly it with the Controller. Fly on the Controller, or ✋ END SHOT, ends it.</p>
+<p><strong>Smart Shots:</strong> 🎬 SMART SHOTS opens a row of shots: Orbit, Cable Cam, Pano, Zip Line, Rewind, Transect, Return Home, Follow, Selfie and Multipoint Cable Cam. Arm and fly, then tap a shot. The Solo's shot manager runs it just as when it is started from Solex, and you fly it with the Controller. Fly on the Controller, or ✋ END SHOT, ends it.</p>
 <ul>
 <li>Shots start only while the Solo is armed.</li>
 <li>If Solex is connected to the Solo, start shots from Solex; the Cockpit tells you so.</li>
-<li>Selfie, Follow and Multipoint Cable Cam are shown but need Solex (the drawn path, the phone's GPS, attaching to the cable).</li>
+<li><strong>Follow</strong> uses the phone's GPS: open the utility in the SoloLink Viewer app on an Android phone and allow location. FOLLOW works once the phone's GPS is good to 10 m (out in the open). <strong>FOLLOW: HOLD ANGLE</strong> switches between Hold Angle (the Solo keeps its direction from you), Leash (it stays behind you as you move) and Free Look (you aim the camera with the left stick), also while Follow runs. The Solo first turns to you, then follows. Pause on the Controller: it only looks at you; A: it follows again. Keep the app open with the screen on: 2 s without the phone's position ends Follow and the Solo holds in Fly.</li>
+<li><strong>Selfie</strong> starts where the Solo is and flies away from you and up, filming you, then comes back and stops. <strong>&#9881; SELFIE</strong> sets how far away (5&ndash;100 m), how high (0&ndash;50 m) and how fast (1&ndash;8 m/s). It looks at the phone's position when the SoloLink Viewer app is sending one; otherwise at the spot straight ahead of the Solo, as far away as the Solo is high, so point the Solo at yourself first. Pause on the Controller stops it, the sticks move it along the path, Fly ends it. Check that the path out and up is clear.</li>
+<li><strong>Multipoint Cable Cam</strong>: tap MULTIPOINT, fly to each point of the cable and press A on the Controller to record it (camera angle included). B records the last point; the Solo then attaches to the cable right there, and the right stick flies it along the cable while the camera moves between the recorded angles. The Cockpit shows each recorded point. Fly ends it.</li>
 <li>The Solo's shot manager talks to one app at a time. While a shot started from the Cockpit runs, Solex cannot connect; it can again as soon as the shot ends.</li>
 </ul>
 <p><strong>Precision Landing:</strong> the Solo can land on a printed pad. The Cockpit looks for the pad in the live video and sends where it is to the Cube; ArduPilot's own precision landing then steers onto it in LAND, RTL (the Controller's Home button) and Smart RTL, and Precision Loiter holds over it in Fly.</p>
@@ -1476,7 +1478,7 @@ The original Map Tile Provider setting is no longer applicable. Map settings and
 <h3 id="62-smart-shots">6.2 Smart Shots</h3>
 <p>Solo's four different Smart Shots automate flying Solo to make it easy to get stunning aerial video. By default, Cable Cam and Orbit are assigned to the controller's A and B buttons. Use the app to access Selfie or Follow. Smart Shots are available only with the Solo app.</p>
 <blockquote>
-<p><strong>Solo Web Utility:</strong> the Cockpit's 🎬 SMART SHOTS row also starts Orbit, Cable Cam, Pano, Zip Line, Rewind, Transect and Return Home (see 2.8.8 Cockpit HUD and Live Video). Selfie, Follow and Multipoint Cable Cam still need Solex.</p>
+<p><strong>Solo Web Utility:</strong> the Cockpit's 🎬 SMART SHOTS row also starts Orbit, Cable Cam, Pano, Zip Line, Rewind, Transect, Return Home, Follow, Selfie and Multipoint Cable Cam (see 2.8.8 Cockpit HUD and Live Video; Follow uses the phone's GPS through the SoloLink Viewer app).</p>
 </blockquote>
 <blockquote>
 <p><strong>Tip:</strong> When using Smart Shots without a Solo Gimbal, Solo cannot ensure that the subject is in the frame at all times. You can improve the chances of keeping the subject in the frame by adjusting the camera mount so the camera is fixed at an appropriate angle.</p>

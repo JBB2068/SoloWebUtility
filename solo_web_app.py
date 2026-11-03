@@ -786,6 +786,13 @@ class SoloApiHandler(BaseHTTPRequestHandler):
             self._send_json({"ok": ok, "message": msg})
             return
 
+        # The phone's GPS fix (SoloLink Viewer app, through the Cockpit page) for Follow
+        if path == '/api/follow/location':
+            cockpit_mgr.note_demand()
+            ok, msg = cockpit_mgr.pilot_location.report(body)
+            self._send_json({"ok": ok, "message": msg})
+            return
+
 
         # 2. Auth Endpoints
         if path == '/api/auth/logout':

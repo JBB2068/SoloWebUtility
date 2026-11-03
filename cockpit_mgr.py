@@ -252,7 +252,8 @@ class TelemetryState(object):
         self.vdop = 99.99
         self.lat = 0.0
         self.lon = 0.0
-        
+        self.position_time = 0.0          # time.time() of the last GLOBAL_POSITION_INT
+
         # Navigation / Home
         self.home_lat = 0.0
         self.home_lon = 0.0
@@ -797,6 +798,7 @@ class LiveMAVLinkClient(threading.Thread):
                     self.state.alt_rel = round(alt_rel_mm / 1000.0, 1)
                     self.state.heading = round(hdg_cdeg / 100.0, 1)
                     self.state.climb_rate = round(-vz / 100.0, 2)
+                    self.state.position_time = time.time()
                     self.state.update_distance_bearing()
 
                 # VFR_HUD (74)
@@ -1464,8 +1466,10 @@ SHOT_CONNECT_TIMEOUT = 3.0        # connect, then the shot manager's greeting (c
 SHOT_REPLY_TIMEOUT = 4.0          # answer to SET_CURRENT_SHOT
 
 # (id, name, reason it cannot be started here or None). Ids from shotmanager/shots.py.
-# The startable ones are the shots the Controller's A/B buttons can start
+# Most startable ones are the shots the Controller's A/B buttons can start
 # (shots.CAN_START_FROM_ARTOO): once started they are run with the Controller.
+# Follow also needs the pilot's position (PilotLocation, from the SoloLink Viewer app).
+# Selfie and Multipoint need packets an app normally sends; the utility sends them itself.
 SMART_SHOTS = [
     (1, "Orbit", None),
     (2, "Cable Cam", None),
@@ -1474,11 +1478,199 @@ SMART_SHOTS = [
     (8, "Rewind", None),
     (9, "Transect", None),
     (10, "Return Home", None),
-    (0, "Selfie", "needs the path drawn in Solex"),
-    (5, "Follow", "needs the phone's GPS from Solex"),
-    (6, "Multipoint Cable Cam", "needs Solex to attach to the cable"),
+    (5, "Follow", None),
+    (0, "Selfie", None),
+    (6, "Multipoint Cable Cam", None),
 ]
 SMART_SHOT_NAMES = dict((s[0], s[1]) for s in SMART_SHOTS)
+
+# Selfie (shotmanager/selfie.py): the app sends three SOLO_MESSAGE_LOCATION packets on the app
+# connection ('<ddf' lat, lon, alt above home): the start and end of the path, then the point
+# the camera keeps looking at. selfie.py then switches to GUIDED and waits; SOLO_SHOT_OPTIONS
+# ('<f' cruise speed) flies it to the end, back to the start (it turns round by itself) and stops.
+# Pause on the Controller pauses it, the sticks move along the path, Fly ends it.
+SELFIE_SHOT = 0
+SHOT_MSG_SHOT_OPTIONS = 20
+SELFIE_DEFAULTS = {"distance": 30.0, "rise": 15.0, "speed": 3.0}
+SELFIE_LIMITS = {"distance": (5.0, 100.0), "rise": (0.0, 50.0), "speed": (1.0, 8.0)}   # m, m, m/s (MAX_SPEED 8)
+SELFIE_MAX_ALT = 120.0            # m above home: the end of the path is never higher
+SELFIE_MIN_ALT = 2.0              # m: the Solo must be flying
+VEHICLE_POSITION_MAX_AGE = 3.0    # s: older telemetry is not used to plan a shot
+
+# Multipoint Cable Cam (shotmanager/multipoint.py): A on the Controller records a point, B records
+# the last one and builds the cable. The shot manager then sends SOLO_SPLINE_PLAY and every point
+# (SOLO_SPLINE_POINT '<hfIddffffh': version, alt ref, index, lat, lon, alt, pitch, yaw, p, status)
+# and waits for the app's SOLO_SPLINE_ATTACH ('<I' point index): the Solo flies onto the cable
+# there at 2 m/s and reports SOLO_SPLINE_ATTACH back. The utility attaches at the last point,
+# where B left the Solo. On the cable the right stick flies along it.
+MULTIPOINT_SHOT = 6
+SHOT_MSG_SPLINE_RECORD = 50
+SHOT_MSG_SPLINE_PLAY = 51
+SHOT_MSG_SPLINE_POINT = 52
+SHOT_MSG_SPLINE_ATTACH = 57
+MULTIPOINT_ATTACH_DELAY = 0.3     # s after PLAY: all points have arrived by then
+
+
+def _offset_location(lat, lon, north, east):
+    """lat, lon moved north / east metres (flat earth)."""
+    return (lat + math.degrees(north / EARTH_RADIUS),
+            lon + math.degrees(east / (EARTH_RADIUS * math.cos(math.radians(lat)))))
+
+
+def selfie_path(vehicle, subject, distance, rise):
+    """The Selfie path: vehicle {lat, lon, alt, heading} -> ((start), (end), (look at)), each
+    (lat, lon, alt above home). It starts where the Solo is and goes `distance` m further away
+    from the subject (lat, lon) and `rise` m up. subject None: straight ahead of the Solo, as far
+    as it is high (the camera looking down at ~45 deg)."""
+    lat, lon, alt, heading = vehicle["lat"], vehicle["lon"], vehicle["alt"], vehicle["heading"]
+    h = math.radians(heading)
+    if subject is None:
+        ahead = max(alt, 3.0)
+        subject = _offset_location(lat, lon, ahead * math.cos(h), ahead * math.sin(h))
+    north, east = _ground_offset(subject[0], subject[1], lat, lon)
+    away = math.hypot(north, east)
+    if away < 1.0:                     # right over the subject: back away from where it faces
+        un, ue = -math.cos(h), -math.sin(h)
+    else:
+        un, ue = north / away, east / away
+    end = _offset_location(lat, lon, un * distance, ue * distance)
+    end_alt = min(alt + rise, SELFIE_MAX_ALT)
+    return (lat, lon, alt), (end[0], end[1], end_alt), (subject[0], subject[1], 0.0)
+
+
+def vehicle_position(state=None, now=None):
+    """The Solo's position from telemetry {lat, lon, alt (above home), heading}, or None if stale."""
+    state = telemetry if state is None else state
+    now = time.time() if now is None else now
+    with state.lock:
+        if now - getattr(state, "position_time", 0.0) > VEHICLE_POSITION_MAX_AGE or \
+                (state.lat == 0.0 and state.lon == 0.0):
+            return None
+        heading = state.heading if 0.0 <= state.heading <= 360.0 else state.yaw
+        return {"lat": state.lat, "lon": state.lon, "alt": state.alt_rel, "heading": heading}
+
+# Follow (shotmanager/follow.py). The pilot's position goes to follow.py's own UDP socket,
+# not the app connection: '<IIddf' type SOLO_MESSAGE_LOCATION (2), length 20, lat, lon, alt.
+# follow.py reads it every 25 Hz tick and takes the pilot's speed from the step between two
+# ticks divided by the time between the last two packets, so positions must arrive at about
+# that rate: a 1 Hz phone fix is carried forward along its speed and heading in between.
+# Altitude is always 0: the first one is "supposed to have 0 altitude", and later ones move
+# the Solo up and down (phone GPS altitude is too noisy for that).
+# Follow starts in Look At Me (the Solo stays put and only turns to the pilot) until the app
+# sends SOLO_FOLLOW_OPTIONS_V2 ('<fii' cruise speed, look at, follow style) after the first
+# position. follow.py has no timeout of its own: without new positions it keeps aiming at the
+# last one, so the utility ends the shot when the phone goes quiet.
+FOLLOW_SHOT = 5
+SOLO_FOLLOW_PORT = 14558
+SHOT_MSG_LOCATION = 2
+SHOT_MSG_FOLLOW_OPTIONS_V2 = 119
+FOLLOW_STYLES = {"hold": 0, "freelook": 1, "leash": 2}   # follow.py FOLLOW_PREF_*
+FOLLOW_STYLE_NAMES = {"hold": "Hold Angle", "freelook": "Free Look", "leash": "Leash"}
+FOLLOW_SEND_RATE = 25.0           # follow.py's tick rate (shotManagerConstants UPDATE_RATE)
+FOLLOW_OPTIONS_DELAY = 1.5        # s after the first position (the 3DR app waited 3 s)
+FOLLOW_FIX_MAX_AGE = 2.0          # s without a new phone fix: Follow ends / cannot start
+FOLLOW_START_ACCURACY = 10.0      # m: worst phone GPS accuracy Follow starts with
+FOLLOW_RUN_ACCURACY = 20.0        # m: worse than this while it runs ends it
+FOLLOW_PREDICT_MAX = 1.0          # s: a fix is carried forward at most this long
+FOLLOW_PREDICT_MIN_SPEED = 0.5    # m/s: slower counts as standing (GPS speed noise)
+FOLLOW_MAX_PILOT_SPEED = 25.0     # m/s: a faster jump between two fixes is a GPS glitch
+EARTH_RADIUS = 6378137.0
+
+
+def _ground_offset(lat1, lon1, lat2, lon2):
+    """(north, east) metres from point 1 to point 2 (flat earth: fine over a few hundred m)."""
+    dlon = (lon2 - lon1 + 180.0) % 360.0 - 180.0
+    north = math.radians(lat2 - lat1) * EARTH_RADIUS
+    east = math.radians(dlon) * EARTH_RADIUS * math.cos(math.radians((lat1 + lat2) / 2.0))
+    return north, east
+
+
+def pack_follow_location(lat, lon):
+    """One follow.py position packet (UDP 14558), altitude 0."""
+    return struct.pack('<IIddf', SHOT_MSG_LOCATION, 20, lat, lon, 0.0)
+
+
+class PilotLocation(object):
+    """The pilot's position: the phone's GPS fixes, handed to the Cockpit page by the SoloLink
+    Viewer app and posted to /api/follow/location."""
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.fix = None                   # {lat, lon, accuracy, speed, bearing, t (time.time() of the fix)}
+        self.received = 0
+
+    def report(self, data):
+        """One fix: {lat, lon, accuracy (m), speed (m/s), bearing (deg), age_ms}. -> (ok, message)."""
+        if not isinstance(data, dict):
+            return False, "Bad position."
+        lat, lon = _finite(data.get("lat")), _finite(data.get("lon"))
+        accuracy = _finite(data.get("accuracy"))
+        age = _finite(data.get("age_ms", 0))
+        if lat is None or lon is None or not -90.0 <= lat <= 90.0 or not -180.0 <= lon <= 180.0 \
+                or (lat == 0.0 and lon == 0.0):
+            return False, "Bad position."
+        if accuracy is None or accuracy < 0:
+            return False, "The position has no accuracy."
+        if age is None or age < 0 or age > FOLLOW_FIX_MAX_AGE * 1000:
+            return False, "Position too old."
+        speed, bearing = _finite(data.get("speed")), _finite(data.get("bearing"))
+        if speed is None or not 0.0 <= speed <= FOLLOW_MAX_PILOT_SPEED:
+            speed = None
+        if bearing is None or not 0.0 <= bearing <= 360.0:
+            bearing = None
+        t = time.time() - age / 1000.0
+        with self.lock:
+            last = self.fix
+            if last is not None and time.time() - last["t"] < FOLLOW_FIX_MAX_AGE:
+                if t <= last["t"]:
+                    return False, "Position older than the last one."
+                north, east = _ground_offset(last["lat"], last["lon"], lat, lon)
+                jump = math.hypot(north, east) - accuracy - last["accuracy"]
+                if jump > FOLLOW_MAX_PILOT_SPEED * (t - last["t"]):
+                    return False, "Position jumped %.0f m: ignored (GPS glitch)." % math.hypot(north, east)
+            self.fix = {"lat": lat, "lon": lon, "accuracy": accuracy, "speed": speed, "bearing": bearing, "t": t}
+            self.received += 1
+        return True, "ok"
+
+    def problem(self, max_accuracy=FOLLOW_START_ACCURACY, now=None):
+        """Why the position cannot be followed now, or None."""
+        now = time.time() if now is None else now
+        with self.lock:
+            fix = self.fix
+        if fix is None:
+            return "no position from this phone. Open the utility in the SoloLink Viewer app " \
+                   "and allow location (Solex can also run Follow)"
+        if now - fix["t"] > FOLLOW_FIX_MAX_AGE:
+            return "no position from the phone for %.0f s" % (now - fix["t"])
+        if fix["accuracy"] > max_accuracy:
+            return "the phone's GPS is only good to %.0f m (needs %.0f m or better); " \
+                   "wait in the open for a better fix" % (fix["accuracy"], max_accuracy)
+        return None
+
+    def predict(self, max_accuracy=FOLLOW_RUN_ACCURACY, now=None):
+        """Where the pilot is now: the last fix carried forward along its speed and heading.
+        -> ((lat, lon), None) or (None, problem)."""
+        now = time.time() if now is None else now
+        problem = self.problem(max_accuracy, now)
+        if problem:
+            return None, problem
+        with self.lock:
+            fix = dict(self.fix)
+        lat, lon = fix["lat"], fix["lon"]
+        if fix["speed"] is not None and fix["bearing"] is not None and fix["speed"] >= FOLLOW_PREDICT_MIN_SPEED:
+            dist = fix["speed"] * min(max(now - fix["t"], 0.0), FOLLOW_PREDICT_MAX)
+            b = math.radians(fix["bearing"])
+            lat += math.degrees(dist * math.cos(b) / EARTH_RADIUS)
+            lon += math.degrees(dist * math.sin(b) / (EARTH_RADIUS * math.cos(math.radians(lat))))
+        return (lat, lon), None
+
+    def status(self):
+        now = time.time()
+        with self.lock:
+            fix = self.fix
+        problem = self.problem(now=now)
+        return {"ready": problem is None, "problem": problem,
+                "age": round(now - fix["t"], 1) if fix else None,
+                "accuracy": round(fix["accuracy"], 1) if fix else None}
 
 
 def pack_shot_packet(msg_type, fmt, *values):
@@ -1501,14 +1693,24 @@ def split_shot_packets(buf):
 
 class SmartShotClient(object):
     """The utility's connection to the shot manager, open only while a shot it started runs."""
-    def __init__(self, host=SOLO_COPTER_IP, port=SOLO_SHOTMGR_PORT, state=None):
+    def __init__(self, host=SOLO_COPTER_IP, port=SOLO_SHOTMGR_PORT, state=None, pilot=None,
+                 follow_port=SOLO_FOLLOW_PORT, position_fn=None):
         self.host = host
         self.port = port
         self.state = state                # TelemetryState for log messages (None in tests)
+        self.pilot = pilot                # PilotLocation for Follow (None: Follow cannot start)
+        self.follow_port = follow_port
+        self.position_fn = position_fn    # () -> the Solo's position for Selfie (vehicle_position)
+        self.follow_style = "hold"
+        self.selfie = dict(SELFIE_DEFAULTS)
         self.lock = threading.Lock()
+        self.send_lock = threading.Lock() # the HTTP thread and the Follow sender both write to sock
         self.sock = None
         self.current_shot = APP_SHOT_NONE
         self.starting = False
+        self.detail = ""                  # what the running shot is doing / waits for (Multipoint)
+        self.mp_points = {}               # Multipoint: index -> (lat, lon, alt) from SOLO_SPLINE_POINT
+        self.mp_play_time = None          # Multipoint: when PLAY came; attach once the points are in
 
     def _log(self, text, severity=6):
         print("[smartshot] %s" % text)
@@ -1519,7 +1721,49 @@ class SmartShotClient(object):
     def status(self):
         with self.lock:
             shot = self.current_shot if self.sock is not None else APP_SHOT_NONE
-            return {"shot": shot, "name": SMART_SHOT_NAMES.get(shot, ""), "starting": self.starting}
+            return {"shot": shot, "name": SMART_SHOT_NAMES.get(shot, ""), "starting": self.starting,
+                    "follow_style": self.follow_style, "selfie": dict(self.selfie),
+                    "detail": self.detail if shot != APP_SHOT_NONE else ""}
+
+    def _set_detail(self, text, severity=6):
+        with self.lock:
+            self.detail = text
+        self._log(text, severity)
+
+    def set_selfie(self, settings):
+        """{distance, rise (m), speed (m/s)}: any of them, for the next Selfie. -> (ok, message)."""
+        if not isinstance(settings, dict):
+            return False, "Selfie settings: say distance, rise and speed."
+        new = {}
+        for key, (lo, hi) in SELFIE_LIMITS.items():
+            if key in settings:
+                v = _finite(settings[key])
+                if v is None or not lo <= v <= hi:
+                    return False, "Selfie %s must be %g to %g." % (key, lo, hi)
+                new[key] = v
+        with self.lock:
+            self.selfie.update(new)
+            s = dict(self.selfie)
+        return True, "Selfie: %.0f m out, %.0f m up, %.0f m/s." % (s["distance"], s["rise"], s["speed"])
+
+    def _plan_selfie(self):
+        """-> ({path, speed, phone}, None) or (None, why not)."""
+        pos = self.position_fn() if self.position_fn is not None else None
+        if pos is None:
+            return None, "no position from the Solo (is the telemetry link up?)"
+        if pos["alt"] < SELFIE_MIN_ALT:
+            return None, "fly the Solo up first (it is %.1f m above home)" % pos["alt"]
+        subject = None
+        if self.pilot is not None and self.pilot.problem() is None:
+            subject = self.pilot.predict()[0]
+        with self.lock:
+            s = dict(self.selfie)
+        return {"path": selfie_path(pos, subject, s["distance"], s["rise"]), "speed": s["speed"],
+                "phone": subject is not None, "distance": s["distance"], "rise": s["rise"]}, None
+
+    def _send(self, sock, packet):
+        with self.send_lock:
+            sock.sendall(packet)
 
     def _read(self, sock, buf, timeout):
         """Wait up to timeout for packets. -> (packets, buf, closed)."""
@@ -1559,9 +1803,21 @@ class SmartShotClient(object):
                     "Start the shot from that app." % app_ip
             if not armed:
                 return False, "Smart Shots start only while the Solo is armed and flying."
+            if shot_id == FOLLOW_SHOT:
+                problem = self.pilot.problem() if self.pilot is not None else "no position from the phone"
+                if problem:
+                    return False, "Follow cannot start: %s." % problem
             self.starting = True
+            self.detail = ""
+            self.mp_points = {}
+            self.mp_play_time = None
         sock = None
         try:
+            selfie = None
+            if shot_id == SELFIE_SHOT:
+                selfie, problem = self._plan_selfie()
+                if problem:
+                    return False, "Selfie cannot start: %s." % problem
             try:
                 sock = socket.create_connection((self.host, self.port), SHOT_CONNECT_TIMEOUT)
             except (socket.error, OSError) as e:
@@ -1588,11 +1844,26 @@ class SmartShotClient(object):
                             with self.lock:
                                 self.sock = sock
                                 self.current_shot = shot_id
-                            sock = None       # the reader thread owns it now
-                            t = threading.Thread(target=self._reader, args=(self.sock, buf))
+                            held, sock = sock, None       # the reader thread owns it now
+                            t = threading.Thread(target=self._reader, args=(held, buf))
                             t.daemon = True
                             t.start()
                             self._log("Smart Shot started: %s" % name, 5)
+                            if shot_id == SELFIE_SHOT:
+                                return self._fly_selfie(held, selfie)
+                            if shot_id == MULTIPOINT_SHOT:
+                                text = "Multipoint started: fly to each point of the cable and press A on the " \
+                                       "Controller to record it. B records the last point, and the Solo then " \
+                                       "attaches to the cable there; the right stick flies along it."
+                                self._set_detail(text, 5)
+                                return True, text
+                            if shot_id == FOLLOW_SHOT:
+                                t = threading.Thread(target=self._follow_sender, args=(held,))
+                                t.daemon = True
+                                t.start()
+                                return True, "Follow started: the Solo turns to you, then follows (%s). " \
+                                    "Pause on the Controller: look at me only, A: follow again. " \
+                                    "Fly ends it." % FOLLOW_STYLE_NAMES[self.follow_style]
                             return True, "%s started. Fly it with the Controller; Fly ends it." % name
             return False, "%s did not start: no answer from the shot manager." % name
         finally:
@@ -1611,11 +1882,115 @@ class SmartShotClient(object):
         if sock is None:
             return False, "No Smart Shot started from the utility is running. Press Fly on the Controller."
         try:
-            sock.sendall(pack_shot_packet(SHOT_MSG_SET_CURRENT_SHOT, '<i', APP_SHOT_NONE))
+            self._send(sock, pack_shot_packet(SHOT_MSG_SET_CURRENT_SHOT, '<i', APP_SHOT_NONE))
         except (socket.error, OSError) as e:
             self._disconnect(sock)
             return False, "Could not send End Shot (%s). Press Fly on the Controller." % e
         return True, "End Shot sent."
+
+    def _fly_selfie(self, sock, selfie):
+        """Selfie is running: send its path (start, end, look at) and the speed that flies it."""
+        try:
+            for lat, lon, alt in selfie["path"]:
+                self._send(sock, pack_shot_packet(SHOT_MSG_LOCATION, '<ddf', lat, lon, alt))
+            self._send(sock, pack_shot_packet(SHOT_MSG_SHOT_OPTIONS, '<f', selfie["speed"]))
+        except (socket.error, OSError) as e:
+            self.end_shot()
+            return False, "Selfie: could not send the path (%s). Press Fly on the Controller." % e
+        rise = selfie["path"][1][2] - selfie["path"][0][2]
+        text = "Selfie: the Solo flies %.0f m away and %.0f m up at %.0f m/s, looking at %s, then comes back. " \
+               "Pause on the Controller stops it; Fly ends it." % (
+                   selfie["distance"], rise, selfie["speed"],
+                   "you (the phone's position)" if selfie["phone"] else "the spot straight ahead of it")
+        self._set_detail(text, 5)
+        return True, text
+
+    def _multipoint_packet(self, sock, msg_type, value):
+        """What the shot manager tells the app during Multipoint."""
+        if msg_type == SHOT_MSG_SPLINE_POINT and len(value) >= 44:
+            index, lat, lon, alt = struct.unpack('<hfIddffffh', value[:44])[2:6]
+            with self.lock:
+                self.mp_points[index] = (lat, lon, alt)
+                playing = self.mp_play_time is not None
+            if not playing:
+                self._set_detail("Multipoint: point %d recorded. A records another; B records the last "
+                                 "one and attaches to the cable." % (index + 1))
+        elif msg_type == SHOT_MSG_SPLINE_PLAY:
+            with self.lock:
+                self.mp_points = {}       # every point comes again now
+                self.mp_play_time = time.time()
+            self._set_detail("Multipoint: cable made, attaching...")
+        elif msg_type == SHOT_MSG_SPLINE_RECORD:
+            with self.lock:
+                self.mp_points = {}
+                self.mp_play_time = None
+            self._set_detail("Multipoint: no cable could be made from those points (it needs two, at least "
+                             "2.5 m apart). Record them again: A records, B finishes.", 4)
+        elif msg_type == SHOT_MSG_SPLINE_ATTACH:
+            self._set_detail("Multipoint: on the cable. The right stick flies along it; Fly ends the shot.", 5)
+
+    def _multipoint_attach_if_due(self, sock):
+        """Once PLAY's points are in, attach at the last one: where B left the Solo."""
+        with self.lock:
+            due = self.mp_play_time is not None and time.time() - self.mp_play_time >= MULTIPOINT_ATTACH_DELAY
+            index = max(self.mp_points) if due and self.mp_points else None
+            if index is not None:
+                self.mp_play_time = None
+        if index is None:
+            return
+        self._send(sock, pack_shot_packet(SHOT_MSG_SPLINE_ATTACH, '<I', index))
+        self._set_detail("Multipoint: flying onto the cable at point %d..." % (index + 1))
+
+    def _send_follow_options(self, sock, style):
+        """SOLO_FOLLOW_OPTIONS_V2: no cruise, not Look At Me, the follow style."""
+        self._send(sock, pack_shot_packet(SHOT_MSG_FOLLOW_OPTIONS_V2, '<fii', 0.0, 0, FOLLOW_STYLES[style]))
+
+    def set_follow_style(self, style):
+        """hold / leash / freelook: for the next Follow, and the running one. -> (ok, message)."""
+        if style not in FOLLOW_STYLES:
+            return False, "Unknown follow style: %s" % style
+        with self.lock:
+            self.follow_style = style
+            sock = self.sock if self.current_shot == FOLLOW_SHOT else None
+        name = FOLLOW_STYLE_NAMES[style]
+        if sock is None:
+            return True, "Follow style: %s." % name
+        try:
+            self._send_follow_options(sock, style)
+        except (socket.error, OSError) as e:
+            return False, "Could not change the follow style (%s)." % e
+        return True, "Following: %s." % name
+
+    def _follow_sender(self, sock):
+        """While Follow runs: the pilot's position to follow.py FOLLOW_SEND_RATE times a second and,
+        once it has positions, the follow style. Ends the shot when the phone's position is lost."""
+        udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        started = time.time()
+        options_sent = False
+        period = 1.0 / FOLLOW_SEND_RATE
+        next_send = started
+        try:
+            while True:
+                with self.lock:
+                    if self.sock is not sock or self.current_shot != FOLLOW_SHOT:
+                        return
+                    style = self.follow_style
+                pos, problem = self.pilot.predict()
+                if pos is None:
+                    self._log("Follow ended: %s." % problem, 4)
+                    self.end_shot()
+                    return
+                udp.sendto(pack_follow_location(pos[0], pos[1]), (self.host, self.follow_port))
+                if not options_sent and time.time() - started >= FOLLOW_OPTIONS_DELAY:
+                    self._send_follow_options(sock, style)
+                    options_sent = True
+                next_send = max(next_send + period, time.time() - period)   # no burst after a stall
+                time.sleep(max(0.0, next_send - time.time()))
+        except Exception as e:
+            print("[smartshot] follow sender error: %s" % e)
+            self.end_shot()
+        finally:
+            udp.close()
 
     def _disconnect(self, sock):
         with self.lock:
@@ -1635,7 +2010,9 @@ class SmartShotClient(object):
         """Hold the connection while the shot runs; hang up when the shot manager ends it."""
         try:
             while True:
-                packets, buf, closed = self._read(sock, buf, 1.0)
+                with self.lock:
+                    waiting = self.mp_play_time is not None
+                packets, buf, closed = self._read(sock, buf, 0.1 if waiting else 1.0)
                 if closed:
                     break
                 for msg_type, value in packets:
@@ -1650,6 +2027,10 @@ class SmartShotClient(object):
                         with self.lock:
                             if self.sock is sock:
                                 self.current_shot = shot
+                    elif msg_type in (SHOT_MSG_SPLINE_RECORD, SHOT_MSG_SPLINE_PLAY, SHOT_MSG_SPLINE_POINT,
+                                      SHOT_MSG_SPLINE_ATTACH):
+                        self._multipoint_packet(sock, msg_type, value)
+                self._multipoint_attach_if_due(sock)
                 with self.lock:
                     if self.sock is not sock:
                         return
@@ -1807,7 +2188,8 @@ class PrecisionLanding(object):
 telemetry = TelemetryState()
 mav_client = LiveMAVLinkClient(telemetry)
 video_manager = SoloVideoManager()
-smart_shots = SmartShotClient(state=telemetry)
+pilot_location = PilotLocation()
+smart_shots = SmartShotClient(state=telemetry, pilot=pilot_location, position_fn=vehicle_position)
 precland = PrecisionLanding(mav_client, state=telemetry)
 _started = False
 
@@ -1863,6 +2245,7 @@ def get_telemetry_dict(msgs_since=None):
     since that messages_seq (null otherwise) -- what the Cockpit HUD's 10 Hz poll uses."""
     d = telemetry.to_dict()
     d["smart_shot"] = smart_shots.status()
+    d["pilot"] = pilot_location.status()
     d["precland"] = precland.status()
     if msgs_since is not None:
         log = d.pop("mavlink_messages", None)
@@ -1981,7 +2364,8 @@ def is_vehicle_armed(wake=True, wait=2.5):
 
 def handle_action(action, custom_mode=None):
     """
-    Handle flight mode changes, disarming, Smart Shots (start_shot: custom_mode = shot id) and the
+    Handle flight mode changes, disarming, Smart Shots (start_shot: custom_mode = shot id;
+    follow_style: hold / leash / freelook; selfie_settings: {distance, rise, speed}) and the
     precision landing commands (camera_down, camera_paddle, prec_loiter: custom_mode = on/off).
     CRITICAL SAFETY: Arm command execution is strictly controlled and reserved for the user.
     """
@@ -2039,6 +2423,14 @@ def handle_action(action, custom_mode=None):
 
     elif action == "end_shot":
         ok, msg = smart_shots.end_shot()
+        return {"status": "ok" if ok else "error", "message": msg}
+
+    elif action == "follow_style":
+        ok, msg = smart_shots.set_follow_style(str(custom_mode).strip().lower())
+        return {"status": "ok" if ok else "error", "message": msg}
+
+    elif action == "selfie_settings":
+        ok, msg = smart_shots.set_selfie(custom_mode)
         return {"status": "ok" if ok else "error", "message": msg}
 
     elif action in ("camera_down", "camera_paddle"):

@@ -376,10 +376,133 @@
         });
     }
 
+    // Follow: the SoloLink Viewer app hands the page each GPS fix of the phone
+    // (window.soloViewerPilotFix); the server carries it on to the shot manager while Follow runs.
+    const btnFollow = document.getElementById('btnFollow');
+    const btnFollowStyle = document.getElementById('btnFollowStyle');
+    const followNeedsDefault = btnFollow ? btnFollow.dataset.needs : '';
+    const FOLLOW_STYLES = ['hold', 'leash', 'freelook'];
+    const FOLLOW_STYLE_LABELS = { hold: 'HOLD ANGLE', leash: 'LEASH', freelook: 'FREE LOOK' };
+    let pilotFixBusy = false;
+    let pilotFixPending = null;
+
+    function sendPilotFix(fix) {
+        if (pilotFixBusy) {                  // keep only the newest; it goes as soon as this one is done
+            pilotFixPending = fix;
+            return;
+        }
+        pilotFixBusy = true;
+        fetch('/api/follow/location', {
+            method: 'POST',
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify(fix)
+        }).then(function(r) {
+            if (r.status === 401) authRequired();
+        }).catch(function() {}).then(function() {
+            pilotFixBusy = false;
+            const next = pilotFixPending;
+            pilotFixPending = null;
+            if (next) sendPilotFix(next);
+        });
+    }
+    window.soloViewerPilotFix = function(fix) {
+        if (fix && typeof fix.lat === 'number' && typeof fix.lon === 'number') sendPilotFix(fix);
+    };
+
+    function setFollowStyleLabel(style) {
+        if (!btnFollowStyle || !FOLLOW_STYLE_LABELS[style]) return;
+        btnFollowStyle.dataset.style = style;
+        btnFollowStyle.textContent = 'FOLLOW: ' + FOLLOW_STYLE_LABELS[style];
+    }
+
+    if (btnFollowStyle) {
+        btnFollowStyle.addEventListener('click', function(e) {
+            e.stopPropagation();
+            const i = FOLLOW_STYLES.indexOf(btnFollowStyle.dataset.style);
+            const next = FOLLOW_STYLES[(i + 1) % FOLLOW_STYLES.length];
+            setFollowStyleLabel(next);
+            postAction({ action: 'follow_style', mode: next }).then(function(data) {
+                const ok = data && data.status === 'ok';
+                setSmartShotMsg((data && data.message) || 'Could not change the follow style.', !ok);
+            }).catch(function(err) {
+                setSmartShotMsg('Could not change the follow style: ' + err.message, true);
+            });
+        });
+    }
+
+    // Selfie settings (kept by the server, shown here): how far away, how high, how fast
+    const btnSelfieSettings = document.getElementById('btnSelfieSettings');
+    const selfieSettings = document.getElementById('selfieSettings');
+    const selfieInputs = {
+        distance: document.getElementById('selfieDistanceIn'),
+        rise: document.getElementById('selfieRiseIn'),
+        speed: document.getElementById('selfieSpeedIn')
+    };
+    let lastShotDetail = '';
+
+    if (btnSelfieSettings && selfieSettings) {
+        btnSelfieSettings.addEventListener('click', function(e) {
+            e.stopPropagation();
+            selfieSettings.hidden = !selfieSettings.hidden;
+            btnSelfieSettings.setAttribute('aria-expanded', selfieSettings.hidden ? 'false' : 'true');
+            layoutShotRow();
+            layoutOsdBar();
+        });
+        selfieSettings.addEventListener('click', function(e) { e.stopPropagation(); });
+    }
+    Object.keys(selfieInputs).forEach(function(key) {
+        const input = selfieInputs[key];
+        if (!input) return;
+        input.addEventListener('change', function() {
+            const v = parseFloat(input.value);
+            if (!isFinite(v)) return;
+            const body = {};
+            body[key] = v;
+            postAction({ action: 'selfie_settings', mode: body }).then(function(data) {
+                const ok = data && data.status === 'ok';
+                setSmartShotMsg((data && data.message) || 'Could not change the Selfie settings.', !ok);
+            }).catch(function(err) {
+                setSmartShotMsg('Could not change the Selfie settings: ' + err.message, true);
+            });
+        });
+    });
+
+    function updateSelfieSettings(telem) {
+        const s = (telem.smart_shot || {}).selfie;
+        if (!s) return;
+        Object.keys(selfieInputs).forEach(function(key) {
+            const input = selfieInputs[key];
+            if (input && document.activeElement !== input && typeof s[key] === 'number') input.value = s[key];
+        });
+    }
+
+    // FOLLOW is usable only while the server has a good position from this phone
+    function updateFollow(telem) {
+        const ss = telem.smart_shot || {};
+        if (ss.follow_style) setFollowStyleLabel(ss.follow_style);
+        if (!btnFollow) return;
+        const pilot = telem.pilot || {};
+        const ready = !!pilot.ready;
+        btnFollow.classList.toggle('needs-app', !ready);
+        if (ready) {
+            delete btnFollow.dataset.needs;
+            btnFollow.title = 'Follow you (phone GPS good to ' + pilot.accuracy + ' m)';
+        } else {
+            btnFollow.dataset.needs = pilot.problem
+                ? 'Follow cannot start: ' + pilot.problem + '.' : followNeedsDefault;
+            btnFollow.title = btnFollow.dataset.needs;
+        }
+    }
+
     // Telemetry carries the shot the utility started (-1: none)
     function updateSmartShots(telem) {
+        updateFollow(telem);
+        updateSelfieSettings(telem);
         const ss = telem.smart_shot || {};
         const shot = (typeof ss.shot === 'number') ? ss.shot : -1;
+        // what the running shot is doing or waiting for (e.g. Multipoint's recorded points)
+        if (ss.detail && ss.detail !== lastShotDetail) setSmartShotMsg(ss.detail, false);
+        lastShotDetail = ss.detail || '';
         if (shot === lastSmartShot) return;
         if (lastSmartShot !== null && lastSmartShot !== -1 && shot === -1) {
             setSmartShotMsg('Smart Shot ended.', false);

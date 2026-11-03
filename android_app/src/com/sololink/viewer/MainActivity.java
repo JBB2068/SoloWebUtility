@@ -8,6 +8,9 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
+import android.location.Location;
+import android.location.LocationListener;
+import android.location.LocationManager;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
@@ -24,6 +27,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.PatternMatcher;
+import android.os.SystemClock;
 import android.provider.Settings;
 import android.util.Log;
 import android.view.View;
@@ -44,6 +48,7 @@ import android.widget.Toast;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 
 public class MainActivity extends Activity {
 
@@ -52,6 +57,8 @@ public class MainActivity extends Activity {
     private static final String SSID_PREFIX = "sololink_";
     private static final String WIFI_PASSKEY = "sololink";
     private static final int PERMISSION_REQ_CODE = 101;
+    // Phone GPS for the Cockpit's Follow: every fix is handed to the page, which posts it to the Solo
+    private static final long PILOT_GPS_INTERVAL_MS = 200;
 
     // UI elements
     private WebView webView;
@@ -77,6 +84,26 @@ public class MainActivity extends Activity {
     private long backPressedTime = 0;
     private String matchedSsid = null;
     private Runnable pageRetryRunnable;
+    private LocationManager locationManager;
+    private boolean isPilotGpsOn = false;
+
+    // The phone's GPS fixes -> window.soloViewerPilotFix(...) in the page (Cockpit Follow).
+    // All four methods are implemented: before Android 11 they are abstract.
+    private final LocationListener pilotGpsListener = new LocationListener() {
+        @Override
+        public void onLocationChanged(Location loc) {
+            sendPilotFixToPage(loc);
+        }
+
+        @Override
+        public void onStatusChanged(String provider, int status, Bundle extras) {}
+
+        @Override
+        public void onProviderEnabled(String provider) {}
+
+        @Override
+        public void onProviderDisabled(String provider) {}
+    };
 
     private final BroadcastReceiver wifiScanReceiver = new BroadcastReceiver() {
         @Override
@@ -103,6 +130,7 @@ public class MainActivity extends Activity {
 
         wifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
         connectivityManager = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+        locationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
 
         // Check if device is already connected to SoloLink Wi-Fi
         if (checkIfAlreadyConnectedToSoloLink()) {
@@ -117,6 +145,56 @@ public class MainActivity extends Activity {
         } else {
             requestPermissions();
         }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        startPilotGps();
+    }
+
+    @Override
+    protected void onPause() {
+        // Android stops background GPS anyway; the Solo ends Follow 2 s after the last fix
+        stopPilotGps();
+        super.onPause();
+    }
+
+    private void startPilotGps() {
+        if (isPilotGpsOn || locationManager == null
+                || checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            return;
+        }
+        try {
+            // GPS only: network positions can jump tens of metres, and the Solo has no internet anyway
+            locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, PILOT_GPS_INTERVAL_MS, 0f,
+                    pilotGpsListener, Looper.getMainLooper());
+            isPilotGpsOn = true;
+            Log.i(TAG, "Phone GPS on for Follow");
+        } catch (SecurityException | IllegalArgumentException e) {
+            Log.w(TAG, "Phone GPS not available: " + e.getMessage());
+        }
+    }
+
+    private void stopPilotGps() {
+        if (!isPilotGpsOn || locationManager == null) return;
+        try {
+            locationManager.removeUpdates(pilotGpsListener);
+        } catch (Exception ignored) {}
+        isPilotGpsOn = false;
+    }
+
+    private void sendPilotFixToPage(Location loc) {
+        if (!isPageLoaded || webView == null || loc == null || !loc.hasAccuracy()) return;
+        long ageMs = (SystemClock.elapsedRealtimeNanos() - loc.getElapsedRealtimeNanos()) / 1000000L;
+        String js = String.format(Locale.US,
+                "window.soloViewerPilotFix&&window.soloViewerPilotFix({lat:%.8f,lon:%.8f,accuracy:%.1f,"
+                        + "speed:%s,bearing:%s,age_ms:%d})",
+                loc.getLatitude(), loc.getLongitude(), loc.getAccuracy(),
+                loc.hasSpeed() ? String.format(Locale.US, "%.2f", loc.getSpeed()) : "null",
+                loc.hasBearing() ? String.format(Locale.US, "%.1f", loc.getBearing()) : "null",
+                Math.max(0L, ageMs));
+        webView.evaluateJavascript(js, null);
     }
 
     @Override
@@ -333,6 +411,7 @@ public class MainActivity extends Activity {
                 }
             }
             if (allGranted || checkPermissions()) {
+                startPilotGps();
                 startSoloLinkDiscovery();
             } else {
                 updateStatus("Permission Required",
@@ -639,6 +718,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        stopPilotGps();
         if (isRegisteredReceiver) {
             try {
                 unregisterReceiver(wifiScanReceiver);

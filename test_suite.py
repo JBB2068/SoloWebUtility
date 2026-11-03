@@ -2923,8 +2923,8 @@ class TestSoloWebUtility(unittest.TestCase):
 
         # refused without touching the shot manager
         c = cm.SmartShotClient(port=1)
-        self.assertFalse(c.start_shot(0)[0])                                   # Selfie: Solex only
-        self.assertIn("Solex", c.start_shot(5)[1])                             # Follow: Solex only
+        self.assertIn("Selfie cannot start", c.start_shot(0)[1])               # Selfie: no Solo position
+        self.assertIn("Follow cannot start", c.start_shot(5)[1])               # Follow: no phone position
         self.assertIn("Unknown", c.start_shot(4)[1])                           # Record is not a shot
         self.assertIn("10.1.1.145", c.start_shot(1, app_ip="10.1.1.145")[1])   # Solex is connected
         self.assertIn("armed", c.start_shot(1, armed=False)[1])
@@ -2934,7 +2934,8 @@ class TestSoloWebUtility(unittest.TestCase):
         c = cm.SmartShotClient(host="127.0.0.1", port=fake_shotmanager("ok"))
         ok, msg = c.start_shot(1)
         self.assertTrue(ok, msg)
-        self.assertEqual(c.status(), {"shot": 1, "name": "Orbit", "starting": False})
+        self.assertEqual(c.status(), {"shot": 1, "name": "Orbit", "starting": False, "follow_style": "hold",
+                                      "selfie": cm.SELFIE_DEFAULTS, "detail": ""})
         self.assertIn("End it first", c.start_shot(2)[1])
         self.assertTrue(c.end_shot()[0])
         self.assertTrue(wait_for(lambda: c.status()["shot"] == -1))
@@ -3214,6 +3215,323 @@ class TestSoloWebUtility(unittest.TestCase):
         text = out.stdout.decode("utf-8", "replace")
         self.assertEqual(out.returncode, 0, text)
         self.assertIn("SPOTFINDER OK", text)
+
+    def test_43_follow(self):
+        """Cockpit Follow with the phone's GPS: the SoloLink Viewer app hands each fix to the page, which
+        posts it to /api/follow/location. While Follow runs the server sends the position to follow.py's
+        UDP socket (14558, '<IIddf' type 2, altitude 0) 25 times a second, carried forward along the fix's
+        speed and heading; once follow.py has positions it sends SOLO_FOLLOW_OPTIONS_V2 (119) with the
+        follow style, so the shot leaves Look At Me. Without a new fix for 2 s it ends the shot."""
+        import socket as _socket
+        import struct as _struct
+        import time as _time
+        import cockpit_mgr as cm
+        root = os.path.dirname(os.path.abspath(__file__))
+
+        self.assertEqual(cm.pack_follow_location(37.5, -122.25), _struct.pack('<IIddf', 2, 20, 37.5, -122.25, 0.0))
+        self.assertEqual(cm.SMART_SHOT_NAMES[cm.FOLLOW_SHOT], "Follow")
+        self.assertIsNone(dict((s[0], s[2]) for s in cm.SMART_SHOTS)[cm.FOLLOW_SHOT])
+
+        # fixes: nonsense is refused, a good one makes Follow ready
+        pl = cm.PilotLocation()
+        self.assertIn("SoloLink Viewer", pl.problem())
+        for bad in (None, [1], {"lat": 0, "lon": 0, "accuracy": 3}, {"lat": 91, "lon": 0, "accuracy": 3},
+                    {"lat": "x", "lon": 1, "accuracy": 3}, {"lat": 37, "lon": -122},
+                    {"lat": 37, "lon": -122, "accuracy": float("nan")},
+                    {"lat": 37, "lon": -122, "accuracy": 3, "age_ms": 5000}):
+            self.assertFalse(pl.report(bad)[0], bad)
+        self.assertIsNone(pl.fix)
+        self.assertTrue(pl.report({"lat": 37.0, "lon": -122.0, "accuracy": 4.0, "speed": 0.1, "bearing": 90,
+                                   "age_ms": 100})[0])
+        self.assertIsNone(pl.problem())
+        self.assertTrue(pl.status()["ready"])
+        (lat, lon), _ = pl.predict()
+        self.assertEqual((lat, lon), (37.0, -122.0))       # standing: not carried forward
+
+        # a jump faster than a person can move is a GPS glitch
+        _time.sleep(0.05)
+        ok, msg = pl.report({"lat": 37.01, "lon": -122.0, "accuracy": 4.0})
+        self.assertFalse(ok)
+        self.assertIn("jumped", msg)
+        # an older fix than the last is ignored
+        self.assertFalse(pl.report({"lat": 37.0, "lon": -122.0, "accuracy": 4.0, "age_ms": 1500})[0])
+
+        # moving: carried forward along speed and heading (5 m/s north, fix 0.6 s old -> 3 m north)
+        pl = cm.PilotLocation()
+        pl.report({"lat": 37.0, "lon": -122.0, "accuracy": 3.0, "speed": 5.0, "bearing": 0.0, "age_ms": 600})
+        (lat, lon), _ = pl.predict()
+        north, east = cm._ground_offset(37.0, -122.0, lat, lon)
+        self.assertAlmostEqual(north, 3.0, delta=0.2)
+        self.assertAlmostEqual(east, 0.0, delta=0.01)
+        # ... but never more than FOLLOW_PREDICT_MAX
+        (lat, lon), _ = pl.predict(now=pl.fix["t"] + 1.9)
+        self.assertAlmostEqual(cm._ground_offset(37.0, -122.0, lat, lon)[0], 5.0, delta=0.2)
+
+        # poor accuracy: cannot start; gone quiet: cannot run
+        pl.fix["accuracy"] = 14.0
+        self.assertIn("only good to 14 m", pl.problem())
+        self.assertIsNotNone(pl.predict()[0])               # still good enough while it runs
+        pl.fix["t"] -= 3.0
+        self.assertIn("no position from the phone", pl.predict()[1])
+
+        # the whole shot against a fake shot manager and a fake follow.py socket
+        udp = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
+        udp.bind(("127.0.0.1", 0))
+        udp.settimeout(2.0)
+        received = []                                       # (type, value) the shot manager got
+
+        def fake_shotmanager():
+            srv = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+            srv.bind(("127.0.0.1", 0))
+            srv.listen(1)
+
+            def run():
+                conn, _ = srv.accept()
+                try:
+                    conn.sendall(_struct.pack('<IIi', 0, 4, -1))
+                    buf = b""
+                    while True:
+                        data = conn.recv(1024)
+                        if not data:
+                            return
+                        buf += data
+                        got, buf = cm.split_shot_packets(buf)
+                        for msg_type, value in got:
+                            received.append((msg_type, value))
+                            if msg_type == 1:
+                                conn.sendall(_struct.pack('<IIi', 0, 4, _struct.unpack('<i', value)[0]))
+                finally:
+                    conn.close()
+                    srv.close()
+            t = threading.Thread(target=run)
+            t.daemon = True
+            t.start()
+            return srv.getsockname()[1]
+
+        def wait_for(fn, secs=3.0):
+            deadline = _time.time() + secs
+            while _time.time() < deadline and not fn():
+                _time.sleep(0.02)
+            return fn()
+
+        delay = cm.FOLLOW_OPTIONS_DELAY
+        cm.FOLLOW_OPTIONS_DELAY = 0.3
+        try:
+            pl = cm.PilotLocation()
+            c = cm.SmartShotClient(host="127.0.0.1", port=fake_shotmanager(), pilot=pl,
+                                   follow_port=udp.getsockname()[1])
+            self.assertIn("Follow cannot start", c.start_shot(5)[1])            # no fix yet
+            self.assertIsNone(c.sock)
+            self.assertTrue(c.set_follow_style("leash")[0])
+            self.assertFalse(c.set_follow_style("sideways")[0])
+            pl.report({"lat": 37.0, "lon": -122.0, "accuracy": 3.0})
+            ok, msg = c.start_shot(5)
+            self.assertTrue(ok, msg)
+            self.assertIn("Leash", msg)
+
+            # positions arrive at about 25 a second
+            t0 = _time.time()
+            pkts = [udp.recvfrom(64)[0] for _ in range(25)]
+            self.assertLess(_time.time() - t0, 1.6)
+            typ, length, lat, lon, alt = _struct.unpack('<IIddf', pkts[-1])
+            self.assertEqual((typ, length, lat, lon, alt), (2, 20, 37.0, -122.0, 0.0))
+
+            # then the style, so follow.py leaves Look At Me: '<fii' no cruise, not look-at, leash (2)
+            opts = lambda: [v for t, v in received if t == 119]
+            self.assertTrue(wait_for(lambda: opts()), received)
+            self.assertEqual(_struct.unpack('<fii', opts()[0]), (0.0, 0, 2))
+            # changed while it runs: sent at once
+            self.assertIn("Free Look", c.set_follow_style("freelook")[1])
+            self.assertTrue(wait_for(lambda: len(opts()) == 2))
+            self.assertEqual(_struct.unpack('<fii', opts()[1]), (0.0, 0, 1))
+
+            # the phone goes quiet: the shot is ended (shot -1) and the connection released
+            with pl.lock:
+                pl.fix["t"] -= 5.0
+            self.assertTrue(wait_for(lambda: c.status()["shot"] == -1))
+            self.assertIn((1, _struct.pack('<i', -1)), received)
+            self.assertIsNone(c.sock)
+        finally:
+            cm.FOLLOW_OPTIONS_DELAY = delay
+            udp.close()
+
+        # actions, telemetry, route, page, viewer app
+        self.assertIn("Unknown follow style", cm.handle_action("follow_style", "sideways")["message"])
+        self.assertIn("pilot", cm.get_telemetry_dict(msgs_since='none'))
+        self.assertIn("'/api/follow/location'", open(os.path.join(root, "solo_web_app.py")).read())
+        for page in ("static/index.html", "templates/index.html"):
+            html = open(os.path.join(root, page), encoding="utf-8").read()
+            self.assertIn('id="btnFollow"', html, page)
+            self.assertIn('id="btnFollowStyle"', html, page)
+        js = open(os.path.join(root, "static", "cockpit.js"), encoding="utf-8").read()
+        for s in ("window.soloViewerPilotFix", "'/api/follow/location'", "action: 'follow_style'", "updateFollow(telem)"):
+            self.assertIn(s, js)
+        java = open(os.path.join(root, "android_app", "src", "com", "sololink", "viewer", "MainActivity.java")).read()
+        self.assertIn("window.soloViewerPilotFix", java)
+        self.assertIn("LocationManager.GPS_PROVIDER", java)
+
+    def test_44_selfie_and_multipoint(self):
+        """Cockpit Selfie and Multipoint Cable Cam without Solex. Selfie: the server sends selfie.py the start
+        (where the Solo is), the end (further from the subject and up) and the point to look at (the phone's
+        position, or straight ahead of the Solo as far as it is high) as SOLO_MESSAGE_LOCATION, then
+        SOLO_SHOT_OPTIONS with the speed. Multipoint: points are recorded with A / B on the Controller; after the
+        shot manager's SOLO_SPLINE_PLAY and points the server sends SOLO_SPLINE_ATTACH at the last point."""
+        import socket as _socket
+        import struct as _struct
+        import time as _time
+        import cockpit_mgr as cm
+        root = os.path.dirname(os.path.abspath(__file__))
+        reasons = dict((s[0], s[2]) for s in cm.SMART_SHOTS)
+        self.assertIsNone(reasons[cm.SELFIE_SHOT])
+        self.assertIsNone(reasons[cm.MULTIPOINT_SHOT])
+
+        def offset(a, b):
+            return cm._ground_offset(a[0], a[1], b[0], b[1])
+
+        # path away from the phone: the subject 10 m south, so out is north
+        solo = {"lat": 37.0, "lon": -122.0, "alt": 10.0, "heading": 0.0}
+        subject = cm._offset_location(37.0, -122.0, -10.0, 0.0)
+        start, end, look = cm.selfie_path(solo, subject, 30.0, 15.0)
+        self.assertEqual(start, (37.0, -122.0, 10.0))
+        n, e = offset(start, end)
+        self.assertAlmostEqual(n, 30.0, delta=0.05)
+        self.assertAlmostEqual(e, 0.0, delta=0.05)
+        self.assertEqual(end[2], 25.0)
+        self.assertEqual(look, (subject[0], subject[1], 0.0))
+        # no phone: the subject is straight ahead (heading 90 = east), as far as the Solo is high -> out is west
+        start, end, look = cm.selfie_path(dict(solo, heading=90.0), None, 20.0, 5.0)
+        n, e = offset(start, look)
+        self.assertAlmostEqual(e, 10.0, delta=0.05)
+        n, e = offset(start, end)
+        self.assertAlmostEqual(e, -20.0, delta=0.05)
+        # right over the phone: backs away from where it faces; never above SELFIE_MAX_ALT
+        start, end, look = cm.selfie_path(dict(solo, alt=110.0), (37.0, -122.0), 10.0, 50.0)
+        self.assertAlmostEqual(offset(start, end)[0], -10.0, delta=0.05)
+        self.assertEqual(end[2], cm.SELFIE_MAX_ALT)
+
+        # the Solo's position from telemetry: stale or missing -> None; unknown GPS heading -> attitude yaw
+        st = cm.TelemetryState()
+        self.assertIsNone(cm.vehicle_position(st))
+        st.lat, st.lon, st.alt_rel, st.heading, st.yaw = 37.0, -122.0, 12.0, 655.35, 45.0
+        st.position_time = _time.time()
+        self.assertEqual(cm.vehicle_position(st), {"lat": 37.0, "lon": -122.0, "alt": 12.0, "heading": 45.0})
+        self.assertIsNone(cm.vehicle_position(st, now=st.position_time + 10))
+
+        # settings
+        c = cm.SmartShotClient(port=1)
+        self.assertTrue(c.set_selfie({"distance": 40, "speed": 2.5})[0])
+        self.assertEqual(c.selfie, {"distance": 40.0, "rise": 15.0, "speed": 2.5})
+        for bad in ({"distance": 1}, {"rise": 99}, {"speed": "fast"}, None):
+            self.assertFalse(c.set_selfie(bad)[0], bad)
+        self.assertEqual(c.selfie["distance"], 40.0)
+        self.assertIn("no position from the Solo", c.start_shot(0)[1])
+        c.position_fn = lambda: dict(solo, alt=1.0)
+        self.assertIn("fly the Solo up", c.start_shot(0)[1])
+        self.assertIsNone(c.sock)
+
+        def fake_shotmanager():
+            """Answers SET_CURRENT_SHOT; records what it gets; push() sends packets as the shot would."""
+            srv = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+            srv.bind(("127.0.0.1", 0))
+            srv.listen(1)
+            fake = {"got": [], "conn": None}
+
+            def run():
+                conn, _ = srv.accept()
+                fake["conn"] = conn
+                try:
+                    conn.sendall(_struct.pack('<IIi', 0, 4, -1))
+                    buf = b""
+                    while True:
+                        data = conn.recv(1024)
+                        if not data:
+                            return
+                        buf += data
+                        got, buf = cm.split_shot_packets(buf)
+                        for msg_type, value in got:
+                            fake["got"].append((msg_type, value))
+                            if msg_type == 1:
+                                conn.sendall(_struct.pack('<IIi', 0, 4, _struct.unpack('<i', value)[0]))
+                except OSError:
+                    pass
+                finally:
+                    conn.close()
+                    srv.close()
+            t = threading.Thread(target=run)
+            t.daemon = True
+            t.start()
+            fake["port"] = srv.getsockname()[1]
+            fake["push"] = lambda pkt: fake["conn"].sendall(pkt)
+            return fake
+
+        def wait_for(fn, secs=3.0):
+            deadline = _time.time() + secs
+            while _time.time() < deadline and not fn():
+                _time.sleep(0.02)
+            return fn()
+
+        # Selfie: path then speed, on the app connection
+        fake = fake_shotmanager()
+        pl = cm.PilotLocation()
+        pl.report({"lat": subject[0], "lon": subject[1], "accuracy": 4.0})
+        c = cm.SmartShotClient(host="127.0.0.1", port=fake["port"], pilot=pl, position_fn=lambda: dict(solo))
+        ok, msg = c.start_shot(0)
+        self.assertTrue(ok, msg)
+        self.assertIn("looking at you", msg)
+        self.assertTrue(wait_for(lambda: len(fake["got"]) >= 5), fake["got"])
+        types = [t for t, _ in fake["got"]]
+        self.assertEqual(types, [1, 2, 2, 2, 20])
+        sent = [_struct.unpack('<ddf', v) for t, v in fake["got"] if t == 2]
+        expect = cm.selfie_path(solo, pl.predict()[0], 30.0, 15.0)
+        for got, want in zip(sent, expect):
+            self.assertAlmostEqual(got[0], want[0], places=7)
+            self.assertAlmostEqual(got[1], want[1], places=7)
+            self.assertAlmostEqual(got[2], want[2], places=3)
+        self.assertEqual(_struct.unpack('<f', fake["got"][-1][1]), (3.0,))
+        self.assertIn("Selfie", c.status()["detail"])
+        self.assertTrue(c.end_shot()[0])
+        self.assertTrue(wait_for(lambda: c.status()["shot"] == -1))
+
+        # Multipoint: recorded points shown, attached at the last point after PLAY, on the cable after ATTACH
+        def point(i, lat):
+            return _struct.pack('<IIhfIddffffh', 52, 44, 0, 3.0, i, lat, -122.0, 10.0, -20.0, 90.0, 0.0, 0)
+
+        fake = fake_shotmanager()
+        c = cm.SmartShotClient(host="127.0.0.1", port=fake["port"])
+        ok, msg = c.start_shot(6)
+        self.assertTrue(ok, msg)
+        self.assertIn("press A", msg)
+        fake["push"](point(0, 37.0))
+        self.assertTrue(wait_for(lambda: "point 1 recorded" in c.status()["detail"]))
+        # B: last point recorded, then PLAY, durations and every point again
+        fake["push"](point(1, 37.001) + _struct.pack('<II', 51, 0) + _struct.pack('<IIff', 56, 8, 10.0, 60.0) +
+                     point(0, 37.0) + point(1, 37.001))
+        attach = lambda: [v for t, v in fake["got"] if t == 57]
+        self.assertTrue(wait_for(lambda: attach()), fake["got"])
+        self.assertEqual(_struct.unpack('<I', attach()[0]), (1,))
+        self.assertEqual(len(attach()), 1)
+        self.assertIn("flying onto the cable at point 2", c.status()["detail"])
+        fake["push"](_struct.pack('<III', 57, 4, 1))
+        self.assertTrue(wait_for(lambda: "on the cable" in c.status()["detail"]))
+        # the shot manager could not make the cable and went back to recording
+        fake["push"](_struct.pack('<II', 50, 0))
+        self.assertTrue(wait_for(lambda: "Record them again" in c.status()["detail"]))
+        self.assertTrue(c.end_shot()[0])
+        self.assertTrue(wait_for(lambda: c.status()["shot"] == -1))
+        self.assertEqual(c.status()["detail"], "")
+
+        # action, page
+        self.assertIn("must be", cm.handle_action("selfie_settings", {"speed": 50})["message"])
+        for page in ("static/index.html", "templates/index.html"):
+            html = open(os.path.join(root, page), encoding="utf-8").read()
+            row = html[html.index('id="smartShotRow"'):html.index('id="precisionRow"')]
+            self.assertNotIn("needs-app\" type=\"button\" data-shot=\"0\"", row, page)
+            self.assertNotIn("needs-app\" type=\"button\" data-shot=\"6\"", row, page)
+            for i in ("btnSelfieSettings", "selfieDistanceIn", "selfieRiseIn", "selfieSpeedIn"):
+                self.assertIn('id="%s"' % i, row, page)
+        js = open(os.path.join(root, "static", "cockpit.js"), encoding="utf-8").read()
+        for s in ("action: 'selfie_settings'", "updateSelfieSettings(telem)", "ss.detail"):
+            self.assertIn(s, js)
 
 
 def _struct_float(b4):
