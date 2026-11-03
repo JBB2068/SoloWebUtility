@@ -448,6 +448,15 @@ class SoloApiHandler(BaseHTTPRequestHandler):
             self._send_json(cockpit_mgr.get_video_status())
             return
 
+        # Precision landing: is the Cube set up for it (PLND_ENABLED, PLND_TYPE read from the Cube)
+        if path == '/api/precland/check':
+            if gimbal_update_running():
+                self._send_json({"ready": False, "message": "A gimbal firmware update is running."})
+                return
+            values = param_mgr.mgr.read_live(cockpit_mgr.PRECLAND_PARAMS)
+            self._send_json(cockpit_mgr.precland_param_report(values))
+            return
+
         if path == '/api/video/h264':
             viewer = cockpit_mgr.video_manager.subscribe()
             conn = self.connection
@@ -768,6 +777,13 @@ class SoloApiHandler(BaseHTTPRequestHandler):
             mode = body.get('mode', body.get('custom_mode', None))
             res = cockpit_mgr.handle_action(action, mode)
             self._send_json(res)
+            return
+
+        # Landing pad sighting from the Cockpit's pad finder (~10 a second) -> LANDING_TARGET
+        if path == '/api/precland/target':
+            cockpit_mgr.note_demand()
+            ok, msg = cockpit_mgr.precland.report_target(body)
+            self._send_json({"ok": ok, "message": msg})
             return
 
 

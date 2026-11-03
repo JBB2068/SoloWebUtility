@@ -1185,6 +1185,57 @@
                     <button id="btnVoiceToggle" class="btn-ctrl active" type="button" title="Audio Callouts">🔊 AUDIO</button>
                     <button id="btnToggleHud" class="btn-ctrl active" type="button" title="Toggle Glass Overlays">👁️ HUD</button>
                     <button id="btnRestartVideo" class="btn-ctrl" type="button" title="Force Video Reconnect">🔄 RESTART VIDEO</button>
+                    <button id="btnSmartShots" class="btn-ctrl" type="button" title="Smart Shots"
+                            aria-expanded="false" aria-controls="smartShotRow">🎬 SMART SHOTS ▾</button>
+                    <button id="btnPrecision" class="btn-ctrl" type="button" title="Precision Landing on the printed pad"
+                            aria-expanded="false" aria-controls="precisionRow">🎯 PRECISION ▾</button>
+                </div>
+
+                <!-- Smart Shots row (opened by the SMART SHOTS button). The shot manager runs the
+                     shot; once started it is flown with the Controller, and Fly ends it. -->
+                <div id="smartShotRow" class="smart-shot-row" hidden>
+                    <button class="btn-ctrl btn-shot" type="button" data-shot="1">ORBIT</button>
+                    <button class="btn-ctrl btn-shot" type="button" data-shot="2">CABLE CAM</button>
+                    <button class="btn-ctrl btn-shot" type="button" data-shot="7">PANO</button>
+                    <button class="btn-ctrl btn-shot" type="button" data-shot="3">ZIP LINE</button>
+                    <button class="btn-ctrl btn-shot" type="button" data-shot="8">REWIND</button>
+                    <button class="btn-ctrl btn-shot" type="button" data-shot="9">TRANSECT</button>
+                    <button class="btn-ctrl btn-shot" type="button" data-shot="10">RETURN HOME</button>
+                    <button class="btn-ctrl btn-shot needs-app" type="button" data-shot="0"
+                            data-needs="Selfie needs the path drawn in Solex. Start it from Solex.">SELFIE</button>
+                    <button class="btn-ctrl btn-shot needs-app" type="button" data-shot="5"
+                            data-needs="Follow needs the phone's GPS from Solex. Start it from Solex.">FOLLOW</button>
+                    <button class="btn-ctrl btn-shot needs-app" type="button" data-shot="6"
+                            data-needs="Multipoint Cable Cam needs Solex to attach to the cable. Start it from Solex.">MULTIPOINT</button>
+                    <button id="btnEndShot" class="btn-ctrl btn-end-shot" type="button" title="End the Smart Shot (same as Fly on the Controller)" disabled>✋ END SHOT</button>
+                    <span id="smartShotMsg" class="smart-shot-msg" role="status" aria-live="polite">Arm and fly, then pick a shot. Fly on the Controller ends it.</span>
+                </div>
+
+                <!-- Precision Landing row (opened by the PRECISION button). The pad finder looks for the
+                     printed pad in the video; ArduPilot's own precision landing (LAND, RTL, Smart RTL)
+                     and Precision Loiter use what it finds. -->
+                <div id="precisionRow" class="smart-shot-row precision-row" hidden>
+                    <button id="btnPadFinder" class="btn-ctrl" type="button" aria-pressed="false"
+                            title="Look for the landing pad in the video and send it to the Cube">🎯 PAD FINDER: OFF</button>
+                    <button id="btnCameraDown" class="btn-ctrl" type="button"
+                            title="Point the camera straight down. Moving the gimbal paddle takes it back.">⬇ CAMERA DOWN</button>
+                    <button id="btnPrecLoiter" class="btn-ctrl" type="button" aria-pressed="false"
+                            title="ArduPilot Precision Loiter: Fly holds over the pad while it is seen">PREC LOITER: OFF</button>
+                    <button id="btnPrecLand" class="btn-ctrl btn-end-shot" type="button" disabled
+                            title="Switch to LAND: the Solo lands on the pad while the pad finder sees it">🛬 LAND</button>
+                    <button id="btnPadSettings" class="btn-ctrl" type="button" aria-expanded="false"
+                            aria-controls="padSettings">⚙ PAD</button>
+                    <span id="precisionMsg" class="smart-shot-msg" role="status" aria-live="polite">Turn on the pad finder, point the camera down and fly over the pad.</span>
+                    <div id="padSettings" class="pad-settings" hidden>
+                        <label>Pad size <input id="padSizeIn" type="number" min="5" max="400" step="0.5"> <span id="padSizeUnit">in</span></label>
+                        <label>Camera FOV <input id="padFovIn" type="number" min="40" max="170" step="1"> °</label>
+                        <label>Lens <select id="padLensIn">
+                            <option value="fisheye">GoPro (fisheye)</option>
+                            <option value="rectilinear">Rectilinear</option>
+                        </select></label>
+                        <a class="btn-ctrl" href="/landing_pad.html" target="_blank" rel="noopener">📄 PRINT PAD</a>
+                        <span class="smart-shot-msg pad-help">Pad size is the black square's side. If the height shown over the pad reads too high, raise the FOV; too low, lower it.</span>
+                    </div>
                 </div>
             </div>
 
@@ -1193,6 +1244,8 @@
                 <!-- 1. FULLSCREEN BACKGROUND LIVE VIDEO & ARTIFICIAL HORIZON -->
                 <main class="pfd-viewport" id="pfdViewport">
                     <video id="liveVideoFeed" class="live-video-layer" autoplay muted playsinline></video>
+                    <!-- Landing pad outline drawn by the pad finder -->
+                    <canvas id="padOverlay" class="pad-overlay"></canvas>
                     
                     <!-- Video Standby Overlay -->
                     <div id="videoStandbyOverlay" class="video-standby-overlay">
@@ -3764,6 +3817,7 @@ The Solo system has been tested to ensure compliance with IC-mandated limits for
     <div class="toast" id="appToast">Notification</div>
 
     <script src="/jmuxer.min.js?v=1.2.6"></script>
+    <script src="/padfinder.js?v=1.2.6"></script>
     <script src="/cockpit.js?v=1.2.6"></script>
     <script src="/app.js?v=1.2.6"></script>
     <script>

@@ -109,6 +109,21 @@ PRESETS = {
             "PILOT_SPD_DN": 3.0       # m/s pilot descent (Default follows climb, 2.5)
         }
     },
+    "precision_landing": {
+        "id": "precision_landing",
+        "name": "Precision Landing (Cockpit pad finder)",
+        "category": "Precision Landing",
+        "description": "Turns on ArduPilot's precision landing with the target sent over MAVLink by the Cockpit's pad finder (🎯 PRECISION). LAND, RTL and Smart RTL then land on the printed pad while the Cockpit sees it, and Precision Loiter holds over it. Reboot the Cube after applying: ArduPilot only picks these up at boot.",
+        "icon": "🎯",
+        "params": {
+            "PLND_ENABLED": 1,        # Precision landing on (its other PLND_ parameters appear once this is 1)
+            "PLND_TYPE": 1,           # 1: MAVLink LANDING_TARGET (the Cockpit's pad finder)
+            "PLND_EST_TYPE": 1,       # 1: Kalman filter (smooths the camera sightings)
+            "PLND_LAG": 0.25,         # s: video to the phone and back takes ~0.2-0.3 s; 0.25 is the maximum
+            "PLND_XY_DIST_MAX": 2.5,  # m: move over the pad before descending when it is further off than this
+            "PLND_OPTIONS": 2         # bit 1: precision landing resumes after the pilot nudges the Solo in LAND
+        }
+    },
     "bait_drop": {
         "id": "bait_drop",
         "name": "Bait Drop / Payload Release Gripper",

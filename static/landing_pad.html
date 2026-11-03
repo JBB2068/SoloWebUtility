@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Solo Landing Pad</title>
+<style>
+    :root {
+        --bg: #f8fafc;
+        --card: #ffffff;
+        --text: #0f172a;
+        --muted: #475569;
+        --line: #cbd5e1;
+        --accent: #059669;
+    }
+    * { box-sizing: border-box; }
+    body {
+        margin: 0;
+        padding: 16px;
+        background: var(--bg);
+        color: var(--text);
+        font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    main { max-width: 860px; margin: 0 auto; }
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    p { margin: 6px 0; color: var(--muted); }
+    .card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 14px 16px;
+        margin: 14px 0;
+    }
+    .controls { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; }
+    label { font-weight: 600; }
+    input, select, button {
+        font: inherit;
+        padding: 6px 10px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: #fff;
+        color: var(--text);
+    }
+    input { width: 90px; }
+    button { cursor: pointer; font-weight: 700; }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    #preview { display: flex; justify-content: center; padding: 10px 0; }
+    #preview svg { width: min(100%, 420px); height: auto; border: 1px dashed var(--line); }
+    table.cells { border-collapse: collapse; margin-top: 8px; }
+    table.cells td {
+        width: 28px; height: 28px;
+        border: 1px solid var(--line);
+        text-align: center;
+        font: 12px/28px ui-monospace, monospace;
+    }
+    table.cells td.b { background: #000; color: #fff; }
+    ul { margin: 6px 0; padding-left: 20px; color: var(--muted); }
+    @media print {
+        @page { margin: 0.4in; }
+        body { background: #fff; padding: 0; }
+        .no-print { display: none !important; }
+        #preview { padding: 0; }
+        #preview svg { border: none; width: auto; max-width: 100%; max-height: 9.5in; }
+    }
+</style>
+</head>
+<body>
+<main>
+    <div class="no-print">
+        <h1>🎯 Solo Landing Pad</h1>
+        <p>The pad the Cockpit's pad finder looks for. Print it (or paint it) at any size, put it flat on the
+           ground, and enter the black square's side in the Cockpit under 🎯 PRECISION → ⚙ PAD.</p>
+    </div>
+
+    <div class="card no-print">
+        <div class="controls">
+            <label>Black square side
+                <input id="sizeIn" type="number" min="2" max="200" step="0.5" value="24">
+            </label>
+            <select id="unitIn" aria-label="Unit">
+                <option value="in">inches</option>
+                <option value="cm">cm</option>
+            </select>
+            <button id="btnSvg" class="primary" type="button">Download SVG (true size)</button>
+            <button id="btnPrint" type="button">Print</button>
+        </div>
+        <p id="sizeNote"></p>
+    </div>
+
+    <div id="preview" aria-label="Landing pad preview"></div>
+
+    <div class="card no-print">
+        <h2 style="font-size:17px;margin:0 0 4px;">Painting it by hand</h2>
+        <p id="cellNote"></p>
+        <table class="cells" id="cellTable" aria-label="Cell map: B is black, blank is white"></table>
+        <ul>
+            <li>The outer ring of cells is the white margin: keep it, the pad is not found without it.</li>
+            <li>Matte paper or flat paint: a shiny pad reflects the sky and looks white.</li>
+            <li>Keep it flat and weighted down; prop wash lifts a loose sheet.</li>
+            <li>A 24 in (61 cm) pad is found from about 10-15 m up with the GoPro on Wide (less on a slow phone). Bigger pads are found from higher.</li>
+            <li>Printed mirrored or with a wrong cell, the pad is not found at all, so nothing wrong is ever sent to the Solo.</li>
+        </ul>
+    </div>
+</main>
+<script src="/padfinder.js"></script>
+<script>
+(function() {
+    'use strict';
+    var CELLS = 8;                       // 1 white margin + 6 black square + 1 white margin
+    var sizeIn = document.getElementById('sizeIn');
+    var unitIn = document.getElementById('unitIn');
+    var preview = document.getElementById('preview');
+
+    function cellIsBlack(i, j) {         // i = column, j = row, over the 8 x 8 sheet
+        if (i === 0 || j === 0 || i === CELLS - 1 || j === CELLS - 1) return false;     // margin
+        if (i === 1 || j === 1 || i === CELLS - 2 || j === CELLS - 2) return true;      // border
+        return PadFinder.PATTERN[j - 2][i - 2] === 0;
+    }
+
+    function svgText(side, unit) {
+        var cell = side / 6;
+        var total = +(cell * CELLS).toFixed(4);
+        var rects = '';
+        for (var j = 0; j < CELLS; j++) {
+            for (var i = 0; i < CELLS; i++) {
+                if (cellIsBlack(i, j)) rects += '<rect x="' + i + '" y="' + j + '" width="1" height="1"/>';
+            }
+        }
+        return '<svg xmlns="http://www.w3.org/2000/svg" width="' + total + unit + '" height="' + total + unit +
+            '" viewBox="0 0 ' + CELLS + ' ' + CELLS + '" shape-rendering="crispEdges">' +
+            '<rect width="' + CELLS + '" height="' + CELLS + '" fill="#fff"/><g fill="#000">' + rects + '</g></svg>';
+    }
+
+    function render() {
+        var side = parseFloat(sizeIn.value) || 24;
+        var unit = unitIn.value;
+        var cell = side / 6;
+        preview.innerHTML = svgText(side, unit);
+        document.getElementById('sizeNote').textContent =
+            'Black square ' + side + ' ' + unit + ', whole sheet with its white margin ' +
+            (cell * CELLS).toFixed(1) + ' ' + unit + ' square. For a pad bigger than your paper, ' +
+            'take the SVG to a print shop, or paint it from the cell map below.';
+        document.getElementById('cellNote').textContent =
+            'An 8 x 8 grid of ' + cell.toFixed(2) + ' ' + unit + ' cells, B = black. The top row is the top of the pad.';
+        var rows = '';
+        for (var j = 0; j < CELLS; j++) {
+            rows += '<tr>';
+            for (var i = 0; i < CELLS; i++) rows += cellIsBlack(i, j) ? '<td class="b">B</td>' : '<td></td>';
+            rows += '</tr>';
+        }
+        document.getElementById('cellTable').innerHTML = rows;
+    }
+
+    sizeIn.addEventListener('input', render);
+    unitIn.addEventListener('change', render);
+    document.getElementById('btnPrint').addEventListener('click', function() { window.print(); });
+    document.getElementById('btnSvg').addEventListener('click', function() {
+        var side = parseFloat(sizeIn.value) || 24;
+        var blob = new Blob([svgText(side, unitIn.value)], { type: 'image/svg+xml' });
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'solo_landing_pad_' + side + unitIn.value + '.svg';
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(function() { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    });
+    render();
+})();
+</script>
+</body>
+</html>

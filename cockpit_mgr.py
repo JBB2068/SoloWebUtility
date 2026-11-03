@@ -121,6 +121,14 @@ AUTOPILOT_VERSION_MSGID = 148
 AUTOPILOT_VERSION_CRC_EXTRA = 178
 STATUSTEXT_MSGID = 253
 STATUSTEXT_CRC_EXTRA = 83
+LANDING_TARGET_MSGID = 149
+LANDING_TARGET_CRC_EXTRA = 200
+MAV_FRAME_LOCAL_FRD = 20          # level, heading-aligned (ArduPilot 4.7 AC_PrecLand_MAVLink)
+MAV_CMD_DO_MOUNT_CONTROL = 205
+MAV_CMD_DO_AUX_FUNCTION = 218
+MAV_MOUNT_MODE_MAVLINK_TARGETING = 2
+MAV_MOUNT_MODE_RC_TARGETING = 3
+AUX_FUNC_PRECISION_LOITER = 39
 # Messages whose content we act on are only accepted with a valid CRC
 # (STATUSTEXT too: a random 0xFE/0xFD byte must never put garbage text on the OSD bar)
 CHECKED_CRC_EXTRA = {0: HEARTBEAT_CRC_EXTRA, AUTOPILOT_VERSION_MSGID: AUTOPILOT_VERSION_CRC_EXTRA,
@@ -534,6 +542,19 @@ class LiveMAVLinkClient(threading.Thread):
         pkt = self.build_mavlink_v1_packet(11, payload, 89)
         self.send_packet(pkt)
 
+    def send_command_long(self, command, params):
+        """COMMAND_LONG (msg ID 76, CRC extra 152) to the Cube. params: up to 7 floats."""
+        p = [float(x) for x in params] + [0.0] * (7 - len(params))
+        payload = struct.pack('<fffffffHBBB', p[0], p[1], p[2], p[3], p[4], p[5], p[6], int(command), 1, 1, 0)
+        self.send_packet(self.build_mavlink_v1_packet(76, payload, 152))
+
+    def send_landing_target(self, angle_x, angle_y, distance, size_x, size_y):
+        """LANDING_TARGET (msg ID 149, CRC extra 200), MAVLink 1 fields only, in MAV_FRAME_LOCAL_FRD:
+        the Solo's gimbal keeps the camera level, so ArduPilot only has to turn it by the heading."""
+        payload = struct.pack('<QfffffBB', int(time.time() * 1e6) & 0xffffffffffffffff,
+                              angle_x, angle_y, distance, size_x, size_y, 0, MAV_FRAME_LOCAL_FRD)
+        self.send_packet(self.build_mavlink_v1_packet(LANDING_TARGET_MSGID, payload, LANDING_TARGET_CRC_EXTRA))
+
     def _close_socket(self):
         if self.sock is not None:
             try:
@@ -802,7 +823,8 @@ class LiveMAVLinkClient(threading.Thread):
                     if cmd == 520:
                         return   # our own background version request; not shown in the HUD log
                     res_map = {0: "ACCEPTED", 1: "TEMPORARILY_REJECTED", 2: "DENIED", 3: "UNSUPPORTED", 4: "FAILED", 5: "IN_PROGRESS", 6: "CANCELLED"}
-                    cmd_map = {400: "ARM/DISARM", 176: "DO_SET_MODE", 20: "NAV_TAKEOFF", 21: "NAV_LAND", 22: "NAV_RTL"}
+                    cmd_map = {400: "ARM/DISARM", 176: "DO_SET_MODE", 20: "NAV_TAKEOFF", 21: "NAV_LAND", 22: "NAV_RTL",
+                               MAV_CMD_DO_MOUNT_CONTROL: "CAMERA ANGLE", MAV_CMD_DO_AUX_FUNCTION: "PRECISION LOITER"}
                     cname = cmd_map.get(cmd, "CMD_%d" % cmd)
                     rname = res_map.get(result, "CODE_%d" % result)
                     self.state.add_message("ACK: %s -> %s" % (cname, rname), 4 if result != 0 else 6)
@@ -1419,10 +1441,369 @@ class SoloVideoManager(threading.Thread):
             pass
 
 
+# ---------------------------------------------------------------------------
+# Smart Shots
+# Open Solo's shot manager (TCP 5507) runs the Smart Shots. It takes ONE app at a time and
+# rejects a second one from another address, so the utility connects only while a shot it
+# started is running and hangs up as soon as the shot ends -- Solex can connect again then.
+# The shot manager tells the connected app whenever the shot ends (Fly button, mode change,
+# disarm, error) by sending current shot -1. Orbit, Cable Cam, Pano and Zip Line are ended
+# by the shot manager if their app disconnects, so the connection is held for the whole shot.
+# Packets (shotmanager/app_packet.py): little-endian uint32 type, uint32 length, value.
+# ---------------------------------------------------------------------------
+SHOT_MSG_GET_CURRENT_SHOT = 0     # shot manager -> app: '<i' current shot
+SHOT_MSG_SET_CURRENT_SHOT = 1     # app -> shot manager: '<i' shot to enter, -1 ends the shot
+SHOT_MSG_SHOT_ERROR = 21          # shot manager -> app: '<I' why the shot did not start
+SHOT_ERRORS = {
+    0: "the Solo's position estimate (EKF) is not good enough yet",
+    1: "the Solo is not armed",
+    2: "the Solo is in a failsafe",
+}
+APP_SHOT_NONE = -1
+SHOT_CONNECT_TIMEOUT = 3.0        # connect, then the shot manager's greeting (current shot)
+SHOT_REPLY_TIMEOUT = 4.0          # answer to SET_CURRENT_SHOT
+
+# (id, name, reason it cannot be started here or None). Ids from shotmanager/shots.py.
+# The startable ones are the shots the Controller's A/B buttons can start
+# (shots.CAN_START_FROM_ARTOO): once started they are run with the Controller.
+SMART_SHOTS = [
+    (1, "Orbit", None),
+    (2, "Cable Cam", None),
+    (7, "Pano", None),
+    (3, "Zip Line", None),
+    (8, "Rewind", None),
+    (9, "Transect", None),
+    (10, "Return Home", None),
+    (0, "Selfie", "needs the path drawn in Solex"),
+    (5, "Follow", "needs the phone's GPS from Solex"),
+    (6, "Multipoint Cable Cam", "needs Solex to attach to the cable"),
+]
+SMART_SHOT_NAMES = dict((s[0], s[1]) for s in SMART_SHOTS)
+
+
+def pack_shot_packet(msg_type, fmt, *values):
+    """One shot manager packet: '<II' header (type, value length) + struct.pack(fmt, values)."""
+    value = struct.pack(fmt, *values)
+    return struct.pack('<II', msg_type, len(value)) + value
+
+
+def split_shot_packets(buf):
+    """Complete packets in buf -> ([(type, value), ...], leftover bytes)."""
+    packets = []
+    while len(buf) >= 8:
+        msg_type, length = struct.unpack('<II', buf[:8])
+        if len(buf) < 8 + length:
+            break
+        packets.append((msg_type, buf[8:8 + length]))
+        buf = buf[8 + length:]
+    return packets, buf
+
+
+class SmartShotClient(object):
+    """The utility's connection to the shot manager, open only while a shot it started runs."""
+    def __init__(self, host=SOLO_COPTER_IP, port=SOLO_SHOTMGR_PORT, state=None):
+        self.host = host
+        self.port = port
+        self.state = state                # TelemetryState for log messages (None in tests)
+        self.lock = threading.Lock()
+        self.sock = None
+        self.current_shot = APP_SHOT_NONE
+        self.starting = False
+
+    def _log(self, text, severity=6):
+        print("[smartshot] %s" % text)
+        if self.state is not None:
+            with self.state.lock:
+                self.state.add_message(text, severity)
+
+    def status(self):
+        with self.lock:
+            shot = self.current_shot if self.sock is not None else APP_SHOT_NONE
+            return {"shot": shot, "name": SMART_SHOT_NAMES.get(shot, ""), "starting": self.starting}
+
+    def _read(self, sock, buf, timeout):
+        """Wait up to timeout for packets. -> (packets, buf, closed)."""
+        deadline = time.time() + timeout
+        while True:
+            packets, buf = split_shot_packets(buf)
+            left = deadline - time.time()
+            if packets or left <= 0:
+                return packets, buf, False
+            r, _, _ = select.select([sock], [], [], left)
+            if not r:
+                continue
+            try:
+                data = sock.recv(1024)
+            except (socket.error, OSError):
+                data = b""
+            if not data:
+                return [], buf, True
+            buf += data
+
+    def start_shot(self, shot_id, app_ip=None, armed=True):
+        """Start a Smart Shot. app_ip: another app on the shot manager. -> (ok, message)."""
+        name = SMART_SHOT_NAMES.get(shot_id)
+        reason = dict((s[0], s[2]) for s in SMART_SHOTS).get(shot_id)
+        if name is None:
+            return False, "Unknown Smart Shot: %s" % shot_id
+        if reason:
+            return False, "%s %s. Start it from Solex." % (name, reason)
+        with self.lock:
+            if self.starting:
+                return False, "A Smart Shot is already starting."
+            if self.sock is not None:
+                return False, "%s is running. End it first (End Shot, or Fly on the Controller)." % \
+                    SMART_SHOT_NAMES.get(self.current_shot, "A Smart Shot")
+            if app_ip:
+                return False, "Solex (or another app) at %s is connected to the Solo's shot manager. " \
+                    "Start the shot from that app." % app_ip
+            if not armed:
+                return False, "Smart Shots start only while the Solo is armed and flying."
+            self.starting = True
+        sock = None
+        try:
+            try:
+                sock = socket.create_connection((self.host, self.port), SHOT_CONNECT_TIMEOUT)
+            except (socket.error, OSError) as e:
+                return False, "Could not reach the Solo's shot manager (%s)." % e
+            sock.setblocking(0)
+            # the shot manager greets a new app with the current shot, or hangs up if it has one
+            packets, buf, closed = self._read(sock, b"", SHOT_CONNECT_TIMEOUT)
+            if closed:
+                return False, "The shot manager is busy with another app (Solex?). Start the shot from that app."
+            if not packets:
+                return False, "The shot manager did not answer."
+            sock.sendall(pack_shot_packet(SHOT_MSG_SET_CURRENT_SHOT, '<i', shot_id))
+            deadline = time.time() + SHOT_REPLY_TIMEOUT
+            while time.time() < deadline:
+                packets, buf, closed = self._read(sock, buf, deadline - time.time())
+                if closed:
+                    return False, "The shot manager closed the connection."
+                for msg_type, value in packets:
+                    if msg_type == SHOT_MSG_SHOT_ERROR and len(value) >= 4:
+                        code = struct.unpack('<I', value[:4])[0]
+                        return False, "%s did not start: %s." % (name, SHOT_ERRORS.get(code, "error %d" % code))
+                    if msg_type == SHOT_MSG_GET_CURRENT_SHOT and len(value) >= 4:
+                        if struct.unpack('<i', value[:4])[0] == shot_id:
+                            with self.lock:
+                                self.sock = sock
+                                self.current_shot = shot_id
+                            sock = None       # the reader thread owns it now
+                            t = threading.Thread(target=self._reader, args=(self.sock, buf))
+                            t.daemon = True
+                            t.start()
+                            self._log("Smart Shot started: %s" % name, 5)
+                            return True, "%s started. Fly it with the Controller; Fly ends it." % name
+            return False, "%s did not start: no answer from the shot manager." % name
+        finally:
+            if sock is not None:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+            with self.lock:
+                self.starting = False
+
+    def end_shot(self):
+        """Ask the shot manager to end the shot the utility started. -> (ok, message)."""
+        with self.lock:
+            sock = self.sock
+        if sock is None:
+            return False, "No Smart Shot started from the utility is running. Press Fly on the Controller."
+        try:
+            sock.sendall(pack_shot_packet(SHOT_MSG_SET_CURRENT_SHOT, '<i', APP_SHOT_NONE))
+        except (socket.error, OSError) as e:
+            self._disconnect(sock)
+            return False, "Could not send End Shot (%s). Press Fly on the Controller." % e
+        return True, "End Shot sent."
+
+    def _disconnect(self, sock):
+        with self.lock:
+            if self.sock is not sock:
+                return False
+            name = SMART_SHOT_NAMES.get(self.current_shot, "Smart Shot")
+            self.sock = None
+            self.current_shot = APP_SHOT_NONE
+        try:
+            sock.close()
+        except Exception:
+            pass
+        self._log("Smart Shot ended: %s" % name, 5)
+        return True
+
+    def _reader(self, sock, buf):
+        """Hold the connection while the shot runs; hang up when the shot manager ends it."""
+        try:
+            while True:
+                packets, buf, closed = self._read(sock, buf, 1.0)
+                if closed:
+                    break
+                for msg_type, value in packets:
+                    if msg_type == SHOT_MSG_SHOT_ERROR and len(value) >= 4:
+                        code = struct.unpack('<I', value[:4])[0]
+                        self._log("Smart Shot error: %s" % SHOT_ERRORS.get(code, "error %d" % code), 4)
+                    elif msg_type == SHOT_MSG_GET_CURRENT_SHOT and len(value) >= 4:
+                        shot = struct.unpack('<i', value[:4])[0]
+                        if shot == APP_SHOT_NONE:
+                            self._disconnect(sock)
+                            return
+                        with self.lock:
+                            if self.sock is sock:
+                                self.current_shot = shot
+                with self.lock:
+                    if self.sock is not sock:
+                        return
+        except Exception as e:
+            print("[smartshot] reader error: %s" % e)
+        self._disconnect(sock)
+
+
+# ---------------------------------------------------------------------------
+# Precision Landing
+# The Cockpit's pad finder (static/padfinder.js) looks for the printed landing pad in the live
+# video and posts every sighting here; it goes straight on to the Cube as LANDING_TARGET.
+# ArduPilot's own precision landing then uses it in LAND, RTL and SmartRTL, and Precision
+# Loiter in Fly (Loiter). Needs PLND_ENABLED=1, PLND_TYPE=1 (MAVLink) and a Cube reboot.
+# The Solo has no rangefinder, so every sighting carries the distance (from the pad's size).
+# ---------------------------------------------------------------------------
+PRECLAND_MAX_AGE_MS = 300         # an older sighting is not sent (PLND_LAG is at most 0.25 s)
+PRECLAND_SENDING_SECS = 1.0       # ArduPilot drops a target after 1 s without a sighting
+PRECLAND_MAX_ANGLE = 1.4          # rad off the camera axis; no lens on the Solo sees further
+PRECLAND_MIN_DISTANCE = 0.2       # m
+PRECLAND_MAX_DISTANCE = 60.0      # m
+PRECLAND_PARAMS = ("PLND_ENABLED", "PLND_TYPE", "PLND_LAG")
+
+
+def _finite(value):
+    """float(value), or None for anything that is not a finite number."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    if v != v or v in (float("inf"), float("-inf")):
+        return None
+    return v
+
+
+def precland_param_report(values):
+    """Is the Cube set up for precision landing? values: {param: value or None}
+    as read from the Cube. -> {"ready": bool, "message": str}."""
+    enabled = values.get("PLND_ENABLED")
+    ptype = values.get("PLND_TYPE")
+    if enabled is None:
+        return {"ready": False, "message": "Could not read PLND_ENABLED from the Cube. Is it connected?"}
+    if int(enabled) != 1:
+        return {"ready": False, "message": "Precision landing is off on the Cube: apply the Precision Landing "
+                                           "preset (Parameters tab), then reboot the Cube."}
+    if ptype is None or int(ptype) != 1:
+        return {"ready": False, "message": "PLND_TYPE must be 1 (MAVLink): apply the Precision Landing preset "
+                                           "(Parameters tab), then reboot the Cube."}
+    return {"ready": True, "message": "The Cube is set up for precision landing (PLND_TYPE 1, lag %ss). "
+                                      "If you just changed it, reboot the Cube once." %
+                                      ("?" if values.get("PLND_LAG") is None else round(values["PLND_LAG"], 2))}
+
+
+class PrecisionLanding(object):
+    """Pad sightings -> LANDING_TARGET, plus the camera-down and Precision Loiter commands."""
+    def __init__(self, client, state=None):
+        self.client = client              # LiveMAVLinkClient
+        self.state = state                # TelemetryState for log messages (None in tests)
+        self.lock = threading.Lock()
+        self.sent = 0
+        self.last_sent_time = 0.0
+        self.last_distance = None
+        self.seen = False                 # a sighting went out within PRECLAND_SENDING_SECS
+        self.loiter = None                # last Precision Loiter request: True / False / None (never sent)
+        self.camera = None                # last camera request: "down" / "paddle" / None
+        self._rate_count = 0
+        self._rate_time = time.time()
+        self.rate = 0.0
+
+    def _log(self, text, severity=6):
+        print("[precland] %s" % text)
+        if self.state is not None:
+            with self.state.lock:
+                self.state.add_message(text, severity)
+
+    def report_target(self, data):
+        """One sighting from the pad finder: {angle_x, angle_y (rad), distance (m), size (rad), age_ms}.
+        -> (ok, message)."""
+        if not isinstance(data, dict):
+            return False, "Bad sighting."
+        ax, ay, dist = _finite(data.get("angle_x")), _finite(data.get("angle_y")), _finite(data.get("distance"))
+        size = _finite(data.get("size"))
+        age = _finite(data.get("age_ms", 0))
+        if ax is None or ay is None or dist is None or age is None:
+            return False, "Bad sighting."
+        if abs(ax) > PRECLAND_MAX_ANGLE or abs(ay) > PRECLAND_MAX_ANGLE:
+            return False, "Pad angle out of range."
+        if not PRECLAND_MIN_DISTANCE <= dist <= PRECLAND_MAX_DISTANCE:
+            return False, "Pad distance out of range."
+        if age > PRECLAND_MAX_AGE_MS:
+            return False, "Sighting too old."
+        if size is None or size < 0 or size > math.pi:
+            size = 0.0
+        self.client.send_landing_target(ax, ay, dist, size, size)
+        now = time.time()
+        with self.lock:
+            found = not self.seen
+            self.seen = True
+            self.sent += 1
+            self.last_sent_time = now
+            self.last_distance = dist
+            self._rate_count += 1
+        if found:
+            self._log("Landing pad found, %.1f m away: sending it to the Cube" % dist, 5)
+        return True, "sent"
+
+    def status(self):
+        now = time.time()
+        with self.lock:
+            lost = self.seen and now - self.last_sent_time > PRECLAND_SENDING_SECS
+            if lost:
+                self.seen = False
+            if now - self._rate_time >= 1.0:
+                self.rate = round(self._rate_count / (now - self._rate_time), 1)
+                self._rate_count = 0
+                self._rate_time = now
+            st = {"sending": self.seen, "rate": self.rate if self.seen else 0.0, "sent": self.sent,
+                  "distance": round(self.last_distance, 2) if self.seen and self.last_distance else None,
+                  "loiter": self.loiter, "camera": self.camera}
+        if lost:
+            self._log("Landing pad lost: nothing sent to the Cube now", 4)
+        return st
+
+    def set_camera(self, down):
+        """down=True: gimbal straight down (MAVLink targeting). False: back to the Controller's paddle.
+        Moving the paddle also takes the gimbal back (ArduPilot switches to RC targeting)."""
+        if down:
+            self.client.send_command_long(MAV_CMD_DO_MOUNT_CONTROL,
+                                          [-90.0, 0.0, 0.0, 0.0, 0.0, 0.0, MAV_MOUNT_MODE_MAVLINK_TARGETING])
+        else:
+            self.client.send_command_long(MAV_CMD_DO_MOUNT_CONTROL,
+                                          [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, MAV_MOUNT_MODE_RC_TARGETING])
+        with self.lock:
+            self.camera = "down" if down else "paddle"
+        self._log("Camera: straight down" if down else "Camera: back on the Controller's paddle", 6)
+        return True, ("Camera pointed straight down. Moving the gimbal paddle takes it back." if down
+                      else "The gimbal paddle controls the camera again.")
+
+    def set_precision_loiter(self, on):
+        """ArduPilot's Precision Loiter aux function (39) over MAVLink: high = on, low = off."""
+        self.client.send_command_long(MAV_CMD_DO_AUX_FUNCTION, [AUX_FUNC_PRECISION_LOITER, 2 if on else 0])
+        with self.lock:
+            self.loiter = bool(on)
+        self._log("Precision Loiter %s" % ("on" if on else "off"), 5)
+        return True, ("Precision Loiter on: Fly holds over the pad while it is seen; the sticks still move the Solo."
+                      if on else "Precision Loiter off.")
+
+
 # Global singletons
 telemetry = TelemetryState()
 mav_client = LiveMAVLinkClient(telemetry)
 video_manager = SoloVideoManager()
+smart_shots = SmartShotClient(state=telemetry)
+precland = PrecisionLanding(mav_client, state=telemetry)
 _started = False
 
 
@@ -1476,6 +1857,8 @@ def get_telemetry_dict(msgs_since=None):
     msgs_since=<int>: the log is sent once, as mavlink_messages, and only when it changed
     since that messages_seq (null otherwise) -- what the Cockpit HUD's 10 Hz poll uses."""
     d = telemetry.to_dict()
+    d["smart_shot"] = smart_shots.status()
+    d["precland"] = precland.status()
     if msgs_since is not None:
         log = d.pop("mavlink_messages", None)
         d.pop("messages", None)
@@ -1593,7 +1976,8 @@ def is_vehicle_armed(wake=True, wait=2.5):
 
 def handle_action(action, custom_mode=None):
     """
-    Handle flight mode changes and disarming.
+    Handle flight mode changes, disarming, Smart Shots (start_shot: custom_mode = shot id) and the
+    precision landing commands (camera_down, camera_paddle, prec_loiter: custom_mode = on/off).
     CRITICAL SAFETY: Arm command execution is strictly controlled and reserved for the user.
     """
     if action == "set_mode":
@@ -1636,5 +2020,31 @@ def handle_action(action, custom_mode=None):
         mav_client.send_arm_command(True)
         telemetry.add_message("Dispatched: ARM MOTORS", 4)
         return {"status": "ok", "message": "Arm command dispatched"}
+
+    elif action == "start_shot":
+        try:
+            shot_id = int(custom_mode)
+        except (TypeError, ValueError):
+            return {"status": "error", "message": "Invalid Smart Shot: %s" % str(custom_mode)}
+        ok, msg = smart_shots.start_shot(shot_id, app_ip=find_app_on_shotmanager(),
+                                         armed=is_vehicle_armed(wake=True))
+        if not ok:
+            telemetry.add_message("Smart Shot: %s" % msg, 4)
+        return {"status": "ok" if ok else "error", "message": msg}
+
+    elif action == "end_shot":
+        ok, msg = smart_shots.end_shot()
+        return {"status": "ok" if ok else "error", "message": msg}
+
+    elif action in ("camera_down", "camera_paddle"):
+        ok, msg = precland.set_camera(action == "camera_down")
+        return {"status": "ok" if ok else "error", "message": msg}
+
+    elif action == "prec_loiter":
+        on = str(custom_mode).strip().lower()
+        if on not in ("on", "off"):
+            return {"status": "error", "message": "Precision Loiter: say on or off."}
+        ok, msg = precland.set_precision_loiter(on == "on")
+        return {"status": "ok" if ok else "error", "message": msg}
 
     return {"status": "error", "message": "Unknown action"}

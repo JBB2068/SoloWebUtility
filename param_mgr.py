@@ -670,7 +670,7 @@ def _write_order(names):
     """Feature switches first (their sub-parameters only exist once the feature is enabled),
     then everything else; deterministic on Python 2.7, whose dicts have no stable order."""
     def key(n):
-        first = n.endswith("_ENABLE") or n.endswith("_TYPE") or n == "BATT_MONITOR"
+        first = n.endswith("_ENABLE") or n.endswith("_ENABLED") or n.endswith("_TYPE") or n == "BATT_MONITOR"
         return (0 if first else 1, n)
     return sorted(names, key=key)
 
@@ -1059,6 +1059,25 @@ class ParameterManager(object):
             except Exception:
                 pass
         return None
+
+    def read_live(self, names):
+        """Read a few parameters straight from the Cube. -> {name: value or None}; all None when
+        the Cube cannot be reached. A name the Cube does not have (or hides) reads as None."""
+        values = dict((_clean_name(n).upper(), None) for n in names)
+        mav = self._get_mavlink_connection(timeout=4.0)
+        if not mav:
+            return values
+        try:
+            for name in list(values.keys()):
+                found = read_param_mavlink(mav, name)
+                if found is not None:
+                    values[name] = found[0]
+        finally:
+            try:
+                mav.close()
+            except Exception:
+                pass
+        return values
 
     def fetch_live_mavlink(self, timeout=30.0, progress_callback=None):
         """Fetch all live parameters: MAVFTP @PARAM/param.pck first, PARAM_REQUEST_LIST gap-filling fallback."""

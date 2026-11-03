@@ -1607,7 +1607,8 @@ class TestSoloWebUtility(unittest.TestCase):
                   "GRIP_GRAB", "GRIP_RELEASE", "BATT_MONITOR", "BATT_ARM_VOLT", "BATT_LOW_VOLT", "BATT_CRT_VOLT",
                   "BATT_LOW_MAH", "BATT_CRT_MAH", "BATT_LOW_TIMER", "BATT_FS_LOW_ACT", "BATT_FS_CRT_ACT",
                   "BATT_FS_VOLTSRC", "MOT_BAT_VOLT_MIN", "MOT_BAT_VOLT_MAX", "MOT_BAT_CURR_MAX", "LOIT_BRK_DELAY",
-                  "LOIT_ANG_MAX", "ATC_INPUT_TC"]
+                  "LOIT_ANG_MAX", "ATC_INPUT_TC", "PLND_ENABLED", "PLND_TYPE", "PLND_EST_TYPE", "PLND_LAG",
+                  "PLND_XY_DIST_MAX", "PLND_OPTIONS"]
         new_names = sorted(_pm.PARAM_ALIASES_PRE_4_7.keys())
         old_names = [_pm.PARAM_ALIASES_PRE_4_7[n][0] for n in new_names]
 
@@ -2861,6 +2862,300 @@ class TestSoloWebUtility(unittest.TestCase):
                       "btnGoldenControllerCheck", "goldenTerminal"):
                 self.assertIn('id="%s"' % i, html)
         self.assertIn("/api/golden/start", open(os.path.join(root, "static", "app.js"), encoding="utf-8").read())
+
+    def test_40_smart_shots(self):
+        """Cockpit Smart Shots: the 6th control button opens a row of shots. Starting one connects to the
+        shot manager (TCP 5507) like an app, sends SET_CURRENT_SHOT and holds the connection while the shot
+        runs; it hangs up when the shot manager reports shot -1, so Solex can connect again. It never
+        connects while Solex is on the shot manager or the Solo is disarmed."""
+        import socket as _socket
+        import struct as _struct
+        import time as _time
+        import cockpit_mgr as cm
+        root = os.path.dirname(os.path.abspath(__file__))
+
+        # packet framing (shotmanager/app_packet.py: '<II' type, length, then the value)
+        pkt = cm.pack_shot_packet(cm.SHOT_MSG_SET_CURRENT_SHOT, '<i', -1)
+        self.assertEqual(pkt, _struct.pack('<IIi', 1, 4, -1))
+        packets, rest = cm.split_shot_packets(pkt + pkt[:5])
+        self.assertEqual(packets, [(1, _struct.pack('<i', -1))])
+        self.assertEqual(rest, pkt[:5])
+
+        def fake_shotmanager(mode):
+            """Like appManager.py: greets with the current shot; 'ok' enters shots, 'ekf' refuses them,
+            'reject' hangs up at once (another app is connected)."""
+            srv = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+            srv.bind(("127.0.0.1", 0))
+            srv.listen(1)
+
+            def run():
+                conn, _ = srv.accept()
+                try:
+                    if mode == "reject":
+                        return
+                    conn.sendall(_struct.pack('<IIi', 0, 4, -1))
+                    buf = b""
+                    while True:
+                        data = conn.recv(1024)
+                        if not data:
+                            return
+                        buf += data
+                        got, buf = cm.split_shot_packets(buf)
+                        for msg_type, value in got:
+                            shot = _struct.unpack('<i', value)[0]
+                            if mode == "ekf" and shot != -1:
+                                conn.sendall(_struct.pack('<III', 21, 4, 0))
+                            else:
+                                conn.sendall(_struct.pack('<IIi', 0, 4, shot))
+                finally:
+                    conn.close()
+                    srv.close()
+            t = threading.Thread(target=run)
+            t.daemon = True
+            t.start()
+            return srv.getsockname()[1]
+
+        def wait_for(fn, secs=3.0):
+            deadline = _time.time() + secs
+            while _time.time() < deadline and not fn():
+                _time.sleep(0.05)
+            return fn()
+
+        # refused without touching the shot manager
+        c = cm.SmartShotClient(port=1)
+        self.assertFalse(c.start_shot(0)[0])                                   # Selfie: Solex only
+        self.assertIn("Solex", c.start_shot(5)[1])                             # Follow: Solex only
+        self.assertIn("Unknown", c.start_shot(4)[1])                           # Record is not a shot
+        self.assertIn("10.1.1.145", c.start_shot(1, app_ip="10.1.1.145")[1])   # Solex is connected
+        self.assertIn("armed", c.start_shot(1, armed=False)[1])
+        self.assertFalse(c.end_shot()[0])
+
+        # started, held while it runs, released when the shot manager ends it
+        c = cm.SmartShotClient(host="127.0.0.1", port=fake_shotmanager("ok"))
+        ok, msg = c.start_shot(1)
+        self.assertTrue(ok, msg)
+        self.assertEqual(c.status(), {"shot": 1, "name": "Orbit", "starting": False})
+        self.assertIn("End it first", c.start_shot(2)[1])
+        self.assertTrue(c.end_shot()[0])
+        self.assertTrue(wait_for(lambda: c.status()["shot"] == -1))
+        self.assertIsNone(c.sock)
+
+        # the shot manager refuses the shot: nothing held
+        c = cm.SmartShotClient(host="127.0.0.1", port=fake_shotmanager("ekf"))
+        ok, msg = c.start_shot(7)
+        self.assertFalse(ok)
+        self.assertIn("EKF", msg)
+        self.assertIsNone(c.sock)
+
+        # another app already holds the shot manager
+        c = cm.SmartShotClient(host="127.0.0.1", port=fake_shotmanager("reject"))
+        ok, msg = c.start_shot(2)
+        self.assertFalse(ok)
+        self.assertIn("busy", msg)
+
+        # telemetry carries the state; the action handler checks Solex and the armed state first
+        self.assertIn("smart_shot", cm.get_telemetry_dict(msgs_since='none'))
+        src = open(os.path.join(root, "cockpit_mgr.py")).read()
+        self.assertIn("app_ip=find_app_on_shotmanager()", src)
+        self.assertIn("armed=is_vehicle_armed(wake=True)", src)
+
+        # pages: SMART SHOTS is the 6th control button (PRECISION the 7th); its row has a button for every shot
+        import re as _re
+        for page in ("static/index.html", "templates/index.html"):
+            html = open(os.path.join(root, page), encoding="utf-8").read()
+            top = html[html.index('<section class="tab-content" id="tab-cockpit">'):html.index('<div class="cockpit-body">')]
+            row = top[top.index('class="annun-row"', top.index('id="btnUnitToggle"') - 200):top.index('id="smartShotRow"')]
+            self.assertEqual(row.count('class="btn-ctrl'), 7, page)
+            self.assertIn('id="btnSmartShots"', row)
+            shots = set(int(s) for s in _re.findall(r'data-shot="(-?\d+)"', top))
+            self.assertEqual(shots, set(s[0] for s in cm.SMART_SHOTS), page)
+            self.assertIn('id="btnEndShot"', top)
+        js = open(os.path.join(root, "static", "cockpit.js"), encoding="utf-8").read()
+        self.assertIn("action: 'start_shot'", js)
+        self.assertIn("action: 'end_shot'", js)
+        self.assertIn("updateSmartShots(telem)", js)
+
+    def test_41_precision_landing(self):
+        """Precision landing with ArduPilot's own PrecLand: the Cockpit's pad finder posts sightings,
+        the server sends each one as LANDING_TARGET (MAVLink 1, MAV_FRAME_LOCAL_FRD, with the distance:
+        the Solo has no rangefinder); camera down is DO_MOUNT_CONTROL -90 deg, Precision Loiter is
+        DO_AUX_FUNCTION 39. The preset writes PLND_ENABLED before the PLND_ settings it unhides."""
+        import struct as _struct
+        import subprocess as _subprocess
+        import shutil as _shutil
+        import cockpit_mgr as cm
+        import presets as _presets
+        import param_mgr as _pm
+        root = os.path.dirname(os.path.abspath(__file__))
+
+        # CRC_EXTRA computed from the message definition the way mavgen does (fields sorted by size)
+        def crc_extra(name, fields):
+            def x25(buf, crc=0xffff):
+                for b in bytearray(buf):
+                    tmp = b ^ (crc & 0xff)
+                    tmp = (tmp ^ (tmp << 4)) & 0xff
+                    crc = ((crc >> 8) ^ (tmp << 8) ^ (tmp << 3) ^ (tmp >> 4)) & 0xffff
+                return crc
+            size = {"uint64_t": 8, "float": 4, "uint16_t": 2, "uint8_t": 1}
+            s = name + " " + "".join("%s %s " % (t, n) for t, n in sorted(fields, key=lambda f: -size[f[0]]))
+            c = x25(s.encode("ascii"))
+            return (c & 0xff) ^ (c >> 8)
+        lt_fields = [("uint64_t", "time_usec"), ("uint8_t", "target_num"), ("uint8_t", "frame"), ("float", "angle_x"),
+                     ("float", "angle_y"), ("float", "distance"), ("float", "size_x"), ("float", "size_y")]
+        self.assertEqual(crc_extra("LANDING_TARGET", lt_fields), cm.LANDING_TARGET_CRC_EXTRA)
+        cl_fields = [("uint8_t", "target_system"), ("uint8_t", "target_component"), ("uint16_t", "command"),
+                     ("uint8_t", "confirmation")] + [("float", "param%d" % i) for i in range(1, 8)]
+        self.assertEqual(crc_extra("COMMAND_LONG", cl_fields), 152)
+
+        class _Client(cm.LiveMAVLinkClient):
+            def __init__(self):
+                cm.LiveMAVLinkClient.__init__(self, cm.TelemetryState())
+                self.sent = []
+
+            def send_packet(self, packet_bytes):
+                self.sent.append(packet_bytes)
+
+        def payload(pkt):
+            self.assertEqual(bytearray(pkt)[0], 0xFE)
+            plen, msgid = bytearray(pkt)[1], bytearray(pkt)[5]
+            body = pkt[6:6 + plen]
+            crc = cm.calc_x25_crc(pkt[1:6 + plen] + bytes(bytearray([{149: 200, 76: 152}[msgid]])))
+            self.assertEqual(_struct.unpack('<H', pkt[6 + plen:8 + plen])[0], crc)
+            return msgid, body
+
+        client = _Client()
+        pl = cm.PrecisionLanding(client)
+
+        # a good sighting goes out as LANDING_TARGET in the level, heading-aligned frame
+        ok, msg = pl.report_target({"angle_x": 0.1, "angle_y": -0.2, "distance": 6.5, "size": 0.09, "age_ms": 40})
+        self.assertTrue(ok, msg)
+        msgid, body = payload(client.sent[-1])
+        self.assertEqual(msgid, 149)
+        self.assertEqual(len(body), 30)
+        _t, ax, ay, dist, sx, sy, num, frame = _struct.unpack('<QfffffBB', body)
+        self.assertAlmostEqual(ax, 0.1, places=5)
+        self.assertAlmostEqual(ay, -0.2, places=5)
+        self.assertAlmostEqual(dist, 6.5, places=4)
+        self.assertEqual(frame, 20)                    # MAV_FRAME_LOCAL_FRD (AC_PrecLand_MAVLink accepts it)
+        st = pl.status()
+        self.assertTrue(st["sending"])
+        self.assertEqual(st["distance"], 6.5)
+
+        # nonsense is never sent (ArduPilot would steer the landing by it)
+        n = len(client.sent)
+        for bad in ({"angle_x": "x", "angle_y": 0, "distance": 5}, {"angle_x": 0, "angle_y": 0},
+                    {"angle_x": float("nan"), "angle_y": 0, "distance": 5}, {"angle_x": 2.0, "angle_y": 0, "distance": 5},
+                    {"angle_x": 0, "angle_y": 0, "distance": 0.0}, {"angle_x": 0, "angle_y": 0, "distance": 500},
+                    {"angle_x": 0, "angle_y": 0, "distance": 5, "age_ms": 900}, None, [1, 2]):
+            self.assertFalse(pl.report_target(bad)[0], bad)
+        self.assertEqual(len(client.sent), n)
+
+        # nothing for > 1 s: no longer "sending"
+        pl.last_sent_time -= 2.0
+        self.assertFalse(pl.status()["sending"])
+
+        # camera down: DO_MOUNT_CONTROL pitch -90, MAVLink targeting; back: RC targeting (the paddle)
+        pl.set_camera(True)
+        msgid, body = payload(client.sent[-1])
+        p = _struct.unpack('<fffffffHBBB', body)
+        self.assertEqual((msgid, p[7], p[0], p[6], p[8], p[9]), (76, 205, -90.0, 2.0, 1, 1))
+        pl.set_camera(False)
+        p = _struct.unpack('<fffffffHBBB', payload(client.sent[-1])[1])
+        self.assertEqual((p[7], p[6]), (205, 3.0))
+
+        # Precision Loiter: aux function 39 high / low
+        pl.set_precision_loiter(True)
+        p = _struct.unpack('<fffffffHBBB', payload(client.sent[-1])[1])
+        self.assertEqual((p[7], p[0], p[1]), (218, 39.0, 2.0))
+        self.assertTrue(pl.status()["loiter"])
+        pl.set_precision_loiter(False)
+        p = _struct.unpack('<fffffffHBBB', payload(client.sent[-1])[1])
+        self.assertEqual((p[7], p[0], p[1]), (218, 39.0, 0.0))
+        self.assertIn("on or off", cm.handle_action("prec_loiter", "maybe")["message"])
+
+        # the Cube's settings, as /api/precland/check reports them
+        self.assertFalse(cm.precland_param_report({"PLND_ENABLED": None})["ready"])
+        self.assertIn("preset", cm.precland_param_report({"PLND_ENABLED": 0.0})["message"])
+        self.assertFalse(cm.precland_param_report({"PLND_ENABLED": 1.0, "PLND_TYPE": 2.0})["ready"])
+        self.assertTrue(cm.precland_param_report({"PLND_ENABLED": 1.0, "PLND_TYPE": 1.0, "PLND_LAG": 0.25})["ready"])
+        self.assertIn("precland", cm.get_telemetry_dict(msgs_since='none'))
+
+        # preset: MAVLink type, the longest lag ArduPilot accepts, no Rover-only PLND_ORIENT
+        pre = _presets.get_preset("precision_landing")["params"]
+        self.assertEqual((pre["PLND_ENABLED"], pre["PLND_TYPE"]), (1, 1))
+        self.assertTrue(0.02 <= pre["PLND_LAG"] <= 0.25)
+        self.assertNotIn("PLND_ORIENT", pre)
+        order = _pm._write_order(list(pre.keys()))
+        self.assertEqual(order[0], "PLND_ENABLED")
+
+        # the PLND_ settings only exist on the Cube once PLND_ENABLED is 1 (AP_PARAM_FLAG_ENABLE)
+        class _Msg(object):
+            def __init__(self, name, value):
+                self.param_id, self.param_value, self.param_type = name, float(value), 9
+
+        class _Cube(object):
+            def __init__(self):
+                self.params = dict((k, 0.0) for k in pre)
+                self.queue = []
+                self.target_system, self.target_component = 1, 1
+                cube = self
+
+                class _Link(object):
+                    def param_request_read_send(self, ts, tc, name, idx):
+                        cube._handle(name, None)
+
+                    def param_set_send(self, ts, tc, name, value, ptype):
+                        cube._handle(name, value)
+                self.mav = _Link()
+
+            def _handle(self, name, value):
+                name = name.decode("ascii") if isinstance(name, bytes) else name
+                if name != "PLND_ENABLED" and not self.params["PLND_ENABLED"]:
+                    return                                  # hidden
+                if value is not None:
+                    self.params[name] = float(value)
+                self.queue.append(_Msg(name, self.params[name]))
+
+            def recv_match(self, type=None, blocking=True, timeout=0.1):
+                return self.queue.pop(0) if self.queue else None
+        orig_mavutil = _pm.mavutil
+        if _pm.mavutil is None:
+            class _MavutilStub(object):
+                class mavlink(object):
+                    MAV_PARAM_TYPE_REAL32 = 9
+            _pm.mavutil = _MavutilStub()
+        try:
+            ok, confirmed, failed, msg = _pm.commit_batch_mavlink(_Cube(), pre)
+            self.assertTrue(ok, msg)
+        finally:
+            _pm.mavutil = orig_mavutil
+
+        # server routes and pages
+        swa = open(os.path.join(root, "solo_web_app.py"), encoding="utf-8").read()
+        self.assertIn("'/api/precland/target'", swa)
+        self.assertIn("'/api/precland/check'", swa)
+        for page in ("static/index.html", "templates/index.html"):
+            html = open(os.path.join(root, page), encoding="utf-8").read()
+            for i in ("btnPrecision", "precisionRow", "btnPadFinder", "btnCameraDown", "btnPrecLoiter",
+                      "btnPrecLand", "padOverlay", "padSizeIn", "padFovIn"):
+                self.assertIn('id="%s"' % i, html, page)
+            self.assertLess(html.index('src="/padfinder.js'), html.index('src="/cockpit.js'))
+        js = open(os.path.join(root, "static", "cockpit.js"), encoding="utf-8").read()
+        self.assertIn("'/api/precland/target'", js)
+        self.assertIn("updatePrecision(telem)", js)
+        pad_page = open(os.path.join(root, "static", "landing_pad.html"), encoding="utf-8").read()
+        self.assertIn('src="/padfinder.js"', pad_page)            # prints the finder's own pattern
+        self.assertIn('"static/padfinder.js"', open(os.path.join(root, "install_to_solo.py")).read())
+
+        # the pad finder itself on rendered camera frames (needs Node; skipped without it)
+        node = _shutil.which("node") if hasattr(_shutil, "which") else None
+        if not node:
+            self.skipTest("node not installed: pad finder image tests not run")
+        out = _subprocess.run([node, os.path.join(root, "tools", "test_padfinder.js")],
+                              stdout=_subprocess.PIPE, stderr=_subprocess.STDOUT, timeout=600)
+        text = out.stdout.decode("utf-8", "replace")
+        self.assertEqual(out.returncode, 0, text)
+        self.assertIn("PADFINDER OK", text)
 
 
 def _struct_float(b4):

@@ -2080,6 +2080,10 @@ function setUploadProgressVisible(visible) {
         {
             title: '⚡ Flight Performance Presets',
             match: function (p) { return p.category === 'Flight Performance' || p.id.indexOf('speed') !== -1; }
+        },
+        {
+            title: '🎯 Precision Landing Presets',
+            match: function (p) { return p.category === 'Precision Landing'; }
         }
     ];
 

@@ -186,6 +186,7 @@
         hudDirty = true;
         localStorage.setItem('solo_unit_pref', unitSystem);
         updateUnitButtonLabel();
+        showPadSettings();
         if (currentTelem) updateDOM(currentTelem);
     });
 
@@ -274,7 +275,506 @@
                 });
         });
     }
-    
+
+    // =========================================================================
+    // Smart Shots: the SMART SHOTS button opens a row with one button per shot.
+    // The server starts the shot through the Solo's shot manager; it is then flown
+    // with the Controller, and Fly (or END SHOT) ends it.
+    // =========================================================================
+    const btnSmartShots = document.getElementById('btnSmartShots');
+    const smartShotRow = document.getElementById('smartShotRow');
+    const btnEndShot = document.getElementById('btnEndShot');
+    const smartShotMsg = document.getElementById('smartShotMsg');
+    const shotButtons = smartShotRow ? smartShotRow.querySelectorAll('.btn-shot') : [];
+    let smartShotBusy = false;
+    let lastSmartShot = null;
+
+    function setSmartShotMsg(text, isError) {
+        if (!smartShotMsg) return;
+        smartShotMsg.textContent = text;
+        smartShotMsg.classList.toggle('error', !!isError);
+        layoutShotRow();
+    }
+
+    // While a row (Smart Shots or Precision) is open the side HUD panels start below it instead of under it
+    function layoutShotRow() {
+        const row = [smartShotRow, document.getElementById('precisionRow')].filter(function(r) {
+            return r && !r.hidden;
+        })[0];
+        [leftHud, rightHud].forEach(function(p) {
+            if (!p) return;
+            if (!row || !p.offsetParent) {
+                p.style.removeProperty('top');
+                return;
+            }
+            const top = row.getBoundingClientRect().bottom - p.offsetParent.getBoundingClientRect().top + 6;
+            p.style.setProperty('top', Math.round(top) + 'px', 'important');
+        });
+    }
+    window.addEventListener('resize', layoutShotRow);
+
+    function setSmartShotLabel(runningName) {
+        if (!btnSmartShots || !smartShotRow) return;
+        const caret = smartShotRow.hidden ? ' ▾' : ' ▴';
+        btnSmartShots.textContent = '🎬 ' + (runningName ? runningName.toUpperCase() : 'SMART SHOTS') + caret;
+    }
+
+    function setShotButtonsDisabled(disabled) {
+        shotButtons.forEach(function(b) {
+            if (!b.dataset.needs) b.disabled = disabled;
+        });
+    }
+
+    if (btnSmartShots && smartShotRow) {
+        btnSmartShots.addEventListener('click', function(e) {
+            e.stopPropagation();
+            const open = smartShotRow.hidden;
+            smartShotRow.hidden = !open;
+            btnSmartShots.setAttribute('aria-expanded', open ? 'true' : 'false');
+            setSmartShotLabel(btnSmartShots.classList.contains('shot-running') ? btnSmartShots.dataset.shotName : '');
+            if (open) closePrecisionRow();
+            layoutShotRow();
+            layoutOsdBar();             // the OSD bar moves below the shot row
+        });
+    }
+
+    shotButtons.forEach(function(btn) {
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            if (btn.dataset.needs) {
+                setSmartShotMsg(btn.dataset.needs, true);
+                return;
+            }
+            if (smartShotBusy) return;
+            const shotId = parseInt(btn.dataset.shot, 10);
+            const name = btn.textContent.trim();
+            smartShotBusy = true;
+            setShotButtonsDisabled(true);
+            setSmartShotMsg('Starting ' + name + '...', false);
+            postAction({ action: 'start_shot', mode: shotId }).then(function(data) {
+                const ok = data && data.status === 'ok';
+                setSmartShotMsg((data && data.message) || (name + (ok ? ' started.' : ' did not start.')), !ok);
+                if (ok) speak('Smart shot ' + name.toLowerCase());
+            }).catch(function(err) {
+                setSmartShotMsg('Could not start ' + name + ': ' + err.message, true);
+            }).then(function() {
+                smartShotBusy = false;
+                setShotButtonsDisabled(false);
+            });
+        });
+    });
+
+    if (btnEndShot) {
+        btnEndShot.addEventListener('click', function(e) {
+            e.stopPropagation();
+            postAction({ action: 'end_shot' }).then(function(data) {
+                const ok = data && data.status === 'ok';
+                setSmartShotMsg((data && data.message) || 'End Shot failed.', !ok);
+            }).catch(function(err) {
+                setSmartShotMsg('End Shot failed: ' + err.message + '. Press Fly on the Controller.', true);
+            });
+        });
+    }
+
+    // Telemetry carries the shot the utility started (-1: none)
+    function updateSmartShots(telem) {
+        const ss = telem.smart_shot || {};
+        const shot = (typeof ss.shot === 'number') ? ss.shot : -1;
+        if (shot === lastSmartShot) return;
+        if (lastSmartShot !== null && lastSmartShot !== -1 && shot === -1) {
+            setSmartShotMsg('Smart Shot ended.', false);
+            speak('Smart shot ended');
+        }
+        lastSmartShot = shot;
+        shotButtons.forEach(function(b) {
+            b.classList.toggle('running', parseInt(b.dataset.shot, 10) === shot);
+        });
+        if (btnEndShot) btnEndShot.disabled = shot === -1;
+        if (btnSmartShots) {
+            btnSmartShots.classList.toggle('shot-running', shot !== -1);
+            btnSmartShots.dataset.shotName = shot !== -1 ? (ss.name || '') : '';
+            setSmartShotLabel(btnSmartShots.dataset.shotName);
+        }
+    }
+
+    // =========================================================================
+    // Precision Landing: the pad finder (padfinder.js) looks for the printed landing pad in the
+    // live video ~10 times a second and the server passes every sighting on to the Cube as
+    // LANDING_TARGET. ArduPilot's own precision landing then lands on the pad in LAND, RTL and
+    // Smart RTL, and Precision Loiter holds over it in Fly. While the pad is not seen nothing is
+    // sent, and the Solo lands or loiters as it normally would.
+    // =========================================================================
+    const btnPrecision = document.getElementById('btnPrecision');
+    const precisionRow = document.getElementById('precisionRow');
+    const btnPadFinder = document.getElementById('btnPadFinder');
+    const btnCameraDown = document.getElementById('btnCameraDown');
+    const btnPrecLoiter = document.getElementById('btnPrecLoiter');
+    const btnPrecLand = document.getElementById('btnPrecLand');
+    const btnPadSettings = document.getElementById('btnPadSettings');
+    const padSettings = document.getElementById('padSettings');
+    const precisionMsg = document.getElementById('precisionMsg');
+    const padSizeIn = document.getElementById('padSizeIn');
+    const padSizeUnit = document.getElementById('padSizeUnit');
+    const padFovIn = document.getElementById('padFovIn');
+    const padLensIn = document.getElementById('padLensIn');
+    const padOverlay = document.getElementById('padOverlay');
+    const padOverlayCtx = padOverlay ? padOverlay.getContext('2d') : null;
+
+    const PAD_TICK_MS = 80;              // look at most ~12 times a second (new video frames only)
+    const PAD_WORK_WIDTH_MAX = 960;      // pixels across the frame the pad finder works on
+    const PAD_WORK_WIDTH_MIN = 640;      // ... when a look takes too long on this phone
+    const PAD_SLOW_MS = 70;
+    const PAD_VIDEO_FRESH_MS = 500;      // older video is not used: the Solo has moved on
+    const PAD_LOST_MS = 1500;
+    const PAD_CHECK_EVERY_MS = 60000;    // re-read the Cube's PLND_ settings at most this often
+    const PAD_LAND_MODES = ['LAND', 'RTL', 'SMART_RTL'];
+
+    function loadPadSetting(key, fallback) {
+        try {
+            const v = localStorage.getItem(key);
+            if (v !== null && v !== '') return v;
+        } catch (e) {}
+        return fallback;
+    }
+    function savePadSetting(key, value) {
+        try { localStorage.setItem(key, String(value)); } catch (e) {}
+    }
+    let padSizeM = parseFloat(loadPadSetting('solo_pad_size_m', '0.6096')) || 0.6096;   // 24 in black square
+    let padFovDeg = parseFloat(loadPadSetting('solo_pad_fov_deg', '118')) || 118;       // GoPro Wide
+    let padLens = loadPadSetting('solo_pad_lens', 'fisheye') === 'rectilinear' ? 'rectilinear' : 'fisheye';
+
+    let padFinderOn = false;
+    let padWorkWidth = PAD_WORK_WIDTH_MAX;
+    let padSlowMs = 0;                   // smoothed time one look takes
+    let padLastFrameTime = -1;
+    let padPostBusy = false;
+    let padLastSeen = 0;
+    let padCheck = null;                 // last /api/precland/check answer: {ready, message}
+    let padCheckTime = 0;
+    let padCheckBusy = false;
+    let padLastMode = null;
+    let padServer = {};                  // telemetry.precland
+    let padMsgKey = '';
+    let padGray = null;
+    const padCanvas = document.createElement('canvas');
+    const padCtx = padCanvas.getContext('2d', { willReadFrequently: true });
+
+    function setPrecisionMsg(text, isError) {
+        if (!precisionMsg) return;
+        const key = (isError ? '!' : '') + text;
+        if (key === padMsgKey) return;
+        padMsgKey = key;
+        precisionMsg.textContent = text;
+        precisionMsg.classList.toggle('error', !!isError);
+        layoutShotRow();
+    }
+
+    function setPrecisionLabel() {
+        if (!btnPrecision || !precisionRow) return;
+        btnPrecision.textContent = '🎯 ' + (padFinderOn ? 'PRECISION ON' : 'PRECISION') + (precisionRow.hidden ? ' ▾' : ' ▴');
+        btnPrecision.classList.toggle('finder-on', padFinderOn);
+    }
+
+    function closePrecisionRow() {
+        if (!precisionRow || precisionRow.hidden) return;
+        precisionRow.hidden = true;
+        if (btnPrecision) btnPrecision.setAttribute('aria-expanded', 'false');
+        setPrecisionLabel();
+    }
+
+    function showPadSettings() {
+        const imperial = unitSystem === 'imperial';
+        if (padSizeIn) padSizeIn.value = imperial ? (padSizeM / 0.0254).toFixed(1) : (padSizeM * 100).toFixed(1);
+        if (padSizeUnit) padSizeUnit.textContent = imperial ? 'in' : 'cm';
+        if (padFovIn) padFovIn.value = Math.round(padFovDeg);
+        if (padLensIn) padLensIn.value = padLens;
+    }
+
+    // Is the Cube set up (PLND_ENABLED 1, PLND_TYPE 1)? Without it the sightings do nothing.
+    function checkPrecisionSetup(force) {
+        if (padCheckBusy || (!force && Date.now() - padCheckTime < PAD_CHECK_EVERY_MS)) return;
+        padCheckBusy = true;
+        fetch('/api/precland/check', { cache: 'no-store', headers: authHeaders() })
+            .then(function(r) {
+                if (r.status === 401) { authRequired(); throw new Error('Login required'); }
+                return r.json();
+            })
+            .then(function(res) {
+                if (!res || typeof res.message !== 'string') return;
+                padCheck = res;
+                padCheckTime = Date.now();
+                if (!padFinderOn || !res.ready) setPrecisionMsg(res.message, !res.ready);
+            })
+            .catch(function() {})
+            .then(function() { padCheckBusy = false; });
+    }
+
+    if (btnPrecision && precisionRow) {
+        btnPrecision.addEventListener('click', function(e) {
+            e.stopPropagation();
+            const open = precisionRow.hidden;
+            precisionRow.hidden = !open;
+            btnPrecision.setAttribute('aria-expanded', open ? 'true' : 'false');
+            if (open && smartShotRow && !smartShotRow.hidden) {
+                smartShotRow.hidden = true;
+                if (btnSmartShots) btnSmartShots.setAttribute('aria-expanded', 'false');
+                setSmartShotLabel(btnSmartShots && btnSmartShots.classList.contains('shot-running') ? btnSmartShots.dataset.shotName : '');
+            }
+            setPrecisionLabel();
+            if (open) {
+                showPadSettings();
+                checkPrecisionSetup(false);
+            }
+            layoutShotRow();
+            layoutOsdBar();
+        });
+    }
+
+    if (btnPadSettings && padSettings) {
+        btnPadSettings.addEventListener('click', function(e) {
+            e.stopPropagation();
+            padSettings.hidden = !padSettings.hidden;
+            btnPadSettings.setAttribute('aria-expanded', padSettings.hidden ? 'false' : 'true');
+            showPadSettings();
+            layoutShotRow();
+            layoutOsdBar();
+        });
+        padSettings.addEventListener('click', function(e) { e.stopPropagation(); });
+    }
+    if (padSizeIn) {
+        padSizeIn.addEventListener('change', function() {
+            const v = parseFloat(padSizeIn.value);
+            if (v > 0) {
+                const m = unitSystem === 'imperial' ? v * 0.0254 : v / 100;
+                padSizeM = Math.min(4, Math.max(0.1, m));
+                savePadSetting('solo_pad_size_m', padSizeM);
+            }
+            showPadSettings();
+        });
+    }
+    if (padFovIn) {
+        padFovIn.addEventListener('change', function() {
+            const v = parseFloat(padFovIn.value);
+            if (v > 0) {
+                padFovDeg = Math.min(170, Math.max(40, v));
+                savePadSetting('solo_pad_fov_deg', padFovDeg);
+            }
+            showPadSettings();
+        });
+    }
+    if (padLensIn) {
+        padLensIn.addEventListener('change', function() {
+            padLens = padLensIn.value === 'rectilinear' ? 'rectilinear' : 'fisheye';
+            savePadSetting('solo_pad_lens', padLens);
+        });
+    }
+
+    if (btnPadFinder) {
+        btnPadFinder.addEventListener('click', function(e) {
+            e.stopPropagation();
+            padFinderOn = !padFinderOn;
+            btnPadFinder.classList.toggle('active', padFinderOn);
+            btnPadFinder.setAttribute('aria-pressed', padFinderOn ? 'true' : 'false');
+            btnPadFinder.textContent = '🎯 PAD FINDER: ' + (padFinderOn ? 'ON' : 'OFF');
+            setPrecisionLabel();
+            padLastFrameTime = -1;
+            if (padFinderOn) {
+                setPrecisionMsg('Looking for the pad. Point the camera down and fly over it.', false);
+                speak('Pad finder on');
+                checkPrecisionSetup(false);
+            } else {
+                clearPadOverlay();
+                setPrecisionMsg('Pad finder off: nothing is sent to the Cube.', false);
+                speak('Pad finder off');
+            }
+        });
+    }
+
+    function precisionAction(body, doneText) {
+        return postAction(body).then(function(data) {
+            const ok = data && data.status === 'ok';
+            setPrecisionMsg((data && data.message) || (ok ? doneText : 'Command failed.'), !ok);
+        }).catch(function(err) {
+            setPrecisionMsg('Command failed: ' + err.message, true);
+        });
+    }
+
+    if (btnCameraDown) {
+        btnCameraDown.addEventListener('click', function(e) {
+            e.stopPropagation();
+            precisionAction({ action: 'camera_down' }, 'Camera pointed down.');
+        });
+    }
+    if (btnPrecLoiter) {
+        btnPrecLoiter.addEventListener('click', function(e) {
+            e.stopPropagation();
+            const turnOn = padServer.loiter !== true;
+            precisionAction({ action: 'prec_loiter', mode: turnOn ? 'on' : 'off' }, 'Precision Loiter ' + (turnOn ? 'on.' : 'off.'));
+        });
+    }
+    if (btnPrecLand) {
+        btnPrecLand.addEventListener('click', function(e) {
+            e.stopPropagation();
+            speak('Mode land');
+            precisionAction({ action: 'set_mode', mode: 'LAND' }, 'LAND sent.');
+        });
+    }
+
+    function clearPadOverlay() {
+        if (!padOverlayCtx) return;
+        padOverlayCtx.setTransform(1, 0, 0, 1, 0, 0);
+        padOverlayCtx.clearRect(0, 0, padOverlay.width, padOverlay.height);
+    }
+
+    // Outline the pad on the video and draw a line from straight below the Solo to its centre
+    function drawPadOverlay(det, m, fw, fh) {
+        if (!padOverlayCtx) return;
+        const dpr = window.devicePixelRatio || 1;
+        const cw = padOverlay.clientWidth, ch = padOverlay.clientHeight;
+        if (padOverlay.width !== Math.round(cw * dpr) || padOverlay.height !== Math.round(ch * dpr)) {
+            padOverlay.width = Math.round(cw * dpr);
+            padOverlay.height = Math.round(ch * dpr);
+        }
+        clearPadOverlay();
+        if (!det || !cw || !ch) return;
+        // the video fills the viewport like object-fit: cover
+        const k = Math.max(cw / fw, ch / fh);
+        const ox = (cw - fw * k) / 2, oy = (ch - fh * k) / 2;
+        const P = function(p) { return [ox + p[0] * k, oy + p[1] * k]; };
+        const ctx = padOverlayCtx;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = '#10b981';
+        ctx.beginPath();
+        det.corners.forEach(function(p, i) {
+            const q = P(p);
+            if (i === 0) ctx.moveTo(q[0], q[1]); else ctx.lineTo(q[0], q[1]);
+        });
+        ctx.closePath();
+        ctx.stroke();
+        const tl = P(det.corners[0]);
+        ctx.fillStyle = '#10b981';
+        ctx.beginPath();
+        ctx.arc(tl[0], tl[1], 5, 0, Math.PI * 2);
+        ctx.fill();
+        const c = P(det.center), mid = P([fw / 2, fh / 2]);
+        ctx.setLineDash([6, 4]);
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(mid[0], mid[1]);
+        ctx.lineTo(c[0], c[1]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.arc(c[0], c[1], 6, 0, Math.PI * 2);
+        ctx.stroke();
+        if (m) {
+            const alt = getConvertedAlt(m.below);
+            const label = alt.val.toFixed(1) + ' ' + alt.unit;
+            ctx.font = 'bold 15px sans-serif';
+            ctx.lineWidth = 4;
+            ctx.strokeStyle = '#000';
+            ctx.strokeText(label, c[0] + 10, c[1] - 10);
+            ctx.fillStyle = '#d1fae5';
+            ctx.fillText(label, c[0] + 10, c[1] - 10);
+        }
+    }
+
+    function sendPadSighting(m, t0) {
+        if (padPostBusy) return;            // never queue up: the next frame is newer anyway
+        padPostBusy = true;
+        fetch('/api/precland/target', {
+            method: 'POST',
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({
+                angle_x: m.angle_x, angle_y: m.angle_y, distance: m.distance, size: m.size,
+                age_ms: Math.round(performance.now() - t0)
+            })
+        }).then(function(r) {
+            if (r.status === 401) authRequired();
+        }).catch(function() {}).then(function() {
+            padPostBusy = false;
+        });
+    }
+
+    function showPadStatus(m) {
+        const notReady = padCheck && !padCheck.ready;
+        if (m) {
+            const below = getConvertedAlt(m.below);
+            const ahead = getConvertedAlt(Math.abs(m.ahead)), right = getConvertedAlt(Math.abs(m.right));
+            let text = 'PAD ' + below.val.toFixed(1) + ' ' + below.unit + ' below, ' +
+                ahead.val.toFixed(1) + ' ' + ahead.unit + (m.ahead >= 0 ? ' ahead, ' : ' behind, ') +
+                right.val.toFixed(1) + ' ' + right.unit + (m.right >= 0 ? ' right' : ' left');
+            if (notReady) text += '. ' + padCheck.message;
+            else text += padServer.sending ? ' · Cube gets ' + padServer.rate + '/s' : ' · sending';
+            setPrecisionMsg(text, !!notReady);
+        } else if (Date.now() - padLastSeen > PAD_LOST_MS) {
+            setPrecisionMsg(notReady ? padCheck.message : 'Looking for the pad. Point the camera down and fly over it.', !!notReady);
+        }
+    }
+
+    function padTick() {
+        if (!padFinderOn) return;
+        const v = liveVideoFeed;
+        if (!videoWanted() || !v || v.readyState < 2 || !v.videoWidth ||
+                Date.now() - lastVideoPacketTime > PAD_VIDEO_FRESH_MS) {
+            clearPadOverlay();
+            setPrecisionMsg('Pad finder on, but there is no live video (is Solex using it?). Nothing is sent.', true);
+            return;
+        }
+        if (v.currentTime === padLastFrameTime) return;          // no new frame yet
+        padLastFrameTime = v.currentTime;
+        const t0 = performance.now();
+        const scale = Math.min(1, padWorkWidth / v.videoWidth);
+        const w = Math.round(v.videoWidth * scale), h = Math.round(v.videoHeight * scale);
+        if (padCanvas.width !== w || padCanvas.height !== h) {
+            padCanvas.width = w;
+            padCanvas.height = h;
+        }
+        let det = null, m = null;
+        try {
+            padCtx.drawImage(v, 0, 0, w, h);
+            padGray = PadFinder.toGray(padCtx.getImageData(0, 0, w, h).data, w, h, padGray);
+            det = PadFinder.detect(padGray, w, h);
+            if (det) m = PadFinder.measure(det, PadFinder.camera(w, h, padFovDeg, padLens), padSizeM);
+        } catch (err) {
+            console.warn('[PadFinder]', err);
+        }
+        const took = performance.now() - t0;
+        padSlowMs = padSlowMs ? padSlowMs * 0.9 + took * 0.1 : took;
+        if (padSlowMs > PAD_SLOW_MS && padWorkWidth > PAD_WORK_WIDTH_MIN) {
+            padWorkWidth = PAD_WORK_WIDTH_MIN;      // slow phone: smaller frames (shorter range)
+            padSlowMs = 0;
+        }
+        drawPadOverlay(det, m, w, h);
+        if (m) {
+            if (Date.now() - padLastSeen > 3000) speak('Pad found');
+            padLastSeen = Date.now();
+            sendPadSighting(m, t0);
+        }
+        showPadStatus(m);
+    }
+    if (typeof PadFinder !== 'undefined') setInterval(padTick, PAD_TICK_MS);
+
+    // Telemetry carries what the server sent (telemetry.precland)
+    function updatePrecision(telem) {
+        padServer = telem.precland || {};
+        if (btnPrecLoiter) {
+            const on = padServer.loiter === true;
+            btnPrecLoiter.classList.toggle('active', on);
+            btnPrecLoiter.setAttribute('aria-pressed', on ? 'true' : 'false');
+            btnPrecLoiter.textContent = 'PREC LOITER: ' + (on ? 'ON' : 'OFF');
+        }
+        const armed = !!(telem.status && telem.status.armed);
+        if (btnPrecLand) btnPrecLand.disabled = !armed;
+        // camera straight down as the Solo starts to land (LAND, RTL, Smart RTL) with the finder on
+        const mode = telem.flight_mode || '';
+        if (padFinderOn && armed && padLastMode !== null && mode !== padLastMode && PAD_LAND_MODES.indexOf(mode) !== -1) {
+            postAction({ action: 'camera_down' }).catch(function() {});
+        }
+        padLastMode = mode;
+    }
+
     const btnFullscreen = document.getElementById('btnFullscreen');
     if (btnFullscreen) {
         btnFullscreen.addEventListener('click', function() {
@@ -918,16 +1418,20 @@
         const barRect = osdMain ? osdMain.getBoundingClientRect() : null;
         const barH = barRect && barRect.height ? barRect.height : 28;
         const barL = vp.left + left, barR = vp.right - right;
-        const btns = document.querySelectorAll('#tab-cockpit .top-bar .btn-ctrl');
-        let below = 0;
-        for (let i = 0; i < btns.length; i++) {
-            const r = btns[i].getBoundingClientRect();
-            if (!r.width || !r.height) continue;
-            const overlapX = r.left < barR && r.right > barL;
-            const overlapY = r.top < vp.top + OSD_DEFAULT_TOP + barH && r.bottom > vp.top + OSD_DEFAULT_TOP;
-            if (overlapX && overlapY) below = Math.max(below, r.bottom - vp.top + 4);
+        // (repeated: below one line of buttons there may be another, e.g. the Smart Shots row)
+        const btns = document.querySelectorAll('#tab-cockpit .top-bar .btn-ctrl, #tab-cockpit .top-bar .smart-shot-msg, #tab-cockpit .top-bar .pad-settings');
+        for (let pass = 0; pass < 5; pass++) {
+            let below = 0;
+            for (let i = 0; i < btns.length; i++) {
+                const r = btns[i].getBoundingClientRect();
+                if (!r.width || !r.height) continue;
+                const overlapX = r.left < barR && r.right > barL;
+                const overlapY = r.top < vp.top + top + barH && r.bottom > vp.top + top;
+                if (overlapX && overlapY) below = Math.max(below, r.bottom - vp.top + 4);
+            }
+            if (!below) break;
+            top = Math.round(below);
         }
-        if (below) top = Math.round(below);
         const key = left + '_' + right + '_' + top;
         if (key !== osdLayoutKey) {
             osdLayoutKey = key;
@@ -1146,6 +1650,9 @@
                     }
                 }
             }
+
+            updateSmartShots(telem);
+            updatePrecision(telem);
 
             // MAVLink OSD messages bar (vehicle STATUSTEXT)
             updateOsdBar(telem);

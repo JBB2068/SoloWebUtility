@@ -1071,6 +1071,118 @@
     border-radius: 4px !important;
 }
 
+/* Smart Shots: the SMART SHOTS button opens a row of shots under the control buttons */
+#btnSmartShots[aria-expanded="true"],
+#btnSmartShots.shot-running {
+    border-color: var(--accent-purple) !important;
+    color: #e9d5ff !important;
+    background: rgba(168, 85, 247, 0.35) !important;
+}
+.smart-shot-row {
+    flex-basis: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 5px;
+    margin-top: 4px;
+}
+.smart-shot-row[hidden] {
+    display: none;
+}
+.btn-shot.needs-app {
+    opacity: 0.45;
+}
+.btn-shot.running {
+    border-color: var(--accent-emerald) !important;
+    color: #d1fae5 !important;
+    background: rgba(16, 185, 129, 0.4) !important;
+}
+.btn-shot:disabled {
+    cursor: wait;
+}
+.btn-end-shot {
+    border-color: var(--accent-amber) !important;
+    color: #fde68a !important;
+}
+.btn-end-shot:disabled {
+    opacity: 0.35;
+    cursor: default;
+}
+.smart-shot-msg {
+    font-size: 12px;
+    font-weight: 700;
+    color: #fff;
+    text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000;
+    padding: 0 4px;
+}
+.smart-shot-msg.error {
+    color: #fca5a5;
+}
+
+/* Precision Landing row (same layout as the Smart Shots row) */
+#btnPrecision.finder-on {
+    border-color: var(--accent-emerald) !important;
+    color: #d1fae5 !important;
+    background: rgba(16, 185, 129, 0.35) !important;
+}
+.precision-row .btn-ctrl.active {
+    border-color: var(--accent-emerald) !important;
+    color: #d1fae5 !important;
+    background: rgba(16, 185, 129, 0.4) !important;
+}
+.precision-row #btnPrecLand:disabled {
+    opacity: 0.35;
+    cursor: default;
+}
+.pad-settings {
+    flex-basis: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 12px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    background: rgba(2, 6, 23, 0.72);
+    font-size: 12px;
+    font-weight: 700;
+    color: #fff;
+}
+.pad-settings[hidden] {
+    display: none;
+}
+.pad-settings input,
+.pad-settings select {
+    width: 72px;
+    margin-left: 4px;
+    padding: 2px 4px;
+    font: inherit;
+    color: #fff;
+    background: rgba(15, 23, 42, 0.9);
+    border: 1px solid rgba(148, 163, 184, 0.6);
+    border-radius: 4px;
+}
+.pad-settings select {
+    width: auto;
+}
+.pad-settings a.btn-ctrl {
+    text-decoration: none;
+}
+.pad-help {
+    font-weight: 600;
+    font-size: 11px;
+}
+
+/* Landing pad outline over the video (under the HUD canvas) */
+.pad-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 3;
+    pointer-events: none;
+}
+
 
 .bottom-bar {
     display: none !important;
