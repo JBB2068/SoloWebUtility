@@ -385,6 +385,22 @@
     const FOLLOW_STYLE_LABELS = { hold: 'HOLD ANGLE', leash: 'LEASH', freelook: 'FREE LOOK' };
     let pilotFixBusy = false;
     let pilotFixPending = null;
+    let pilotFixRejected = '';               // why the server refused the last fix ('' if it took it)
+    let viewerGpsStatus = '';                // the SoloLink Viewer app's GPS state ('' outside the app)
+    const inAndroidWebView = /; wv\)/.test(navigator.userAgent);
+    const VIEWER_GPS_PROBLEMS = {
+        no_permission: 'the SoloLink Viewer app may not use the phone\'s location. Allow it: Android Settings → Apps → ' +
+            'SoloLink Viewer → Permissions → Location → Allow, with Use precise location on',
+        approximate: 'the SoloLink Viewer app only has approximate location. Turn on Use precise location: Android ' +
+            'Settings → Apps → SoloLink Viewer → Permissions → Location',
+        off: 'Location is turned off on the phone. Turn it on (swipe down from the top of the screen)',
+        unavailable: 'this phone\'s GPS is not available to the SoloLink Viewer app',
+        waiting: 'the phone is still looking for GPS satellites. Stand in the open with a clear view of the sky; ' +
+            'without internet the first fix can take a minute or more'
+    };
+    window.soloViewerGpsStatus = function(status) {
+        viewerGpsStatus = String(status || '');
+    };
 
     function sendPilotFix(fix) {
         if (pilotFixBusy) {                  // keep only the newest; it goes as soon as this one is done
@@ -397,8 +413,17 @@
             headers: authHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify(fix)
         }).then(function(r) {
-            if (r.status === 401) authRequired();
-        }).catch(function() {}).then(function() {
+            if (r.status === 401) {
+                authRequired();
+                pilotFixRejected = 'log in to the utility first';
+                return null;
+            }
+            return r.json();
+        }).then(function(data) {
+            if (data) pilotFixRejected = data.ok ? '' : 'the phone\'s position was refused: ' + data.message;
+        }).catch(function(err) {
+            pilotFixRejected = 'could not send the phone\'s position (' + err.message + ')';
+        }).then(function() {
             pilotFixBusy = false;
             const next = pilotFixPending;
             pilotFixPending = null;
@@ -488,8 +513,20 @@
             delete btnFollow.dataset.needs;
             btnFollow.title = 'Follow you (phone GPS good to ' + pilot.accuracy + ' m)';
         } else {
-            btnFollow.dataset.needs = pilot.problem
-                ? 'Follow cannot start: ' + pilot.problem + '.' : followNeedsDefault;
+            // the server only knows it got nothing: say why, if the phone can tell
+            let problem = pilot.problem;
+            if (VIEWER_GPS_PROBLEMS[viewerGpsStatus]) {
+                problem = VIEWER_GPS_PROBLEMS[viewerGpsStatus];
+            } else if (typeof pilot.age !== 'number') {
+                if (pilotFixRejected) problem = pilotFixRejected;
+                else if (!viewerGpsStatus && inAndroidWebView) {
+                    problem = 'this SoloLink Viewer app does not send the phone\'s GPS. Install version 1.4 or ' +
+                        'newer: open http://10.1.1.10/sololink_viewer.apk in the phone\'s browser';
+                }
+            } else if (pilotFixRejected) {
+                problem += ' (' + pilotFixRejected + ')';
+            }
+            btnFollow.dataset.needs = problem ? 'Follow cannot start: ' + problem + '.' : followNeedsDefault;
             btnFollow.title = btnFollow.dataset.needs;
         }
     }

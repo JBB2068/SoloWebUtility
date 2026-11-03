@@ -57,6 +57,7 @@ public class MainActivity extends Activity {
     private static final String SSID_PREFIX = "sololink_";
     private static final String WIFI_PASSKEY = "sololink";
     private static final int PERMISSION_REQ_CODE = 101;
+    private static final int GPS_PERMISSION_REQ_CODE = 102;
     // Phone GPS for the Cockpit's Follow: every fix is handed to the page, which posts it to the Solo
     private static final long PILOT_GPS_INTERVAL_MS = 200;
 
@@ -86,6 +87,7 @@ public class MainActivity extends Activity {
     private Runnable pageRetryRunnable;
     private LocationManager locationManager;
     private boolean isPilotGpsOn = false;
+    private boolean hasPilotFix = false;
 
     // The phone's GPS fixes -> window.soloViewerPilotFix(...) in the page (Cockpit Follow).
     // All four methods are implemented: before Android 11 they are abstract.
@@ -99,10 +101,15 @@ public class MainActivity extends Activity {
         public void onStatusChanged(String provider, int status, Bundle extras) {}
 
         @Override
-        public void onProviderEnabled(String provider) {}
+        public void onProviderEnabled(String provider) {
+            sendPilotGpsStatusToPage();
+        }
 
         @Override
-        public void onProviderDisabled(String provider) {}
+        public void onProviderDisabled(String provider) {
+            hasPilotFix = false;
+            sendPilotGpsStatusToPage();
+        }
     };
 
     private final BroadcastReceiver wifiScanReceiver = new BroadcastReceiver() {
@@ -136,6 +143,11 @@ public class MainActivity extends Activity {
         if (checkIfAlreadyConnectedToSoloLink()) {
             updateStatus("Connected to SoloLink!", "Loading web console at " + TARGET_URL + "...", true);
             bindToCurrentWifiAndLoadPage();
+            // No Wi-Fi scan needed, but Follow still needs the phone's precise location
+            if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(new String[] { Manifest.permission.ACCESS_FINE_LOCATION,
+                        Manifest.permission.ACCESS_COARSE_LOCATION }, GPS_PERMISSION_REQ_CODE);
+            }
             return;
         }
 
@@ -170,10 +182,35 @@ public class MainActivity extends Activity {
             locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, PILOT_GPS_INTERVAL_MS, 0f,
                     pilotGpsListener, Looper.getMainLooper());
             isPilotGpsOn = true;
+            hasPilotFix = false;
             Log.i(TAG, "Phone GPS on for Follow");
         } catch (SecurityException | IllegalArgumentException e) {
             Log.w(TAG, "Phone GPS not available: " + e.getMessage());
         }
+        sendPilotGpsStatusToPage();
+    }
+
+    // Why the page gets no fixes, for the Cockpit's Follow message:
+    // no_permission / approximate / off / unavailable / waiting / ok
+    private String pilotGpsStatus() {
+        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            return checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                    ? "approximate" : "no_permission";
+        }
+        if (locationManager == null) return "unavailable";
+        try {
+            if (!locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) return "off";
+        } catch (Exception e) {
+            return "unavailable";
+        }
+        if (!isPilotGpsOn) return "unavailable";
+        return hasPilotFix ? "ok" : "waiting";
+    }
+
+    private void sendPilotGpsStatusToPage() {
+        if (!isPageLoaded || webView == null) return;
+        webView.evaluateJavascript("window.soloViewerGpsStatus&&window.soloViewerGpsStatus('"
+                + pilotGpsStatus() + "')", null);
     }
 
     private void stopPilotGps() {
@@ -186,6 +223,10 @@ public class MainActivity extends Activity {
 
     private void sendPilotFixToPage(Location loc) {
         if (!isPageLoaded || webView == null || loc == null || !loc.hasAccuracy()) return;
+        if (!hasPilotFix) {
+            hasPilotFix = true;
+            sendPilotGpsStatusToPage();
+        }
         long ageMs = (SystemClock.elapsedRealtimeNanos() - loc.getElapsedRealtimeNanos()) / 1000000L;
         String js = String.format(Locale.US,
                 "window.soloViewerPilotFix&&window.soloViewerPilotFix({lat:%.8f,lon:%.8f,accuracy:%.1f,"
@@ -330,6 +371,7 @@ public class MainActivity extends Activity {
             public void onPageFinished(WebView view, String url) {
                 Log.d(TAG, "onPageFinished: " + url);
                 isPageLoaded = true;
+                sendPilotGpsStatusToPage();
                 // Once page has finished loading, reveal full screen WebView and discreet controls
                 statusOverlay.setVisibility(View.GONE);
                 webView.setVisibility(View.VISIBLE);
@@ -402,6 +444,11 @@ public class MainActivity extends Activity {
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == GPS_PERMISSION_REQ_CODE) {
+            startPilotGps();
+            sendPilotGpsStatusToPage();
+            return;
+        }
         if (requestCode == PERMISSION_REQ_CODE) {
             boolean allGranted = true;
             for (int res : grantResults) {

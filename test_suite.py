@@ -1825,7 +1825,7 @@ class TestSoloWebUtility(unittest.TestCase):
         # Python 2.7 rules for the Solo (no f-strings in the new code)
         with open(os.path.join(BASE_DIR, "cockpit_mgr.py"), "r", encoding="utf-8") as f:
             src = f.read()
-        self.assertIsNone(re.search(r'\bf"|\bf\'', src))
+        self.assertIsNone(re.search(r'(?<![\w>\'"])[fF]("[^"\n]*\{|\'[^\'\n]*\{)', src))   # f-strings only, not struct '<f'
 
         # Frontend: bar on the video, wired to telemetry.osd, closes history on outside click
         for page in (("static", "index.html"), ("templates", "index.html")):
@@ -3369,6 +3369,13 @@ class TestSoloWebUtility(unittest.TestCase):
         java = open(os.path.join(root, "android_app", "src", "com", "sololink", "viewer", "MainActivity.java")).read()
         self.assertIn("window.soloViewerPilotFix", java)
         self.assertIn("LocationManager.GPS_PROVIDER", java)
+        # why there is no fix: the app reports its GPS state, and asks for location even when it starts on SoloLink
+        self.assertIn("window.soloViewerGpsStatus", java)
+        self.assertIn("window.soloViewerGpsStatus", js)
+        self.assertIn("GPS_PERMISSION_REQ_CODE);", java)
+        for status in ("no_permission", "approximate", "off", "waiting"):
+            self.assertIn('"%s"' % status, java)
+            self.assertIn("%s:" % status, js)
 
     def test_44_selfie_and_multipoint(self):
         """Cockpit Selfie and Multipoint Cable Cam without Solex. Selfie: the server sends selfie.py the start
