@@ -357,6 +357,7 @@ def main():
         ("static/cockpit.css",                "%s/static/cockpit.css" % target_dir),
         ("static/cockpit.js",                 "%s/static/cockpit.js" % target_dir),
         ("static/padfinder.js",               "%s/static/padfinder.js" % target_dir),
+        ("static/spotfinder.js",              "%s/static/spotfinder.js" % target_dir),
         ("static/landing_pad.html",           "%s/static/landing_pad.html" % target_dir),
         ("static/jmuxer.min.js",              "%s/static/jmuxer.min.js" % target_dir),
         ("static/app.js",                     "%s/static/app.js" % target_dir),

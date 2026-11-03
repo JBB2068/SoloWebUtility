@@ -3157,6 +3157,64 @@ class TestSoloWebUtility(unittest.TestCase):
         self.assertEqual(out.returncode, 0, text)
         self.assertIn("PADFINDER OK", text)
 
+    def test_42_takeoff_spot(self):
+        """Precision landing on the takeoff spot, no pad: TAKEOFF SPOT turns the camera down when the
+        Solo arms, saves pictures of the ground on the climb (spotfinder.js) and hands the camera back
+        to the paddle; on the way down matches go to the Cube as LANDING_TARGET like pad sightings."""
+        import struct as _struct
+        import subprocess as _subprocess
+        import shutil as _shutil
+        import cockpit_mgr as cm
+        root = os.path.dirname(os.path.abspath(__file__))
+
+        class _Client(cm.LiveMAVLinkClient):
+            def __init__(self):
+                cm.LiveMAVLinkClient.__init__(self, cm.TelemetryState())
+                self.sent = []
+
+            def send_packet(self, packet_bytes):
+                self.sent.append(packet_bytes)
+
+        # a takeoff spot match is sent exactly like a pad sighting, and says which it was
+        client = _Client()
+        state = cm.TelemetryState()
+        pl = cm.PrecisionLanding(client, state=state)
+        ok, msg = pl.report_target({"angle_x": -0.05, "angle_y": 0.1, "distance": 8.0, "size": 0.3,
+                                    "age_ms": 60, "source": "spot"})
+        self.assertTrue(ok, msg)
+        body = bytes(client.sent[-1])[6:6 + bytearray(client.sent[-1])[1]]
+        _t, ax, ay, dist, sx, sy, num, frame = _struct.unpack('<QfffffBB', body)
+        self.assertEqual(bytearray(client.sent[-1])[5], 149)
+        self.assertAlmostEqual(dist, 8.0, places=4)
+        self.assertEqual(frame, 20)
+        self.assertEqual(pl.status()["source"], "spot")
+        self.assertIn("Takeoff spot found", state.mavlink_messages[-1]["text"])
+        # switching to the pad is logged again; anything else counts as the pad
+        pl.report_target({"angle_x": 0, "angle_y": 0, "distance": 5.0, "age_ms": 10, "source": "nonsense"})
+        self.assertEqual(pl.status()["source"], "pad")
+        self.assertIn("Landing pad found", state.mavlink_messages[-1]["text"])
+
+        # the Cockpit: button, script, arming / climb / hand back / matching
+        for page in ("static/index.html", "templates/index.html"):
+            html = open(os.path.join(root, page), encoding="utf-8").read()
+            self.assertIn('id="btnTakeoffSpot"', html, page)
+            self.assertLess(html.index('src="/spotfinder.js'), html.index('src="/cockpit.js'), page)
+        js = open(os.path.join(root, "static", "cockpit.js"), encoding="utf-8").read()
+        for s in ("SpotFinder.reference(", "SpotFinder.match(", "action: 'camera_down'", "action: 'camera_paddle'",
+                  "updateTakeoffSpot(telem, armed)", "source: source || 'pad'", "SPOT_HANDBACK_ALT = 10"):
+            self.assertIn(s, js)
+        self.assertIn('"static/spotfinder.js"', open(os.path.join(root, "install_to_solo.py")).read())
+
+        # the matcher itself on rendered camera frames (needs Node; skipped without it)
+        node = _shutil.which("node") if hasattr(_shutil, "which") else None
+        if not node:
+            self.skipTest("node not installed: takeoff spot image tests not run")
+        out = _subprocess.run([node, os.path.join(root, "tools", "test_spotfinder.js")],
+                              stdout=_subprocess.PIPE, stderr=_subprocess.STDOUT, timeout=600)
+        text = out.stdout.decode("utf-8", "replace")
+        self.assertEqual(out.returncode, 0, text)
+        self.assertIn("SPOTFINDER OK", text)
+
 
 def _struct_float(b4):
     """Pack 4 signed bytes into the float the gimbal sends as GMB_SWVER."""

@@ -1713,6 +1713,7 @@ class PrecisionLanding(object):
         self.last_sent_time = 0.0
         self.last_distance = None
         self.seen = False                 # a sighting went out within PRECLAND_SENDING_SECS
+        self.source = "pad"               # what the last sighting was: "pad" / "spot" (takeoff spot)
         self.loiter = None                # last Precision Loiter request: True / False / None (never sent)
         self.camera = None                # last camera request: "down" / "paddle" / None
         self._rate_count = 0
@@ -1726,8 +1727,8 @@ class PrecisionLanding(object):
                 self.state.add_message(text, severity)
 
     def report_target(self, data):
-        """One sighting from the pad finder: {angle_x, angle_y (rad), distance (m), size (rad), age_ms}.
-        -> (ok, message)."""
+        """One sighting from the pad finder or the takeoff spot finder: {angle_x, angle_y (rad),
+        distance (m), size (rad), age_ms, source: "pad" / "spot"}. -> (ok, message)."""
         if not isinstance(data, dict):
             return False, "Bad sighting."
         ax, ay, dist = _finite(data.get("angle_x")), _finite(data.get("angle_y")), _finite(data.get("distance"))
@@ -1744,16 +1745,19 @@ class PrecisionLanding(object):
         if size is None or size < 0 or size > math.pi:
             size = 0.0
         self.client.send_landing_target(ax, ay, dist, size, size)
+        source = "spot" if data.get("source") == "spot" else "pad"
         now = time.time()
         with self.lock:
-            found = not self.seen
+            found = not self.seen or source != self.source
             self.seen = True
+            self.source = source
             self.sent += 1
             self.last_sent_time = now
             self.last_distance = dist
             self._rate_count += 1
         if found:
-            self._log("Landing pad found, %.1f m away: sending it to the Cube" % dist, 5)
+            self._log("%s found, %.1f m away: sending it to the Cube" %
+                      ("Takeoff spot" if source == "spot" else "Landing pad", dist), 5)
         return True, "sent"
 
     def status(self):
@@ -1768,9 +1772,10 @@ class PrecisionLanding(object):
                 self._rate_time = now
             st = {"sending": self.seen, "rate": self.rate if self.seen else 0.0, "sent": self.sent,
                   "distance": round(self.last_distance, 2) if self.seen and self.last_distance else None,
-                  "loiter": self.loiter, "camera": self.camera}
+                  "loiter": self.loiter, "camera": self.camera, "source": self.source}
         if lost:
-            self._log("Landing pad lost: nothing sent to the Cube now", 4)
+            self._log("%s lost: nothing sent to the Cube now" %
+                      ("Takeoff spot" if st["source"] == "spot" else "Landing pad"), 4)
         return st
 
     def set_camera(self, down):

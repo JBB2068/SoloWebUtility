@@ -459,6 +459,38 @@
     const padCanvas = document.createElement('canvas');
     const padCtx = padCanvas.getContext('2d', { willReadFrequently: true });
 
+    // Takeoff spot (spotfinder.js): with TAKEOFF SPOT on, arming turns the camera down and the climb
+    // saves pictures of the ground around the takeoff spot; the camera goes back to the paddle by
+    // 10 m. On the way back down the live video is matched against them and the spot goes to the
+    // Cube like a pad sighting. A seen pad always wins.
+    const btnTakeoffSpot = document.getElementById('btnTakeoffSpot');
+    const SPOT_HEIGHTS = [2, 4, 8];      // pictures on the climb (m above the spot)
+    const SPOT_HEIGHT_WINDOW = 1.5;      // ... tried up to 1.5 x that height, then skipped
+    const SPOT_HANDBACK_ALT = 10;        // the camera is back on the paddle by this height whatever happened
+    const SPOT_AWAY_M = 3;               // ... or once the Solo is this far sideways (the spot leaves the view)
+    const SPOT_GIMBAL_MS = 1500;         // time for the gimbal to turn down after arming
+    const SPOT_CAMERA_HEIGHT = 0.15;     // the GoPro above the ground with the Solo on its legs (m)
+    const SPOT_VIDEO_LAG_S = 0.25;       // the video runs about this far behind the telemetry
+    const SPOT_SEARCH_M = 6;             // how far from where GPS puts it the spot is looked for
+    const SPOT_TRACK_M = 1.5;            // ... once it has been found (+5% of the height)
+    const SPOT_AGREE_M = 0.6;            // matches in a row must agree this well (+5% of the height)
+    const SPOT_AGREE_COUNT = 3;          // ... this many before anything goes to the Cube
+    const SPOT_NEAR_M = 15;              // only look when GPS has the Solo this close (+ its height)
+    let spotOn = false;
+    let spotRefs = [];                   // SpotFinder references from the last climb
+    let spotHome = null;                 // [lat, lon] where the Solo was armed
+    let spotGround = [];                 // the last GPS positions while disarmed
+    let spotNext = 0;                    // index into SPOT_HEIGHTS of the next picture
+    let spotCapturing = false;           // the camera is down for the climb pictures
+    let spotDownTime = 0;
+    let spotNotes = [];                  // why a height was skipped
+    let spotLastReason = '';             // why the last try at the next height failed
+    let spotTrack = null;                // {dn, de: the spot vs GPS (m), count, time, scale}
+    let spotLastArmed = null;
+    let spotLastSeen = 0;
+    let spotMsgUntil = 0;                // the end-of-climb message stays up until then
+    const SPOT_MSG_HOLD_MS = 5000;
+
     function setPrecisionMsg(text, isError) {
         if (!precisionMsg) return;
         const key = (isError ? '!' : '') + text;
@@ -471,8 +503,9 @@
 
     function setPrecisionLabel() {
         if (!btnPrecision || !precisionRow) return;
-        btnPrecision.textContent = '🎯 ' + (padFinderOn ? 'PRECISION ON' : 'PRECISION') + (precisionRow.hidden ? ' ▾' : ' ▴');
-        btnPrecision.classList.toggle('finder-on', padFinderOn);
+        const on = padFinderOn || spotOn;
+        btnPrecision.textContent = '🎯 ' + (on ? 'PRECISION ON' : 'PRECISION') + (precisionRow.hidden ? ' ▾' : ' ▴');
+        btnPrecision.classList.toggle('finder-on', on);
     }
 
     function closePrecisionRow() {
@@ -590,6 +623,189 @@
         });
     }
 
+    function telemArmed(t) {
+        return !!(t && t.status && t.status.armed);
+    }
+
+    // The Solo's offset from the takeoff spot, metres north / east (GPS)
+    function spotOffset(t) {
+        if (!spotHome || !t || !(t.gps_fix_type >= 3) || !(t.lat || t.lon)) return null;
+        const k = 111320;
+        return { n: (t.lat - spotHome[0]) * k, e: (t.lon - spotHome[1]) * k * Math.cos(spotHome[0] * Math.PI / 180) };
+    }
+
+    // Height above the takeoff spot and heading when the frame now on screen was taken
+    function spotView(t) {
+        const alt = (t.alt_rel || 0) - (t.climb_rate || 0) * SPOT_VIDEO_LAG_S;
+        return { height: Math.max(0.3, alt + SPOT_CAMERA_HEIGHT), yaw: t.yaw || 0 };
+    }
+
+    function setSpotButton() {
+        if (!btnTakeoffSpot) return;
+        btnTakeoffSpot.classList.toggle('active', spotOn);
+        btnTakeoffSpot.setAttribute('aria-pressed', spotOn ? 'true' : 'false');
+        btnTakeoffSpot.textContent = '📍 TAKEOFF SPOT: ' + (spotOn ? (spotRefs.length ? 'ON · ' + spotRefs.length + '/3' : 'ON') : 'OFF');
+    }
+
+    // Armed with TAKEOFF SPOT on: remember where, turn the camera down for the climb pictures
+    function spotStartClimb(t) {
+        spotRefs = [];
+        spotNext = 0;
+        spotNotes = [];
+        spotLastReason = '';
+        spotTrack = null;
+        let pts = spotGround.slice();
+        if (!pts.length && t && t.gps_fix_type >= 3 && (t.lat || t.lon)) pts = [[t.lat, t.lon]];
+        if (!pts.length) {
+            spotHome = null;
+            setSpotButton();
+            setPrecisionMsg('TAKEOFF SPOT: no GPS fix when armed, so the spot can\'t be saved. The landing uses GPS.', true);
+            return;
+        }
+        spotHome = [0, 1].map(function(i) {
+            return pts.reduce(function(s, p) { return s + p[i]; }, 0) / pts.length;
+        });
+        spotCapturing = true;
+        spotDownTime = Date.now();
+        postAction({ action: 'camera_down' }).catch(function() {});
+        setSpotButton();
+        setPrecisionMsg('TAKEOFF SPOT: camera down. Pictures at 2, 4 and 8 m on the climb; the camera goes back to the paddle by 10 m.', false);
+        speak('Camera down for the takeoff spot');
+    }
+
+    // Done with the climb pictures (or gave up): the camera goes back to the paddle
+    function spotFinishClimb(reason) {
+        if (!spotCapturing) return;
+        spotCapturing = false;
+        postAction({ action: 'camera_paddle' }).catch(function() {});
+        const n = spotRefs.length;
+        setSpotButton();
+        spotMsgUntil = Date.now() + SPOT_MSG_HOLD_MS;
+        if (n) {
+            setPrecisionMsg('TAKEOFF SPOT: ' + n + ' of 3 pictures saved' + (reason ? ' (' + reason + ')' : '') +
+                            '. Camera back on the paddle. LAND, RTL and Smart RTL land on the spot.', false);
+            speak('Takeoff spot saved');
+        } else {
+            const why = spotNotes.length ? spotNotes.join('; ') : reason;
+            setPrecisionMsg('TAKEOFF SPOT: no pictures saved' + (why ? ' (' + why + ')' : '') +
+                            '. The landing uses GPS. Camera back on the paddle.', true);
+            speak('Takeoff spot not saved');
+        }
+    }
+
+    // Telemetry side of the takeoff spot: arming, and when to stop the climb pictures
+    function updateTakeoffSpot(t, armed) {
+        if (!armed) {
+            if (t.gps_fix_type >= 3 && (t.lat || t.lon)) {
+                spotGround.push([t.lat, t.lon]);
+                if (spotGround.length > 10) spotGround.shift();
+            }
+            if (spotCapturing) spotFinishClimb('disarmed');
+        } else if (spotLastArmed === false && spotOn) {
+            spotStartClimb(t);
+        }
+        spotLastArmed = armed;
+        if (!spotCapturing || !armed) return;
+        const off = spotOffset(t);
+        if (spotNext >= SPOT_HEIGHTS.length) spotFinishClimb('');
+        else if ((t.alt_rel || 0) >= SPOT_HANDBACK_ALT) spotFinishClimb('reached ' + SPOT_HANDBACK_ALT + ' m');
+        else if (off && Math.hypot(off.n, off.e) > SPOT_AWAY_M) spotFinishClimb('the Solo moved away from the spot');
+    }
+
+    // One climb picture, once the Solo is high enough for the next one
+    function spotCapture(t, pyr, cam) {
+        if (Date.now() - spotDownTime < SPOT_GIMBAL_MS || spotNext >= SPOT_HEIGHTS.length) return;
+        const view = spotView(t), target = SPOT_HEIGHTS[spotNext], off = spotOffset(t);
+        if (view.height < target || !off) return;
+        // climbed past it (slow phone, video gap): a picture from higher up is no use low down
+        const late = view.height > target * SPOT_HEIGHT_WINDOW;
+        const res = late ? { ok: false, reason: spotLastReason || 'climbed past it before a picture was taken' }
+                         : SpotFinder.reference(pyr, cam, view, -off.n, -off.e);
+        if (res.ok) {
+            spotRefs.push(res.ref);
+            spotNext++;
+            spotLastReason = '';
+            setSpotButton();
+            setPrecisionMsg('TAKEOFF SPOT: ' + spotRefs.length + ' of 3 pictures saved (' + target + ' m).', false);
+        } else if (late) {
+            spotNotes.push(target + ' m: ' + res.reason);
+            spotNext++;
+            spotLastReason = '';
+            setPrecisionMsg('TAKEOFF SPOT: no picture at ' + target + ' m (' + res.reason + ').', true);
+            if (spotNext < SPOT_HEIGHTS.length) {
+                spotCapture(t, pyr, cam);          // the next height may be due now
+                return;
+            }
+        } else {
+            spotLastReason = res.reason;           // tried again on the next frame
+        }
+        if (spotNext >= SPOT_HEIGHTS.length) spotFinishClimb('');
+    }
+
+    // Look for the spot while armed near it, after the climb
+    function spotWanted(t) {
+        if (!spotOn || spotCapturing || !spotRefs.length || !telemArmed(t)) return false;
+        const off = spotOffset(t);
+        return !!off && Math.hypot(off.n, off.e) < SPOT_NEAR_M + (t.alt_rel || 0);
+    }
+
+    // Match this frame; only a match agreeing with the ones before it goes to the Cube.
+    // -> {m (SpotFinder.match), send}
+    function spotLook(t, pyr, cam) {
+        const view = spotView(t), off = spotOffset(t);
+        const gn = -off.n, ge = -off.e, now = Date.now();
+        if (spotTrack && now - spotTrack.time > PAD_LOST_MS) spotTrack = null;
+        const tracking = spotTrack && spotTrack.count >= SPOT_AGREE_COUNT;
+        const prior = tracking
+            ? { n: gn + spotTrack.dn, e: ge + spotTrack.de, radius: SPOT_TRACK_M + 0.05 * view.height, scale: spotTrack.scale }
+            : { n: gn, e: ge, radius: SPOT_SEARCH_M, scale: spotTrack ? spotTrack.scale : 1 };
+        const m = SpotFinder.match(pyr, cam, view, spotRefs, prior);
+        if (!m.ok) return { m: m, send: false };
+        const dn = m.n - gn, de = m.e - ge;
+        if (spotTrack && Math.hypot(dn - spotTrack.dn, de - spotTrack.de) < SPOT_AGREE_M + 0.05 * view.height) {
+            spotTrack.count++;
+        } else {
+            spotTrack = { count: 1 };
+        }
+        spotTrack.dn = dn;
+        spotTrack.de = de;
+        spotTrack.time = now;
+        spotTrack.scale = m.scale;
+        return { m: m, send: spotTrack.count >= SPOT_AGREE_COUNT };
+    }
+
+    if (btnTakeoffSpot) {
+        btnTakeoffSpot.addEventListener('click', function(e) {
+            e.stopPropagation();
+            spotOn = !spotOn;
+            setPrecisionLabel();
+            padLastFrameTime = -1;
+            const t = currentTelem;
+            if (spotOn) {
+                speak('Takeoff spot on');
+                checkPrecisionSetup(false);
+                if (telemArmed(t) && !spotRefs.length && (t.alt_rel || 0) < 0.5) {
+                    spotStartClimb(t);                 // armed, still on the ground
+                } else if (telemArmed(t) && !spotRefs.length) {
+                    setPrecisionMsg('TAKEOFF SPOT is on, but the Solo is already flying: turn it on before takeoff.', true);
+                } else if (spotRefs.length) {
+                    setPrecisionMsg('TAKEOFF SPOT on: ' + spotRefs.length + ' of 3 pictures of the takeoff spot saved. ' +
+                                    'LAND, RTL and Smart RTL land on it.', false);
+                } else {
+                    setPrecisionMsg('TAKEOFF SPOT on: when you arm, the camera turns down and the climb saves pictures ' +
+                                    'of the takeoff spot (2, 4, 8 m). The camera goes back to the paddle by 10 m.', false);
+                }
+            } else {
+                spotFinishClimb('turned off');
+                spotTrack = null;
+                clearPadOverlay();
+                setPrecisionMsg('TAKEOFF SPOT off.', false);
+                speak('Takeoff spot off');
+            }
+            setSpotButton();
+        });
+    }
+
     function precisionAction(body, doneText) {
         return postAction(body).then(function(data) {
             const ok = data && data.status === 'ok';
@@ -626,8 +842,9 @@
         padOverlayCtx.clearRect(0, 0, padOverlay.width, padOverlay.height);
     }
 
-    // Outline the pad on the video and draw a line from straight below the Solo to its centre
-    function drawPadOverlay(det, m, fw, fh) {
+    // Outline the pad (or the takeoff spot's picture, in blue) on the video and draw a line from
+    // straight below the Solo to its centre
+    function drawPadOverlay(det, m, fw, fh, spot) {
         if (!padOverlayCtx) return;
         const dpr = window.devicePixelRatio || 1;
         const cw = padOverlay.clientWidth, ch = padOverlay.clientHeight;
@@ -642,21 +859,26 @@
         const ox = (cw - fw * k) / 2, oy = (ch - fh * k) / 2;
         const P = function(p) { return [ox + p[0] * k, oy + p[1] * k]; };
         const ctx = padOverlayCtx;
+        const colour = spot ? '#38bdf8' : '#10b981';
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.lineWidth = 3;
-        ctx.strokeStyle = '#10b981';
-        ctx.beginPath();
-        det.corners.forEach(function(p, i) {
-            const q = P(p);
-            if (i === 0) ctx.moveTo(q[0], q[1]); else ctx.lineTo(q[0], q[1]);
-        });
-        ctx.closePath();
-        ctx.stroke();
-        const tl = P(det.corners[0]);
-        ctx.fillStyle = '#10b981';
-        ctx.beginPath();
-        ctx.arc(tl[0], tl[1], 5, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.strokeStyle = colour;
+        if (det.corners) {
+            ctx.beginPath();
+            det.corners.forEach(function(p, i) {
+                const q = P(p);
+                if (i === 0) ctx.moveTo(q[0], q[1]); else ctx.lineTo(q[0], q[1]);
+            });
+            ctx.closePath();
+            ctx.stroke();
+        }
+        if (det.corners && !spot) {
+            const tl = P(det.corners[0]);
+            ctx.fillStyle = colour;
+            ctx.beginPath();
+            ctx.arc(tl[0], tl[1], 5, 0, Math.PI * 2);
+            ctx.fill();
+        }
         const c = P(det.center), mid = P([fw / 2, fh / 2]);
         ctx.setLineDash([6, 4]);
         ctx.lineWidth = 2;
@@ -675,12 +897,12 @@
             ctx.lineWidth = 4;
             ctx.strokeStyle = '#000';
             ctx.strokeText(label, c[0] + 10, c[1] - 10);
-            ctx.fillStyle = '#d1fae5';
+            ctx.fillStyle = spot ? '#e0f2fe' : '#d1fae5';
             ctx.fillText(label, c[0] + 10, c[1] - 10);
         }
     }
 
-    function sendPadSighting(m, t0) {
+    function sendPadSighting(m, t0, source) {
         if (padPostBusy) return;            // never queue up: the next frame is newer anyway
         padPostBusy = true;
         fetch('/api/precland/target', {
@@ -688,7 +910,7 @@
             headers: authHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({
                 angle_x: m.angle_x, angle_y: m.angle_y, distance: m.distance, size: m.size,
-                age_ms: Math.round(performance.now() - t0)
+                age_ms: Math.round(performance.now() - t0), source: source || 'pad'
             })
         }).then(function(r) {
             if (r.status === 401) authRequired();
@@ -697,29 +919,48 @@
         });
     }
 
-    function showPadStatus(m) {
+    // "PAD 3.2 m below, 0.4 m ahead, 0.1 m right · Cube gets 9/s" (name: PAD or SPOT)
+    function showTargetStatus(name, m, sending) {
+        if (name === 'SPOT' && Date.now() < spotMsgUntil) return;
         const notReady = padCheck && !padCheck.ready;
-        if (m) {
-            const below = getConvertedAlt(m.below);
-            const ahead = getConvertedAlt(Math.abs(m.ahead)), right = getConvertedAlt(Math.abs(m.right));
-            let text = 'PAD ' + below.val.toFixed(1) + ' ' + below.unit + ' below, ' +
-                ahead.val.toFixed(1) + ' ' + ahead.unit + (m.ahead >= 0 ? ' ahead, ' : ' behind, ') +
-                right.val.toFixed(1) + ' ' + right.unit + (m.right >= 0 ? ' right' : ' left');
-            if (notReady) text += '. ' + padCheck.message;
-            else text += padServer.sending ? ' · Cube gets ' + padServer.rate + '/s' : ' · sending';
-            setPrecisionMsg(text, !!notReady);
-        } else if (Date.now() - padLastSeen > PAD_LOST_MS) {
-            setPrecisionMsg(notReady ? padCheck.message : 'Looking for the pad. Point the camera down and fly over it.', !!notReady);
-        }
+        const below = getConvertedAlt(m.below);
+        const ahead = getConvertedAlt(Math.abs(m.ahead)), right = getConvertedAlt(Math.abs(m.right));
+        let text = name + ' ' + below.val.toFixed(1) + ' ' + below.unit + ' below, ' +
+            ahead.val.toFixed(1) + ' ' + ahead.unit + (m.ahead >= 0 ? ' ahead, ' : ' behind, ') +
+            right.val.toFixed(1) + ' ' + right.unit + (m.right >= 0 ? ' right' : ' left');
+        if (!sending) text += ' · checking (' + (spotTrack ? spotTrack.count : 0) + ' of ' + SPOT_AGREE_COUNT + ')';
+        else if (notReady) text += '. ' + padCheck.message;
+        else text += padServer.sending ? ' · Cube gets ' + padServer.rate + '/s' : ' · sending';
+        setPrecisionMsg(text, !!(sending && notReady));
     }
 
+    // Nothing seen for a while: say what is being looked for
+    function showLookingStatus(spotMatch, spotActive) {
+        const now = Date.now();
+        if (now - padLastSeen < PAD_LOST_MS || now - spotLastSeen < PAD_LOST_MS || now < spotMsgUntil) return;
+        const notReady = padCheck && !padCheck.ready;
+        if (notReady) { setPrecisionMsg(padCheck.message, true); return; }
+        if (!spotActive) {
+            setPrecisionMsg('Looking for the pad. Point the camera down and fly over it.', false);
+            return;
+        }
+        const text = (padFinderOn ? 'Looking for the pad and the takeoff spot' : 'Looking for the takeoff spot') +
+            (spotMatch && spotMatch.reason ? ' (' + spotMatch.reason + ')' : '');
+        setPrecisionMsg(text + '. Nothing is sent until it is seen; the Solo lands on GPS.', false);
+    }
+
+    // ~10 looks a second at the live video: the pad first, then the takeoff spot (or, on the
+    // climb, the takeoff spot pictures)
     function padTick() {
-        if (!padFinderOn) return;
+        const t = currentTelem;
+        const spotActive = typeof SpotFinder !== 'undefined' && !!t && (spotCapturing || spotWanted(t));
+        if (!padFinderOn && !spotActive) return;
         const v = liveVideoFeed;
         if (!videoWanted() || !v || v.readyState < 2 || !v.videoWidth ||
                 Date.now() - lastVideoPacketTime > PAD_VIDEO_FRESH_MS) {
             clearPadOverlay();
-            setPrecisionMsg('Pad finder on, but there is no live video (is Solex using it?). Nothing is sent.', true);
+            setPrecisionMsg((padFinderOn ? 'Pad finder' : 'TAKEOFF SPOT') +
+                            ' on, but there is no live video (is Solex using it?). Nothing is sent.', true);
             return;
         }
         if (v.currentTime === padLastFrameTime) return;          // no new frame yet
@@ -731,12 +972,20 @@
             padCanvas.width = w;
             padCanvas.height = h;
         }
-        let det = null, m = null;
+        let det = null, m = null, spot = null;
         try {
             padCtx.drawImage(v, 0, 0, w, h);
             padGray = PadFinder.toGray(padCtx.getImageData(0, 0, w, h).data, w, h, padGray);
-            det = PadFinder.detect(padGray, w, h);
-            if (det) m = PadFinder.measure(det, PadFinder.camera(w, h, padFovDeg, padLens), padSizeM);
+            const cam = PadFinder.camera(w, h, padFovDeg, padLens);
+            if (padFinderOn) {
+                det = PadFinder.detect(padGray, w, h);
+                if (det) m = PadFinder.measure(det, cam, padSizeM);
+            }
+            if (!m && spotActive) {
+                const pyr = SpotFinder.pyramid(padGray, w, h);
+                if (spotCapturing) spotCapture(t, pyr, cam);
+                else spot = spotLook(t, pyr, cam);
+            }
         } catch (err) {
             console.warn('[PadFinder]', err);
         }
@@ -746,13 +995,24 @@
             padWorkWidth = PAD_WORK_WIDTH_MIN;      // slow phone: smaller frames (shorter range)
             padSlowMs = 0;
         }
-        drawPadOverlay(det, m, w, h);
         if (m) {
+            drawPadOverlay(det, m, w, h);
             if (Date.now() - padLastSeen > 3000) speak('Pad found');
             padLastSeen = Date.now();
-            sendPadSighting(m, t0);
+            sendPadSighting(m, t0, 'pad');
+            showTargetStatus('PAD', m, true);
+        } else if (spot && spot.m.ok) {
+            drawPadOverlay(spot.m.center ? { corners: spot.m.outline, center: spot.m.center } : null, spot.m, w, h, true);
+            if (spot.send) {
+                if (Date.now() - spotLastSeen > 3000) speak('Takeoff spot found');
+                spotLastSeen = Date.now();
+                sendPadSighting(spot.m, t0, 'spot');
+            }
+            showTargetStatus('SPOT', spot.m, spot.send);
+        } else {
+            drawPadOverlay(null, null, w, h);
+            if (!spotCapturing) showLookingStatus(spot && spot.m, spotActive);
         }
-        showPadStatus(m);
     }
     if (typeof PadFinder !== 'undefined') setInterval(padTick, PAD_TICK_MS);
 
@@ -765,11 +1025,14 @@
             btnPrecLoiter.setAttribute('aria-pressed', on ? 'true' : 'false');
             btnPrecLoiter.textContent = 'PREC LOITER: ' + (on ? 'ON' : 'OFF');
         }
-        const armed = !!(telem.status && telem.status.armed);
+        const armed = telemArmed(telem);
         if (btnPrecLand) btnPrecLand.disabled = !armed;
-        // camera straight down as the Solo starts to land (LAND, RTL, Smart RTL) with the finder on
+        updateTakeoffSpot(telem, armed);
+        // camera straight down as the Solo starts to land (LAND, RTL, Smart RTL) with the finder
+        // on, or with pictures of the takeoff spot saved
         const mode = telem.flight_mode || '';
-        if (padFinderOn && armed && padLastMode !== null && mode !== padLastMode && PAD_LAND_MODES.indexOf(mode) !== -1) {
+        const looking = padFinderOn || (spotOn && spotRefs.length > 0);
+        if (looking && armed && padLastMode !== null && mode !== padLastMode && PAD_LAND_MODES.indexOf(mode) !== -1) {
             postAction({ action: 'camera_down' }).catch(function() {});
         }
         padLastMode = mode;
