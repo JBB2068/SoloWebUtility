@@ -263,18 +263,18 @@ This document is an updated edition of the original <em>3DR Solo User Manual V9<
 <p>The 3-Axis Solo Gimbal provides greater control of GoPro® HERO cameras. The Gimbal is included, fully installed, in the package Solo with 3-Axis Gimbal, and is also available separately for Solo. This powerful accessory is fully covered in Chapter 3 of this manual.</p>
 <hr />
 <h3 id="12-aircraft-overview">1.2 Aircraft Overview</h3>
-<h4 id="121-smart-battery">1.2.6 Smart Battery</h4>
+<h4 id="121-smart-battery">1.2.7 Smart Battery</h4>
 <blockquote>
 <p><strong>Updated — 2026:</strong> Original 3DR Solo Smart Batteries are no longer manufactured. Existing batteries have limited remaining service life. For current replacement and alternative battery options, see <strong>Section 2.3</strong> and <strong>Section 10</strong> (Maintenance).</p>
 </blockquote>
 <p>The battery connects to Solo's battery bay. Solo's power button is located on the battery; Solo can be powered only when the battery is connected.</p>
-<h4 id="122-motors-and-propellers">1.2.6 Motors and Propellers</h4>
+<h4 id="122-motors-and-propellers">1.2.7 Motors and Propellers</h4>
 <p>Solo's arms are labeled 1 through 4 on the ends of the arms. Motors on arms #1 and #2 spin counterclockwise and use clockwise-tightening propellers with silver tops. Motors on arms #3 and #4 spin clockwise and use counterclockwise-tightening propellers with black tops.</p>
-<h4 id="123-orientation-leds">1.2.6 Orientation LEDs</h4>
+<h4 id="123-orientation-leds">1.2.7 Orientation LEDs</h4>
 <p>Each arm contains an LED for ground-to-air directional awareness; when armed for flight, the two front arms (#1 and #3) display white, and the two rear arms (#2 and #4) display red. This LED scheme mimics the headlight and taillight style of a car.</p>
-<h4 id="124-fixed-camera-mount-and-hdmi-cable">1.2.6 Fixed Camera Mount and HDMI Cable</h4>
+<h4 id="124-fixed-camera-mount-and-hdmi-cable">1.2.7 Fixed Camera Mount and HDMI Cable</h4>
 <p>Solo includes a GoPro® The Frame™ fixed mount to mount a GoPro® HERO camera. The HDMI cable connects to the GoPro® to output video during flight.</p>
-<p><em>Figure 1.2.6.1: Solo Overview</em></p>
+<p><em>Figure 1.2.7.1: Solo Overview</em></p>
 <table>
 <thead>
 <tr>
@@ -582,15 +582,15 @@ The 3DR Solo Web Utility is a free, open-source on-board management console that
 </ul>
 <p><strong>Installation steps:</strong></p>
 <ol>
-<li>Download <strong>Solo Web Utility v1.2.6 Installer.exe</strong> from open-solo.com (approximately 160 MB standalone executable).</li>
+<li>Download <strong>Solo Web Utility v1.2.7 Installer.exe</strong> from open-solo.com (approximately 160 MB standalone executable).</li>
 <li>Power on Solo and the Controller and connect your PC to the SoloLink Wi-Fi network as you normally would.</li>
-<li>Double-click <code>Solo Web Utility v1.2.6 Installer.exe</code>. The installer automatically connects to Solo via SSH at 10.1.1.10, uploads all application files and firmware images, verifies file integrity, configures startup on every boot via <code>/etc/inittab</code>, and starts the web server on port 80.</li>
+<li>Double-click <code>Solo Web Utility v1.2.7 Installer.exe</code>. The installer automatically connects to Solo via SSH at 10.1.1.10, uploads all application files and firmware images, verifies file integrity, configures startup on every boot via <code>/etc/inittab</code>, and starts the web server on port 80.</li>
 <li>When the installer completes, open any browser on any device connected to SoloLink and navigate to <strong>http://10.1.1.10</strong>. The utility is live and will persist across all future power cycles without reinstallation.</li>
 </ol>
 <blockquote>
 <p>The installer uses SSH/SFTP to transfer files. It uses unpipelined synchronous transfers to prevent the Solo's embedded OpenSSH server buffer from overflowing over Wi-Fi. If a transfer is interrupted, the installer automatically resumes from the exact byte offset on the next run.</p>
 </blockquote>
-<p><strong>Android installer:</strong> <code>Solo Web Utility v1.2.6 Installer.apk</code> (approximately 160 MB, from open-solo.com) installs exactly the same files from an Android phone connected to SoloLink. It is only an installer: once the utility is on the Solo, you can delete it and use a browser.</p>
+<p><strong>Android installer:</strong> <code>Solo Web Utility v1.2.7 Installer.apk</code> (approximately 160 MB, from open-solo.com) installs exactly the same files from an Android phone connected to SoloLink. It is only an installer: once the utility is on the Solo, you can delete it and use a browser.</p>
 <p><strong>Sololink Viewer:</strong> the separate Android video viewer can be downloaded with <strong>📥 Viewer for Android</strong> in the utility's top bar.</p>
 <h3 id="283-automated-preflight-update-firmware">2.8.3 Automated Preflight Update (Firmware)</h3>
 <blockquote>
@@ -687,6 +687,10 @@ The 3DR Solo Web Utility is a free, open-source on-board management console that
 <td>5S Li-ion (BMSOne / Upgrade Energy 5S2P)</td>
 <td>For 5S Li-ion packs on a BMSOne — 14.5V Low / 14.1V Critical with Smart RTL, thrust compensation 13.5–21.0V</td>
 </tr>
+<tr>
+<td>Precision Landing (Cockpit pad finder)</td>
+<td>Turns on ArduPilot's precision landing with the target sent by the Cockpit's pad finder: <code>PLND_ENABLED = 1</code>, <code>PLND_TYPE = 1</code> (MAVLink), Kalman filter, 0.25 s lag, moves over the pad before descending when it is more than 2.5 m off. Reboot the Cube once after applying it</td>
+</tr>
 </tbody>
 </table>
 <p><strong>Battery Solutions tab:</strong> original Solo batteries were last made in 2015. This tab compares the three ways to get good batteries today — the ready-built Battery Mod, the do-it-yourself <em>Solo Battery Mod for Dummies</em> guide (stored on the Solo as a PDF), and the BMSOne with off-the-shelf 4S or 5S packs — and applies the matching preset with one click.</p>
@@ -717,6 +721,25 @@ The 3DR Solo Web Utility is a free, open-source on-board management console that
 </blockquote>
 <p><strong>Arming:</strong> A two-step confirmation sequence protects against accidental motor arming. The default focus is always on Cancel for safety.</p>
 <p><strong>Units:</strong> Toggle between Metric and Imperial. Preference is remembered across sessions.</p>
+<p><strong>Smart Shots:</strong> 🎬 SMART SHOTS opens a row of shots: Orbit, Cable Cam, Pano, Zip Line, Rewind, Transect and Return Home. Arm and fly, then tap a shot. The Solo's shot manager runs it just as when it is started from Solex, and you fly it with the Controller. Fly on the Controller, or ✋ END SHOT, ends it.</p>
+<ul>
+<li>Shots start only while the Solo is armed.</li>
+<li>If Solex is connected to the Solo, start shots from Solex; the Cockpit tells you so.</li>
+<li>Selfie, Follow and Multipoint Cable Cam are shown but need Solex (the drawn path, the phone's GPS, attaching to the cable).</li>
+<li>The Solo's shot manager talks to one app at a time. While a shot started from the Cockpit runs, Solex cannot connect; it can again as soon as the shot ends.</li>
+</ul>
+<p><strong>Precision Landing:</strong> the Solo can land on a printed pad. The Cockpit looks for the pad in the live video and sends where it is to the Cube; ArduPilot's own precision landing then steers onto it in LAND, RTL (the Controller's Home button) and Smart RTL, and Precision Loiter holds over it in Fly.</p>
+<ol>
+<li><strong>Print the pad:</strong> 🎯 PRECISION → ⚙ PAD → 📄 PRINT PAD (or open <code>http://10.1.1.10/landing_pad.html</code>). The default is a 24 in black square; any size works if you enter it under ⚙ PAD (the side of the black square). Lay it flat in the open with nothing covering it. For RTL and Smart RTL, put it where the Solo took off (the home point).</li>
+<li><strong>Set up the Cube once:</strong> apply the 🎯 <em>Precision Landing</em> preset on the Parameters tab, then reboot the Cube.</li>
+<li><strong>Turn on the pad finder:</strong> 🎯 PRECISION → <strong>PAD FINDER: ON</strong>. When the pad is seen, it is outlined in the video with its height.</li>
+<li><strong>Land:</strong> fly over the pad and press 🛬 LAND, or use RTL or Smart RTL. With the pad finder on, the camera turns straight down as the Solo starts to land. ⬇ CAMERA DOWN points it down by hand; moving the gimbal paddle takes it back.</li>
+<li><strong>Precision Loiter:</strong> <strong>PREC LOITER: ON</strong> makes Fly hold over the pad while it is seen; the sticks still move the Solo.</li>
+</ol>
+<p><strong>Pad settings (⚙ PAD):</strong> pad size, camera field of view (118° for GoPro Wide) and lens type. If the height shown over the pad reads too high, raise the FOV; if it reads too low, lower it.</p>
+<blockquote>
+<p><strong>Safety:</strong> the pad finder runs in your browser. Keep the Cockpit open, with the live video, on your phone or PC for the whole landing. If the pad is lost (video, Wi-Fi or browser drop), nothing is sent and the Solo lands or loiters as it normally would, but with ArduPilot's default setting (<code>PLND_STRICT</code> 1) it may first climb back and retry the landing. Try it on the bench with the props off first, then low and over open ground, and be ready to take over with Fly.</p>
+</blockquote>
 <h3 id="289-wi-fi-nat-router">2.8.9 Wi-Fi NAT Router</h3>
 <p>The Solo Web Utility can configure the Controller to connect to your home 2.4 GHz Wi-Fi network while keeping the SoloLink access point active. Built-in IP forwarding and NAT masquerade allow your home computer to reach Solo's companion computer at 10.1.1.10 directly without disconnecting from your home internet. This enables simultaneous access to Solo's web interface and your home network.</p>
 <h3 id="2810-security">2.8.10 Security</h3>
@@ -1338,7 +1361,7 @@ Drone regulations in the United States have changed significantly since this man
 </blockquote>
 <h4 id="612-main-interface">6.1.2 Main Interface</h4>
 <p>This is the screen you'll use most of the time when flying Solo. It's available by accessing the fly/video screen in Solex or SidePilot. The main screen provides the live video feed from the GoPro camera, telemetry statistics, access to Smart Shots, and more.</p>
-<p><em>Figure 6.1.2.6: App — Main Interface</em></p>
+<p><em>Figure 6.1.2.7: App — Main Interface</em></p>
 <table>
 <thead>
 <tr>
@@ -1451,6 +1474,9 @@ The original Map Tile Provider setting is no longer applicable. Map settings and
 <hr />
 <h3 id="62-smart-shots">6.2 Smart Shots</h3>
 <p>Solo's four different Smart Shots automate flying Solo to make it easy to get stunning aerial video. By default, Cable Cam and Orbit are assigned to the controller's A and B buttons. Use the app to access Selfie or Follow. Smart Shots are available only with the Solo app.</p>
+<blockquote>
+<p><strong>Solo Web Utility:</strong> the Cockpit's 🎬 SMART SHOTS row also starts Orbit, Cable Cam, Pano, Zip Line, Rewind, Transect and Return Home (see 2.8.8 Cockpit HUD and Live Video). Selfie, Follow and Multipoint Cable Cam still need Solex.</p>
+</blockquote>
 <blockquote>
 <p><strong>Tip:</strong> When using Smart Shots without a Solo Gimbal, Solo cannot ensure that the subject is in the frame at all times. You can improve the chances of keeping the subject in the frame by adjusting the camera mount so the camera is fixed at an appropriate angle.</p>
 </blockquote>
@@ -1597,7 +1623,7 @@ The original Map Tile Provider setting is no longer applicable. Map settings and
 <em>Figure 7.1.1.4: Controller — Calibration Error Alert</em></p>
 <h4 id="712-service-alerts">7.1.2 Service Alerts</h4>
 <p>The following alerts indicate a system error that requires service. Consult community resources at 3DRPilots.com. A control stick error can occur either in flight or before takeoff. If the control stick error is received in flight, Solo will return home and land.</p>
-<p><em>Figure 7.1.2.6: Controller — Service Alerts</em></p>
+<p><em>Figure 7.1.2.7: Controller — Service Alerts</em></p>
 <table>
 <thead>
 <tr>

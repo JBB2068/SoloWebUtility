@@ -1,5 +1,5 @@
-# Builds "Solo Web Utility v1.2.6 Installer.apk": the phone installer for Solo Web Utility.
-# Output: ..\release\dist\Solo Web Utility v1.2.6 Installer.apk
+# Builds "Solo Web Utility v1.2.7 Installer.apk": the phone installer for Solo Web Utility.
+# Output: ..\release\dist\Solo Web Utility v1.2.7 Installer.apk
 # Needs: Android SDK (build-tools + platform), a JDK (javac, jar), Python 3.
 $ErrorActionPreference = "Stop"
 
@@ -7,9 +7,9 @@ $AppDir  = $PSScriptRoot
 $RootDir = Split-Path -Parent $AppDir
 Set-Location $AppDir
 
-$ApkName     = "Solo Web Utility v1.2.6 Installer.apk"
-$VersionName = "1.2.6"
-$VersionCode = "10206"
+$ApkName     = "Solo Web Utility v1.2.7 Installer.apk"
+$VersionName = "1.2.7"
+$VersionCode = "10207"
 
 # --- Tools -------------------------------------------------------------------------
 $SdkDir = $env:ANDROID_HOME
