@@ -1,7 +1,7 @@
 {
-  "version": "1.2.7",
-  "iteration": 79,
-  "updated_at": 1793734433,
+  "version": "1.2.8",
+  "iteration": 80,
+  "updated_at": 1793828529,
   "changelog": [
     {
       "version": "1.0.67",
@@ -448,6 +448,12 @@
       "iteration": 79,
       "date": "2026-11-03 13:33:53",
       "description": "Cockpit Smart Shots (Orbit, Cable Cam, Pano, Zip Line, Rewind, Transect, Return Home through Open Solo's shot manager on TCP 5507) and Precision Landing (Cockpit pad finder sends LANDING_TARGET to ArduPilot 4.7.2's own precision landing for LAND, RTL, Smart RTL and Precision Loiter; Precision Landing preset). Manuals and website updated. test_40, test_41."
+    },
+    {
+      "version": "1.2.8",
+      "iteration": 80,
+      "date": "2026-11-04 15:42:09",
+      "description": "Cockpit TAKEOFF SPOT (precision landing on the takeoff spot, no pad: camera down on arming, ground pictures at 2/4/8 m on the climb, matched on the way down); Follow, Selfie and Multipoint Cable Cam without Solex (all ten Smart Shots from the Cockpit); SoloLink Viewer 1.4 (asks for precise location, says why Follow has no position); precision landing makes up for the video delay beyond PLND_LAG (Video delay setting under PAD) so Precision Loiter no longer swings; the installer also installs the viewer APK."
     }
   ]
 }
