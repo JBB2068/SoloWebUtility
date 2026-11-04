@@ -253,6 +253,7 @@ class TelemetryState(object):
         self.lat = 0.0
         self.lon = 0.0
         self.position_time = 0.0          # time.time() of the last GLOBAL_POSITION_INT
+        self.vel_ned = (0.0, 0.0, 0.0)    # m/s north, east, down from GLOBAL_POSITION_INT
 
         # Navigation / Home
         self.home_lat = 0.0
@@ -798,6 +799,7 @@ class LiveMAVLinkClient(threading.Thread):
                     self.state.alt_rel = round(alt_rel_mm / 1000.0, 1)
                     self.state.heading = round(hdg_cdeg / 100.0, 1)
                     self.state.climb_rate = round(-vz / 100.0, 2)
+                    self.state.vel_ned = (vx / 100.0, vy / 100.0, vz / 100.0)
                     self.state.position_time = time.time()
                     self.state.update_distance_bearing()
 
@@ -2053,6 +2055,13 @@ PRECLAND_MAX_ANGLE = 1.4          # rad off the camera axis; no lens on the Solo
 PRECLAND_MIN_DISTANCE = 0.2       # m
 PRECLAND_MAX_DISTANCE = 60.0      # m
 PRECLAND_PARAMS = ("PLND_ENABLED", "PLND_TYPE", "PLND_LAG")
+# The video reaches the Cockpit ~0.4 s after the GoPro saw it. ArduPilot makes up for PLND_LAG
+# of that (at most 0.25 s); the rest is made up here: each sighting is moved on by the Solo's
+# velocity (and turn) over the delay the Cube doesn't cover, so Precision Loiter doesn't chase
+# where the pad was.
+PRECLAND_CUBE_LAG_DEFAULT = 0.25  # s: PLND_LAG from the Precision Landing preset
+PRECLAND_MAX_DELAY = 1.5          # s: a longer video delay is refused
+PRECLAND_VEL_MAX_AGE = 1.0        # s: older velocity isn't used to move a sighting on
 
 
 def _finite(value):
@@ -2064,6 +2073,27 @@ def _finite(value):
     if v != v or v in (float("inf"), float("-inf")):
         return None
     return v
+
+
+def predict_landing_target(angle_x, angle_y, distance, vel_ned, yaw_deg, yaw_rate_deg, secs):
+    """A sighting from secs ago, moved on to now: the Solo has since flown vel_ned * secs (m/s
+    north, east, down) and turned yaw_rate_deg * secs. Angles and distance as LANDING_TARGET
+    carries them in MAV_FRAME_LOCAL_FRD (level, turned with the heading). -> (angle_x, angle_y, distance)."""
+    if secs <= 0:
+        return angle_x, angle_y, distance
+    # where the pad was: forward, right, down from the Solo (as ArduPilot reads the angles)
+    u = (-math.tan(angle_y), math.tan(angle_x), 1.0)
+    n = math.sqrt(u[0] * u[0] + u[1] * u[1] + 1.0)
+    f, r, d = u[0] / n * distance, u[1] / n * distance, u[2] / n * distance
+    y = math.radians(yaw_deg)
+    vn, ve, vd = vel_ned
+    f -= (vn * math.cos(y) + ve * math.sin(y)) * secs
+    r -= (-vn * math.sin(y) + ve * math.cos(y)) * secs
+    d = max(0.1, d - vd * secs)
+    # turned right by t: what was ahead is now to the left
+    t = math.radians(yaw_rate_deg * secs)
+    f, r = f * math.cos(t) + r * math.sin(t), -f * math.sin(t) + r * math.cos(t)
+    return math.atan2(r, d), math.atan2(-f, d), math.sqrt(f * f + r * r + d * d)
 
 
 def precland_param_report(values):
@@ -2095,6 +2125,8 @@ class PrecisionLanding(object):
         self.last_distance = None
         self.seen = False                 # a sighting went out within PRECLAND_SENDING_SECS
         self.source = "pad"               # what the last sighting was: "pad" / "spot" (takeoff spot)
+        self.cube_lag = PRECLAND_CUBE_LAG_DEFAULT   # PLND_LAG as last read from the Cube
+        self.lead = 0.0                   # s the last sighting was moved on (video delay - PLND_LAG)
         self.loiter = None                # last Precision Loiter request: True / False / None (never sent)
         self.camera = None                # last camera request: "down" / "paddle" / None
         self._rate_count = 0
@@ -2107,9 +2139,28 @@ class PrecisionLanding(object):
             with self.state.lock:
                 self.state.add_message(text, severity)
 
+    def set_cube_lag(self, value):
+        """PLND_LAG as read from the Cube (None: unknown, keep the last)."""
+        v = _finite(value)
+        if v is not None and 0.0 <= v <= 1.0:
+            self.cube_lag = v
+
+    def _move_on(self, ax, ay, dist, delay):
+        """The sighting moved on by the part of the video delay the Cube doesn't make up for."""
+        lead = delay - self.cube_lag
+        if lead <= 0 or self.state is None:
+            return ax, ay, dist, 0.0
+        with self.state.lock:
+            if time.time() - self.state.position_time > PRECLAND_VEL_MAX_AGE:
+                return ax, ay, dist, 0.0
+            vel, yaw, yaw_rate = self.state.vel_ned, self.state.yaw, self.state.yaw_rate
+        ax, ay, dist = predict_landing_target(ax, ay, dist, vel, yaw, yaw_rate, lead)
+        return ax, ay, dist, lead
+
     def report_target(self, data):
         """One sighting from the pad finder or the takeoff spot finder: {angle_x, angle_y (rad),
-        distance (m), size (rad), age_ms, source: "pad" / "spot"}. -> (ok, message)."""
+        distance (m), size (rad), age_ms, delay_s (how old the video frame is: the video delay
+        plus age_ms), source: "pad" / "spot"}. -> (ok, message)."""
         if not isinstance(data, dict):
             return False, "Bad sighting."
         ax, ay, dist = _finite(data.get("angle_x")), _finite(data.get("angle_y")), _finite(data.get("distance"))
@@ -2123,8 +2174,14 @@ class PrecisionLanding(object):
             return False, "Pad distance out of range."
         if age > PRECLAND_MAX_AGE_MS:
             return False, "Sighting too old."
+        delay = _finite(data.get("delay_s", 0))
+        if delay is None or not 0 <= delay <= PRECLAND_MAX_DELAY:
+            return False, "Bad video delay."
         if size is None or size < 0 or size > math.pi:
             size = 0.0
+        ax, ay, dist, lead = self._move_on(ax, ay, dist, delay)
+        if not PRECLAND_MIN_DISTANCE <= dist <= PRECLAND_MAX_DISTANCE:
+            return False, "Pad distance out of range."
         self.client.send_landing_target(ax, ay, dist, size, size)
         source = "spot" if data.get("source") == "spot" else "pad"
         now = time.time()
@@ -2135,6 +2192,7 @@ class PrecisionLanding(object):
             self.sent += 1
             self.last_sent_time = now
             self.last_distance = dist
+            self.lead = lead
             self._rate_count += 1
         if found:
             self._log("%s found, %.1f m away: sending it to the Cube" %
@@ -2153,7 +2211,8 @@ class PrecisionLanding(object):
                 self._rate_time = now
             st = {"sending": self.seen, "rate": self.rate if self.seen else 0.0, "sent": self.sent,
                   "distance": round(self.last_distance, 2) if self.seen and self.last_distance else None,
-                  "loiter": self.loiter, "camera": self.camera, "source": self.source}
+                  "loiter": self.loiter, "camera": self.camera, "source": self.source,
+                  "lead": round(self.lead, 2), "cube_lag": round(self.cube_lag, 2)}
         if lost:
             self._log("%s lost: nothing sent to the Cube now" %
                       ("Takeoff spot" if st["source"] == "spot" else "Landing pad"), 4)

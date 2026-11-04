@@ -46,6 +46,7 @@
     let hudDirty = true;            // redraw the HUD canvas only when something changed
     const VIDEO_FPS = 24;           // Solo HDMI encoder frame rate
     const VIDEO_MAX_LAG_S = 0.5;    // jump to the newest frame when playback falls further behind
+    const VIDEO_FINDER_MAX_LAG_S = 0.15;    // ... while the pad finder or TAKEOFF SPOT is on
     // OSD messages bar state
     let osdSession = null;
     let osdLastId = 0;
@@ -577,6 +578,7 @@
     const padSizeUnit = document.getElementById('padSizeUnit');
     const padFovIn = document.getElementById('padFovIn');
     const padLensIn = document.getElementById('padLensIn');
+    const padDelayIn = document.getElementById('padDelayIn');
     const padOverlay = document.getElementById('padOverlay');
     const padOverlayCtx = padOverlay ? padOverlay.getContext('2d') : null;
 
@@ -602,6 +604,10 @@
     let padSizeM = parseFloat(loadPadSetting('solo_pad_size_m', '0.6096')) || 0.6096;   // 24 in black square
     let padFovDeg = parseFloat(loadPadSetting('solo_pad_fov_deg', '118')) || 118;       // GoPro Wide
     let padLens = loadPadSetting('solo_pad_lens', 'fisheye') === 'rectilinear' ? 'rectilinear' : 'fisheye';
+    // How far behind the GoPro the video on this screen is (s): measured with a stopwatch.
+    // The server moves each sighting on by what the Cube's PLND_LAG doesn't cover.
+    let padDelayS = parseFloat(loadPadSetting('solo_video_delay_s', '0.4'));
+    if (!(padDelayS >= 0 && padDelayS <= 1.5)) padDelayS = 0.4;
 
     let padFinderOn = false;
     let padWorkWidth = PAD_WORK_WIDTH_MAX;
@@ -681,6 +687,7 @@
         if (padSizeUnit) padSizeUnit.textContent = imperial ? 'in' : 'cm';
         if (padFovIn) padFovIn.value = Math.round(padFovDeg);
         if (padLensIn) padLensIn.value = padLens;
+        if (padDelayIn) padDelayIn.value = padDelayS.toFixed(2);
     }
 
     // Is the Cube set up (PLND_ENABLED 1, PLND_TYPE 1)? Without it the sightings do nothing.
@@ -759,6 +766,16 @@
         padLensIn.addEventListener('change', function() {
             padLens = padLensIn.value === 'rectilinear' ? 'rectilinear' : 'fisheye';
             savePadSetting('solo_pad_lens', padLens);
+        });
+    }
+    if (padDelayIn) {
+        padDelayIn.addEventListener('change', function() {
+            const v = parseFloat(padDelayIn.value);
+            if (v >= 0) {
+                padDelayS = Math.min(1.5, v);
+                savePadSetting('solo_video_delay_s', padDelayS);
+            }
+            showPadSettings();
         });
     }
 
@@ -1070,7 +1087,8 @@
             headers: authHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({
                 angle_x: m.angle_x, angle_y: m.angle_y, distance: m.distance, size: m.size,
-                age_ms: Math.round(performance.now() - t0), source: source || 'pad'
+                age_ms: Math.round(performance.now() - t0), source: source || 'pad',
+                delay_s: padDelayS + (performance.now() - t0) / 1000
             })
         }).then(function(r) {
             if (r.status === 401) authRequired();
@@ -2354,14 +2372,16 @@
         const last = v.buffered.length - 1;
         const end = v.buffered.end(last);
         const lag = end - v.currentTime;
-        if (lag > VIDEO_MAX_LAG_S || v.currentTime < v.buffered.start(last)) {
+        // the pad finder and the takeoff spot steer the Solo by this video: keep it nearer live
+        const maxLag = (padFinderOn || spotOn) ? VIDEO_FINDER_MAX_LAG_S : VIDEO_MAX_LAG_S;
+        if (lag > maxLag || v.currentTime < v.buffered.start(last)) {
             try {
                 v.currentTime = Math.max(v.buffered.start(last), end - 0.05);
                 liveEdgeJumps++;
             } catch (e) {}
             if (v.paused && videoWanted()) v.play().catch(function() {});
         }
-    }, 500);
+    }, 250);
 
     document.addEventListener('visibilitychange', function() {
         if (!videoWanted()) {

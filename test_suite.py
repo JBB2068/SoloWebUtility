@@ -3540,6 +3540,85 @@ class TestSoloWebUtility(unittest.TestCase):
         for s in ("action: 'selfie_settings'", "updateSelfieSettings(telem)", "ss.detail"):
             self.assertIn(s, js)
 
+    def test_45_precland_video_delay(self):
+        """The video is ~0.4 s behind the GoPro and ArduPilot's PLND_LAG makes up for 0.25 s at most:
+        the server moves each sighting on by the Solo's velocity and turn over the rest, so
+        Precision Loiter doesn't chase where the pad was (it swung ~8 ft without this)."""
+        import math
+        import struct as _struct
+        import cockpit_mgr as cm
+        root = os.path.dirname(os.path.abspath(__file__))
+
+        def frd(ax, ay, dist):
+            """(forward, right, down) of the pad as ArduPilot reads LANDING_TARGET in LOCAL_FRD."""
+            u = (-math.tan(ay), math.tan(ax), 1.0)
+            n = math.sqrt(sum(c * c for c in u))
+            return tuple(c / n * dist for c in u)
+
+        # the pad 1 m ahead, 5 m down; the Solo flies forward (heading 90: east) at 2 m/s for 0.2 s
+        ax, ay, d = math.atan2(0.0, 5.0), math.atan2(-1.0, 5.0), math.sqrt(26.0)
+        f, r, dn = frd(*cm.predict_landing_target(ax, ay, d, (0.0, 2.0, 0.0), 90.0, 0.0, 0.2))
+        self.assertAlmostEqual(f, 0.6, places=6)          # 0.4 m closer
+        self.assertAlmostEqual(r, 0.0, places=6)
+        self.assertAlmostEqual(dn, 5.0, places=6)
+        # sideways (heading 0, flying east = right) and descending 0.5 m/s
+        f, r, dn = frd(*cm.predict_landing_target(ax, ay, d, (0.0, 1.0, 0.5), 0.0, 0.0, 0.2))
+        self.assertAlmostEqual(r, -0.2, places=6)        # the pad is now a little to the left
+        self.assertAlmostEqual(dn, 4.9, places=6)
+        # turning right 90 deg/s for 0.2 s: what was ahead is now ahead-left
+        f, r, dn = frd(*cm.predict_landing_target(ax, ay, d, (0.0, 0.0, 0.0), 0.0, 90.0, 0.2))
+        self.assertAlmostEqual(f, math.cos(math.radians(18)), places=6)
+        self.assertAlmostEqual(r, -math.sin(math.radians(18)), places=6)
+        # no delay beyond the Cube's: unchanged
+        self.assertEqual(cm.predict_landing_target(ax, ay, d, (5.0, 5.0, 0.0), 0.0, 30.0, 0.0), (ax, ay, d))
+
+        class _Client(cm.LiveMAVLinkClient):
+            def __init__(self):
+                cm.LiveMAVLinkClient.__init__(self, cm.TelemetryState())
+                self.sent = []
+
+            def send_packet(self, packet_bytes):
+                self.sent.append(packet_bytes)
+
+        def sent_target(client):
+            pkt = bytes(client.sent[-1])
+            body = pkt[6:6 + bytearray(pkt)[1]]
+            return _struct.unpack('<QfffffBB', body)[1:4]
+
+        state = cm.TelemetryState()
+        state.vel_ned, state.yaw, state.yaw_rate, state.position_time = (0.0, 2.0, 0.0), 90.0, 0.0, time.time()
+        client = _Client()
+        pl = cm.PrecisionLanding(client, state=state)
+        # 0.45 s old frame, PLND_LAG 0.25: moved on by 0.2 s
+        self.assertTrue(pl.report_target({"angle_x": ax, "angle_y": ay, "distance": d, "age_ms": 30, "delay_s": 0.45})[0])
+        f, r, dn = frd(*sent_target(client))
+        self.assertAlmostEqual(f, 0.6, places=4)
+        self.assertAlmostEqual(pl.status()["lead"], 0.2, places=2)
+        # the Cube's own lag read back as 0.1: the Cockpit makes up for more
+        pl.set_cube_lag(0.1)
+        pl.report_target({"angle_x": ax, "angle_y": ay, "distance": d, "age_ms": 30, "delay_s": 0.45})
+        self.assertAlmostEqual(frd(*sent_target(client))[0], 0.3, places=4)
+        pl.set_cube_lag(None)                                  # unknown: kept
+        self.assertAlmostEqual(pl.cube_lag, 0.1)
+        # no delay sent (an older Cockpit), or no fresh velocity: sent as seen
+        pl.report_target({"angle_x": ax, "angle_y": ay, "distance": d, "age_ms": 30})
+        self.assertAlmostEqual(frd(*sent_target(client))[0], 1.0, places=4)
+        state.position_time = time.time() - 5
+        pl.report_target({"angle_x": ax, "angle_y": ay, "distance": d, "age_ms": 30, "delay_s": 0.45})
+        self.assertAlmostEqual(frd(*sent_target(client))[0], 1.0, places=4)
+        for bad in (-0.1, 2.0, "x"):
+            self.assertFalse(pl.report_target({"angle_x": 0, "angle_y": 0, "distance": 5, "delay_s": bad})[0])
+
+        # the Cockpit sends the delay setting, keeps the video near live while a finder is on;
+        # /api/precland/check passes PLND_LAG on
+        for page in ("static/index.html", "templates/index.html"):
+            self.assertIn('id="padDelayIn"', open(os.path.join(root, page), encoding="utf-8").read(), page)
+        js = open(os.path.join(root, "static", "cockpit.js"), encoding="utf-8").read()
+        for s in ("delay_s: padDelayS +", "solo_video_delay_s", "VIDEO_FINDER_MAX_LAG_S"):
+            self.assertIn(s, js)
+        swa = open(os.path.join(root, "solo_web_app.py"), encoding="utf-8").read()
+        self.assertIn("precland.set_cube_lag(", swa)
+
 
 def _struct_float(b4):
     """Pack 4 signed bytes into the float the gimbal sends as GMB_SWVER."""

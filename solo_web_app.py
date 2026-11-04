@@ -454,6 +454,7 @@ class SoloApiHandler(BaseHTTPRequestHandler):
                 self._send_json({"ready": False, "message": "A gimbal firmware update is running."})
                 return
             values = param_mgr.mgr.read_live(cockpit_mgr.PRECLAND_PARAMS)
+            cockpit_mgr.precland.set_cube_lag(values.get("PLND_LAG"))
             self._send_json(cockpit_mgr.precland_param_report(values))
             return
 
