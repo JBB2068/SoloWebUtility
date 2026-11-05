@@ -453,7 +453,7 @@
       "version": "1.2.8",
       "iteration": 80,
       "date": "2026-11-04 15:42:09",
-      "description": "Cockpit TAKEOFF SPOT (precision landing on the takeoff spot, no pad: camera down on arming, ground pictures at 2/4/8 m on the climb, matched on the way down); Follow, Selfie and Multipoint Cable Cam without Solex (all ten Smart Shots from the Cockpit); SoloLink Viewer 1.4 (asks for precise location, says why Follow has no position); precision landing makes up for the video delay beyond PLND_LAG (Video delay setting under PAD) so Precision Loiter no longer swings; the installer also installs the viewer APK."
+      "description": "Cockpit TAKEOFF SPOT (precision landing on the takeoff spot, no pad: camera down on arming, ground pictures at 2/4/8 m on the climb, matched on the way down); Follow, Selfie and Multipoint Cable Cam without Solex (all ten Smart Shots from the Cockpit); SoloLink Viewer 1.4 (asks for precise location, says why Follow has no position); precision landing makes up for the video delay beyond PLND_LAG (Video delay setting under PAD) so Precision Loiter no longer swings; the installer also installs the viewer APK. The bundled bin/pixhawk.py also flashes the Cube on stock 3DR firmware, which has no led/usb modules or uploader.py in /usr/bin (fixes \"ImportError: No module named led\" on a Full Install from stock), test_46."
     }
   ]
 }

@@ -17,8 +17,97 @@ import traceback
 from pymavlink import mavutil
 sys.path.append("/usr/bin")
 import clock
-import led
-import usb
+
+# Open Solo has led.py and usb.py in /usr/bin. Stock 3DR firmware may not: then the small
+# stand-ins below do the same thing (the Solo's user LED and the Cube's USB switch on GPIO 19/21),
+# so this script can flash the Cube before the Solo has been updated to Open Solo.
+class _SysfsLed(object):
+    """Stand-in for Open Solo's led.py (led_solo.py)."""
+    def _write(self, name, value):
+        try:
+            f = open("/sys/class/leds/user2/" + name, "w")
+            f.write(str(value))
+            f.close()
+        except (IOError, OSError):
+            pass  # no LED: nothing to show, flashing still works
+
+    def blink(self, on_ms, off_ms):
+        self._write("trigger", "timer")
+        self._write("delay_on", "%d" % on_ms)
+        self._write("delay_off", "%d" % off_ms)
+
+    def off(self):
+        self._write("trigger", "none")
+
+
+class _SysfsUsb(object):
+    """Stand-in for Open Solo's usb.py (usb_solo.py): VBUS on GPIO 21, D+/D- on GPIO 19."""
+    ENABLE_GPIO = 19
+    SELECT_GPIO = 21
+
+    def _export(self, n):
+        if not os.path.isdir("/sys/class/gpio/gpio%d" % n):
+            f = open("/sys/class/gpio/export", "w")
+            f.write(str(n))
+            f.close()
+
+    def _unexport(self, n):
+        try:
+            f = open("/sys/class/gpio/unexport", "w")
+            f.write(str(n))
+            f.close()
+        except (IOError, OSError):
+            pass
+
+    def _set(self, n, value):
+        f = open("/sys/class/gpio/gpio%d/value" % n, "w")
+        f.write(str(value))
+        f.close()
+
+    def _set_dir(self, n, direction):
+        f = open("/sys/class/gpio/gpio%d/direction" % n, "w")
+        f.write(direction)
+        f.close()
+
+    def init(self):
+        self._export(self.SELECT_GPIO)
+        self._export(self.ENABLE_GPIO)
+        self._set_dir(self.SELECT_GPIO, "out")
+        self._set_dir(self.ENABLE_GPIO, "out")
+        self._set(self.SELECT_GPIO, 0)
+        self._set(self.ENABLE_GPIO, 1)
+
+    def uninit(self):
+        self._unexport(self.SELECT_GPIO)
+        self._unexport(self.ENABLE_GPIO)
+
+    def enable(self):
+        self._set(self.SELECT_GPIO, 1)  # VBUS on
+        self._set(self.ENABLE_GPIO, 0)  # D+/D- connect
+
+    def disable(self):
+        self._set(self.ENABLE_GPIO, 1)  # D+/D- disconnect
+        self._set(self.SELECT_GPIO, 0)  # VBUS off
+
+try:
+    import led
+except ImportError:
+    led = _SysfsLed()
+try:
+    import usb
+except ImportError:
+    usb = _SysfsUsb()
+
+
+def _uploader_cmd():
+    """uploader.py from the PATH (Open Solo's /usr/bin), else the copy next to this script."""
+    for d in os.environ.get("PATH", "/usr/bin:/bin").split(os.pathsep):
+        if d and os.path.isfile(os.path.join(d, "uploader.py")):
+            return ["uploader.py"]
+    here = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploader.py")
+    if os.path.isfile(here):
+        return [sys.executable or "python", here]
+    return ["uploader.py"]
 
 version_file = "/PIX_VERSION"
 sololink_conf = "/etc/sololink.conf"
@@ -393,7 +482,7 @@ def load(firmware_path):
 
     # load firmware
     start_us = clock.gettime_us(clock.CLOCK_MONOTONIC)
-    uploader = subprocess.Popen(["uploader.py",
+    uploader = subprocess.Popen(_uploader_cmd() + [
                            "--port=%s" % dev_pattern_usb,
                            firmware_path])
 

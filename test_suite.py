@@ -3619,6 +3619,66 @@ class TestSoloWebUtility(unittest.TestCase):
         swa = open(os.path.join(root, "solo_web_app.py"), encoding="utf-8").read()
         self.assertIn("precland.set_cube_lag(", swa)
 
+    def test_46_pixhawk_on_stock_firmware(self):
+        """bin/pixhawk.py flashes the Cube on stock 3DR firmware too: without Open Solo's
+        /usr/bin/led.py and usb.py it uses its own stand-ins (same LED and GPIO 19/21 writes as
+        Open Solo's led_solo.py / usb_solo.py), and uploader.py from next to itself when the
+        PATH has none. Open Solo's own modules still win when they are there."""
+        import re as _re
+        root = os.path.dirname(os.path.abspath(__file__))
+        src = open(os.path.join(root, "bin", "pixhawk.py"), encoding="utf-8").read()
+        self.assertNotIn("\nimport led\n", src)
+        self.assertNotIn("\nimport usb\n", src)
+        self.assertIn("try:\n    import led\nexcept ImportError:\n    led = _SysfsLed()", src)
+        self.assertIn("try:\n    import usb\nexcept ImportError:\n    usb = _SysfsUsb()", src)
+        self.assertIn("subprocess.Popen(_uploader_cmd() + [", src)
+        self.assertNotIn('subprocess.Popen(["uploader.py"', src)
+
+        # run the stand-ins (plain Python, the same under 2 and 3) against a recorded sysfs
+        block = src[src.index("class _SysfsLed"):src.index("try:\n    import led")]
+        uploader_fn = src[src.index("def _uploader_cmd"):src.index("version_file =")]
+        writes = []
+
+        class _Rec(object):
+            def __init__(self, path, mode="r"):
+                self.path = path
+            def write(self, v):
+                writes.append((self.path, v))
+            def close(self):
+                pass
+
+        fake_os = type("o", (), {})()
+        fake_os.path = type("p", (), {"isdir": staticmethod(lambda d: False),
+                                      "isfile": staticmethod(os.path.isfile),
+                                      "join": staticmethod(os.path.join),
+                                      "dirname": staticmethod(os.path.dirname),
+                                      "abspath": staticmethod(os.path.abspath)})()
+        fake_os.environ = {"PATH": ""}
+        fake_os.pathsep = os.pathsep
+        ns = {"os": fake_os, "sys": sys, "open": _Rec, "IOError": IOError, "OSError": OSError,
+              "__file__": os.path.join(root, "bin", "pixhawk.py")}
+        exec(block + "\n" + uploader_fn, ns)
+        u = ns["_SysfsUsb"]()
+        u.init(); u.enable(); u.disable(); u.uninit()
+        self.assertEqual(writes, [
+            ("/sys/class/gpio/export", "21"), ("/sys/class/gpio/export", "19"),
+            ("/sys/class/gpio/gpio21/direction", "out"), ("/sys/class/gpio/gpio19/direction", "out"),
+            ("/sys/class/gpio/gpio21/value", "0"), ("/sys/class/gpio/gpio19/value", "1"),
+            ("/sys/class/gpio/gpio21/value", "1"), ("/sys/class/gpio/gpio19/value", "0"),   # enable
+            ("/sys/class/gpio/gpio19/value", "1"), ("/sys/class/gpio/gpio21/value", "0"),   # disable
+            ("/sys/class/gpio/unexport", "21"), ("/sys/class/gpio/unexport", "19")])
+        del writes[:]
+        led = ns["_SysfsLed"]()
+        led.blink(1000, 100); led.off()
+        self.assertEqual(writes, [("/sys/class/leds/user2/trigger", "timer"),
+                                  ("/sys/class/leds/user2/delay_on", "1000"),
+                                  ("/sys/class/leds/user2/delay_off", "100"),
+                                  ("/sys/class/leds/user2/trigger", "none")])
+        # no uploader.py on the PATH: the bundled one next to pixhawk.py, run with this Python
+        cmd = ns["_uploader_cmd"]()
+        self.assertEqual(cmd[-1], os.path.join(root, "bin", "uploader.py"))
+        self.assertTrue(os.path.isfile(cmd[-1]))
+
 
 def _struct_float(b4):
     """Pack 4 signed bytes into the float the gimbal sends as GMB_SWVER."""
