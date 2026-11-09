@@ -100,10 +100,9 @@ except ImportError:
 
 
 def _uploader_cmd():
-    """uploader.py from the PATH (Open Solo's /usr/bin), else the copy next to this script."""
-    for d in os.environ.get("PATH", "/usr/bin:/bin").split(os.pathsep):
-        if d and os.path.isfile(os.path.join(d, "uploader.py")):
-            return ["uploader.py"]
+    """The Open Solo uploader.py next to this script, else uploader.py from the PATH.
+    This copy of pixhawk.py only runs on a Solo without Open Solo's /usr/bin/pixhawk.py,
+    where an uploader.py on the PATH would be 3DR's original one."""
     here = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploader.py")
     if os.path.isfile(here):
         return [sys.executable or "python", here]
@@ -497,6 +496,11 @@ def load(firmware_path):
         #px_uploader.py failed to complete, probably hosed
         loaded = False
         logger.info("Firmware loading failed due to timeout.")
+        try:
+            uploader.kill()
+            uploader.wait()
+        except Exception:
+            pass
     elif uploader.returncode != 0:
         #px_uploader.py returned error, failed to load due to error
         loaded = False

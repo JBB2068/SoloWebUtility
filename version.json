@@ -1,7 +1,7 @@
 {
-  "version": "1.2.8",
-  "iteration": 80,
-  "updated_at": 1793828529,
+  "version": "1.2.9",
+  "iteration": 81,
+  "updated_at": 1793901453,
   "changelog": [
     {
       "version": "1.0.67",
@@ -454,6 +454,12 @@
       "iteration": 80,
       "date": "2026-11-04 15:42:09",
       "description": "Cockpit TAKEOFF SPOT (precision landing on the takeoff spot, no pad: camera down on arming, ground pictures at 2/4/8 m on the climb, matched on the way down); Follow, Selfie and Multipoint Cable Cam without Solex (all ten Smart Shots from the Cockpit); SoloLink Viewer 1.4 (asks for precise location, says why Follow has no position); precision landing makes up for the video delay beyond PLND_LAG (Video delay setting under PAD) so Precision Loiter no longer swings; the installer also installs the viewer APK. The bundled bin/pixhawk.py also flashes the Cube on stock 3DR firmware, which has no led/usb modules or uploader.py in /usr/bin (fixes \"ImportError: No module named led\" on a Full Install from stock), test_46."
+    },
+    {
+      "version": "1.2.9",
+      "iteration": 81,
+      "date": "2026-11-05 11:57:33",
+      "description": "TAKEOFF SPOT leaves a record and sends steadier: the climb pictures (saved, or skipped and why) go to the Cockpit's messages and the Solo's log (/log/solowebutility.log, [precland] lines), and on the way down a line a second says what the matching found (new /api/precland/note). Matches go to the Cube only once 3 agree and the last 3 came within 1 s (ArduPilot wants a sighting every 0.5 s for 2 s, otherwise 'PrecLand: Init Failed'); one match that disagrees is ignored (stripes, cracks). SpotFinder.track, test_47, tools/test_spotfinder.js track cases. Manuals: striped paving, where the record is. No false alarms while the finders run: the video counts as gone only after 2 s without usable frames (a jump to the newest video is waited out, small lags are caught up by playing 1.25x instead of jumping, which stalled the decoder), and /api/precland/check keeps the Cube's last answer when a read fails in flight instead of 'Could not read PLND_ENABLED'. test_48. Telemetry fix: VFR_HUD was decoded in the wrong field order, so its climb rate overwrote the height above home (about 0 in a hover, every other message) and its heading, throttle and climb rate were garbage; TAKEOFF SPOT then saw 'too low for the saved pictures' all the way down. VFR_HUD is now read in MAVLink's wire order and no longer sets the height (its alt is above sea level). SYS_STATUS battery % is read from byte 30 (was the drop-rate byte). MAVLink 2 trimmed payloads are padded. test_49. The precision landing check reads PLND_ENABLED/PLND_TYPE/PLND_LAG over the Cockpit's own telemetry link (PARAM_REQUEST_READ / PARAM_VALUE) instead of opening a new connection that missed the Cube's heartbeat ('Could not read PLND_ENABLED'). test_50. Manuals: camera control is now described correctly. Full GoPro control is supported natively only on the HERO3+ Black, HERO4 Silver and HERO4 Black; the HERO3+ Silver and all HERO3 models give the live video feed but no camera control. Full Install on a never-updated Solo (still on 3DR's original software) no longer gets stuck flashing the Cube: it installs Open Solo first and the Solo updates its Cube by itself the first time it starts on Open Solo. The Cube flash also has a time limit now, so a Cube that never enters its bootloader gives an error instead of an endless log (test_51)."
     }
   ]
 }

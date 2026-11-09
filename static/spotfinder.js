@@ -12,6 +12,7 @@
  *   reference(pyr, cam, view, homeN, homeE) -> {ok: true, ref} or {ok: false, reason}
  *   match(pyr, cam, view, refs, prior)       -> {ok: true, n, e, angle_x, ...} or {ok: false, reason}
  *   project(n, e, cam, view)                -> the pixel a ground point is seen at
+ *   track(st, dn, de, height, now, opts)     -> {st, send, event}: which matches go to the Cube
  *
  * view: {height (m above the takeoff spot), yaw (deg)}. Ground offsets (n, e) are metres north and
  * east of the point straight below the Solo. cam is PadFinder.camera(): x right, y down, and with
@@ -303,10 +304,51 @@
         return out;
     }
 
+    /**
+     * Which matches go to the Cube. ArduPilot's precision landing only takes a target after it has
+     * had a sighting at least every 0.5 s for 2 s ("PrecLand: Init Failed" otherwise), so a few
+     * matches that come and go do more harm than none. A track starts sending ("locked") only when
+     * agreeCount matches in a row agree (within agreeM + 5% of the height) and came steadily (the
+     * last agreeCount within steadyMs). One match that disagrees is ignored (a stripe or crack
+     * looking alike); more than maxMisses in a row start a new track. A track is dropped when no
+     * match has agreed for lostMs.
+     *   st: the last track (or null); dn, de: where this match puts the spot vs GPS (m).
+     *   -> {st, send, event: 'new' | 'agree' | 'miss' | 'reset'}
+     */
+    function track(st, dn, de, height, now, opts) {
+        const o = opts || {};
+        const agreeM = o.agreeM === undefined ? 0.6 : o.agreeM;
+        const agreeCount = o.agreeCount || 3;
+        const lostMs = o.lostMs || 1500;
+        const steadyMs = o.steadyMs || 1000;
+        const maxMisses = o.maxMisses === undefined ? 1 : o.maxMisses;
+        function fresh(event) {
+            return { st: { dn: dn, de: de, count: 1, misses: 0, times: [now], time: now, locked: false },
+                     send: false, event: event };
+        }
+        if (st && now - st.time > lostMs) st = null;
+        if (!st) return fresh('new');
+        if (Math.hypot(dn - st.dn, de - st.de) < agreeM + 0.05 * Math.max(0, height || 0)) {
+            st.dn = dn;
+            st.de = de;
+            st.count++;
+            st.misses = 0;
+            st.time = now;
+            st.times.push(now);
+            if (st.times.length > agreeCount) st.times.shift();
+            if (!st.locked && st.count >= agreeCount && st.times.length >= agreeCount &&
+                now - st.times[0] <= steadyMs) st.locked = true;
+            return { st: st, send: st.locked, event: 'agree' };
+        }
+        st.misses++;
+        if (st.misses > maxMisses) return fresh('reset');
+        return { st: st, send: false, event: 'miss' };
+    }
+
     const api = {
         COLS: COLS, ROWS: ROWS, MIN_SCORE: MIN_SCORE, MIN_MARGIN: MIN_MARGIN,
         pyramid: pyramid, render: render, reference: reference, match: match, project: project,
-        pickReferences: pickReferences
+        pickReferences: pickReferences, track: track
     };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     else root.SpotFinder = api;

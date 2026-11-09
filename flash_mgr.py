@@ -14,10 +14,17 @@ import re
 import compat
 import sys
 import time
+import json
 import shutil
+import signal
 import hashlib
 import subprocess
 import threading
+
+try:
+    import Queue as queue_mod      # Python 2.7
+except ImportError:
+    import queue as queue_mod
 
 
 
@@ -102,6 +109,23 @@ SSH_OPTS      = "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o 
 
 # pixhawk.py: prefer system-installed /usr/bin/pixhawk.py, fall back to bundled
 PIXHAWK_BINS = ["/usr/bin/pixhawk.py", os.path.join(BIN_DIR, "pixhawk.py")]
+
+# A Solo that was never updated still runs 3DR's original software: it has no Open Solo
+# /usr/bin/pixhawk.py, and from that software the Cube does not stay in its bootloader, so the
+# uploader asks it to reboot forever. Full Install on such a Solo does not flash the Cube; it parks
+# the firmware in /log (which survives the update) and the utility flashes it with Open Solo's own
+# scripts the first time it starts on Open Solo after the reboot.
+OPEN_SOLO_PIXHAWK        = "/usr/bin/pixhawk.py"
+PENDING_CUBE_DIR         = os.path.join(PERSISTENT_FW_DIR, "pending_cube")
+PENDING_CUBE_APJ         = os.path.join(PENDING_CUBE_DIR, "arducopter.apj")
+PENDING_CUBE_INFO        = os.path.join(PENDING_CUBE_DIR, "pending.json")
+PENDING_CUBE_LOCK        = os.path.join(PENDING_CUBE_DIR, "running")
+PENDING_CUBE_MAX_TRIES   = 3      # starts of the utility; then it waits for the user (Cube Only)
+PENDING_CUBE_START_DELAY = 45     # seconds after the utility starts, so boot can settle
+PENDING_CUBE_LOCK_STALE  = 900    # a lock older than this was left by a crash or power loss
+# pixhawk.py --load gives its uploader 2 minutes; this is the hard limit for the whole step.
+CUBE_FLASH_TIMEOUT       = 360
+CUBE_FLASH_EXIT_GRACE    = 10     # seconds to wait for output after pixhawk.py itself exits
 
 
 def _fmt_size(n):
@@ -818,6 +842,90 @@ def bake_web_utility_into_tar(tar_path, app_base_dir=None, log_func=None):
 # FlashManager
 # ---------------------------------------------------------------------------
 
+def solo_has_open_solo():
+    """True when the Solo runs Open Solo (it has Open Solo's /usr/bin/pixhawk.py)."""
+    return os.path.isfile(OPEN_SOLO_PIXHAWK)
+
+
+def read_pending_cube_flash():
+    """The parked Cube update left by Full Install, as a dict, or None."""
+    try:
+        with open(PENDING_CUBE_INFO) as f:
+            info = json.load(f)
+    except Exception:
+        return None
+    if not isinstance(info, dict) or not os.path.isfile(PENDING_CUBE_APJ):
+        return None
+    return info
+
+
+def _write_pending_cube_info(info):
+    compat.makedirs(PENDING_CUBE_DIR)
+    tmp = PENDING_CUBE_INFO + ".new"
+    with open(tmp, "w") as f:
+        json.dump(info, f, indent=2, sort_keys=True)
+    os.rename(tmp, PENDING_CUBE_INFO)
+
+
+def clear_pending_cube_flash():
+    shutil.rmtree(PENDING_CUBE_DIR, ignore_errors=True)
+
+
+def _take_pending_lock():
+    """Only one copy of the utility may run the parked Cube update. True if this one got it."""
+    try:
+        if os.path.isdir(PENDING_CUBE_LOCK) and time.time() - os.path.getmtime(PENDING_CUBE_LOCK) > PENDING_CUBE_LOCK_STALE:
+            os.rmdir(PENDING_CUBE_LOCK)
+    except OSError:
+        pass
+    try:
+        os.mkdir(PENDING_CUBE_LOCK)
+        return True
+    except OSError:
+        return False
+
+
+def _release_pending_lock():
+    try:
+        os.rmdir(PENDING_CUBE_LOCK)
+    except OSError:
+        pass
+
+
+def _other_pixhawk_running():
+    """True while another pixhawk.py (e.g. Open Solo's boot-time 'pixhawk.py -i') is running."""
+    me = os.getpid()
+    try:
+        pids = [p for p in os.listdir("/proc") if p.isdigit() and int(p) != me]
+    except OSError:
+        return False
+    for pid in pids:
+        try:
+            with open("/proc/%s/cmdline" % pid, "rb") as f:
+                cmd = f.read()
+        except Exception:
+            continue
+        if b"pixhawk.py" in cmd:
+            return True
+    return False
+
+
+def _stop_process_group(proc):
+    """Stop proc and everything it started (it runs in its own process group)."""
+    for sig in (signal.SIGTERM, getattr(signal, "SIGKILL", signal.SIGTERM)):
+        try:
+            if hasattr(os, "killpg"):
+                os.killpg(proc.pid, sig)
+            else:
+                proc.kill()
+        except Exception:
+            pass
+        for _ in range(30):
+            if proc.poll() is not None:
+                break
+            time.sleep(0.1)
+
+
 class FlashManager(object):
     def __init__(self):
         self.is_flashing  = False
@@ -1113,10 +1221,158 @@ class FlashManager(object):
                 return p
         return PIXHAWK_BINS[-1]  # bundled fallback
 
+    def _run_pixhawk_load(self, pixhawk_bin, timeout=None):
+        """Run '<pixhawk.py> --load /firmware/arducopter.apj' in its own process group, log its
+        output, and return its exit code. If it is still running after `timeout` seconds, or its
+        uploader is still running CUBE_FLASH_EXIT_GRACE seconds after pixhawk.py itself exited,
+        the whole group is stopped, so a Cube that never enters its bootloader cannot hang the
+        install. Returns None when pixhawk.py had to be stopped."""
+        timeout = CUBE_FLASH_TIMEOUT if timeout is None else timeout
+        cmd = "%s --load /firmware/arducopter.apj" % pixhawk_bin
+        self.log("[*] %s" % cmd, "INFO")
+        kw = {}
+        if hasattr(os, "setsid"):
+            kw["preexec_fn"] = os.setsid
+        proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, **kw)
+        lines = queue_mod.Queue()
+
+        def _reader():
+            try:
+                for raw in iter(proc.stdout.readline, b""):
+                    lines.put(raw)
+            except Exception:
+                pass
+            lines.put(None)
+        t = threading.Thread(target=_reader)
+        t.daemon = True
+        t.start()
+
+        deadline = time.time() + timeout
+        exited_at = None
+        stopped = False
+        while True:
+            try:
+                raw = lines.get(timeout=0.5)
+            except queue_mod.Empty:
+                raw = b""
+            if raw is None:
+                break
+            if raw:
+                if not isinstance(raw, str):
+                    raw = raw.decode("utf-8", "replace")
+                l = raw.rstrip()
+                if l:
+                    self.log("    %s" % l, "INFO")
+            now = time.time()
+            if exited_at is None and proc.poll() is not None:
+                exited_at = now
+            if exited_at is None and now > deadline:
+                self.log("[!] pixhawk.py did not finish within %d minutes; stopping it." % (timeout // 60), "ERROR")
+                _stop_process_group(proc)
+                stopped = True
+                break
+            if exited_at is not None and now - exited_at > CUBE_FLASH_EXIT_GRACE:
+                self.log("[!] The uploader was still running after pixhawk.py finished; stopping it.", "WARNING")
+                _stop_process_group(proc)
+                break
+        if proc.poll() is None:
+            _stop_process_group(proc)
+        return None if stopped else proc.poll()
+
+    def _defer_cube_flash(self, apj_src, cube_type):
+        """Full Install on a Solo still on 3DR's software: park the Cube firmware in /log for the
+        first start on Open Solo instead of flashing it now."""
+        self.log("[*] This Solo still runs 3DR's original software, which cannot put the Cube into its "
+                 "bootloader, so the Cube is not updated now.", "WARNING")
+        self.log("    The Solo updates its Cube by itself a few minutes after it restarts on Open Solo.", "INFO")
+        compat.makedirs(PENDING_CUBE_DIR)
+        _release_pending_lock()
+        tmp = PENDING_CUBE_APJ + ".new"
+        shutil.copyfile(apj_src, tmp)
+        md5 = _get_file_md5(apj_src)
+        if _get_file_md5(tmp) != md5:
+            raise IOError("Copy of %s in %s is corrupt" % (apj_src, PENDING_CUBE_DIR))
+        os.rename(tmp, PENDING_CUBE_APJ)
+        _write_pending_cube_info({
+            "cube_type": cube_type,
+            "firmware": os.path.basename(apj_src),
+            "md5": md5,
+            "created": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "tries": 0,
+        })
+        self._cube_deferred = True
+        self.log("[✓] %s parked in %s for the automatic Cube update." % (os.path.basename(apj_src), PENDING_CUBE_DIR), "SUCCESS")
+
+    # -----------------------------------------------------------------------
+    # Parked Cube update (second half of a Full Install on a never-updated Solo)
+    # -----------------------------------------------------------------------
+    def start_pending_cube_flash(self, delay=None):
+        """Called once when the utility starts. If Full Install parked a Cube update and the Solo
+        now runs Open Solo, flash it in the background after `delay` seconds. Returns True if started."""
+        info = read_pending_cube_flash()
+        if not info or not solo_has_open_solo():
+            return False
+        delay = PENDING_CUBE_START_DELAY if delay is None else delay
+        t = threading.Thread(target=self._pending_cube_worker, args=(info, delay))
+        t.daemon = True
+        t.start()
+        return True
+
+    def _pending_cube_worker(self, info, delay):
+        time.sleep(delay)
+        tries = int(info.get("tries", 0) or 0) + 1
+        if tries > PENDING_CUBE_MAX_TRIES:
+            print("[flash] parked Cube update already failed %d times; run Cube Only from the Firmware page." % (tries - 1))
+            return
+        if not _take_pending_lock():
+            print("[flash] parked Cube update is already running in another copy of the utility")
+            return
+        try:
+            if _get_file_md5(PENDING_CUBE_APJ) != info.get("md5"):
+                print("[flash] parked Cube firmware %s is corrupt; removed. Run Cube Only." % PENDING_CUBE_APJ)
+                clear_pending_cube_flash()
+                return
+            info["tries"] = tries
+            _write_pending_cube_info(info)
+            for _ in range(60):                      # up to 5 minutes
+                busy = self.is_flashing or _other_pixhawk_running()
+                if not busy:
+                    try:
+                        import cockpit_mgr
+                        busy = cockpit_mgr.is_vehicle_armed()
+                    except Exception:
+                        pass
+                if not busy:
+                    break
+                time.sleep(5)
+            else:
+                print("[flash] parked Cube update postponed: Solo busy (flashing, pixhawk.py or armed)")
+                return
+            self.reset_state()
+            self.is_flashing = True
+            self.status = "running"
+            self._apj_override = PENDING_CUBE_APJ
+            self._pending_run = True
+            self.log("[AUTO] Finishing Full Install: updating the Cube with %s (attempt %d of %d)." % (
+                info.get("firmware", "arducopter.apj"), tries, PENDING_CUBE_MAX_TRIES), "HEADER")
+            self._pipeline(info.get("cube_type", "solo"), "cube_only")
+            if self.status == "success":
+                clear_pending_cube_flash()
+                self.log("[✓] Automatic Cube update finished. Now calibrate (IMU and compass).", "SUCCESS")
+            elif tries < PENDING_CUBE_MAX_TRIES:
+                self.log("[!] Automatic Cube update failed. It is tried again the next time the Solo starts "
+                         "(power-cycle it), or run Cube Only from the Firmware page.", "ERROR")
+            else:
+                self.log("[!] Automatic Cube update failed %d times. Run Cube Only from the Firmware page." % tries, "ERROR")
+        finally:
+            self._pending_run = False
+            _release_pending_lock()
+
     # -----------------------------------------------------------------------
     # Main pipeline
     # -----------------------------------------------------------------------
     def _pipeline(self, cube_type, install_mode):
+        self._cube_deferred = False
         try:
             self.saved_ssid = None
             self.modified_profiles = []
@@ -1151,7 +1407,10 @@ class FlashManager(object):
             apj_override = getattr(self, "_apj_override", None)
             if apj_override:
                 apj_selected = apj_override
-                self.log("[*] Using the firmware chosen in the browser: %s" % apj_override, "WARNING")
+                if getattr(self, "_pending_run", False):
+                    self.log("[*] Using the firmware parked by Full Install: %s" % apj_override, "INFO")
+                else:
+                    self.log("[*] Using the firmware chosen in the browser: %s" % apj_override, "WARNING")
             else:
                 apj_selected = get_latest_apj(cube_type, log_fn=self.log)
             if not apj_selected or not os.path.isfile(apj_selected):
@@ -1204,68 +1463,65 @@ class FlashManager(object):
             if install_mode == "full":
                 self.log("    Copter package MD5 (verified in pre-flight): %s" % self._solo_md5, "INFO")
 
-            # a) Release/close active MAVLink connection before flashing so /dev/ttyS1 is not locked
-            self.log("[*] Releasing active MAVLink telemetry connections...", "INFO")
-            release_mavlink_connections()
+            if install_mode == "full" and not solo_has_open_solo():
+                self._defer_cube_flash(apj_src, cube_type)
+                self._set(progress=70)
+            else:
+                # a) Release/close active MAVLink connection before flashing so /dev/ttyS1 is not locked
+                self.log("[*] Releasing active MAVLink telemetry connections...", "INFO")
+                release_mavlink_connections()
 
-            # Run sololink_config --update-prepare pixhawk FIRST so /dev/ttyS1 is not locked
-            # Note: on 3DR Solo, sololink_config --update-prepare pixhawk wipes /firmware/*
-            self.log("[*] sololink_config --update-prepare pixhawk...", "INFO")
-            self._run("sololink_config --update-prepare pixhawk 2>/dev/null || true")
+                # Run sololink_config --update-prepare pixhawk FIRST so /dev/ttyS1 is not locked
+                # Note: on 3DR Solo, sololink_config --update-prepare pixhawk wipes /firmware/*
+                self.log("[*] sololink_config --update-prepare pixhawk...", "INFO")
+                self._run("sololink_config --update-prepare pixhawk 2>/dev/null || true")
 
-            # b) Copy selected .apj to /firmware/arducopter.apj AFTER sololink_config --update-prepare completes
-            _run_local("mkdir -p /firmware /tmp/updates")
-            self.log("[*] Staging ArduCopter firmware to /firmware/arducopter.apj...", "INFO")
-            _safe_copy_file(apj_src, "/tmp/updates/arducopter.apj")
-            _safe_copy_file(apj_src, "/firmware/arducopter.apj")
-            _run_local("chmod 644 /firmware/arducopter.apj 2>/dev/null || true")
+                # b) Copy selected .apj to /firmware/arducopter.apj AFTER sololink_config --update-prepare completes
+                _run_local("mkdir -p /firmware /tmp/updates")
+                self.log("[*] Staging ArduCopter firmware to /firmware/arducopter.apj...", "INFO")
+                _safe_copy_file(apj_src, "/tmp/updates/arducopter.apj")
+                _safe_copy_file(apj_src, "/firmware/arducopter.apj")
+                _run_local("chmod 644 /firmware/arducopter.apj 2>/dev/null || true")
 
-            # Verify os.path.exists('/firmware/arducopter.apj') is True AFTER update-prepare
-            if not os.path.exists("/firmware/arducopter.apj") or not os.path.isfile("/firmware/arducopter.apj") or os.path.getsize("/firmware/arducopter.apj") < 100000:
-                raise IOError("Failed to stage /firmware/arducopter.apj: file missing or empty after sololink_config update-prepare")
+                # Verify os.path.exists('/firmware/arducopter.apj') is True AFTER update-prepare
+                if not os.path.exists("/firmware/arducopter.apj") or not os.path.isfile("/firmware/arducopter.apj") or os.path.getsize("/firmware/arducopter.apj") < 100000:
+                    raise IOError("Failed to stage /firmware/arducopter.apj: file missing or empty after sololink_config update-prepare")
 
-            self.log("[✓] Verified /firmware/arducopter.apj is present (%d bytes)." % os.path.getsize("/firmware/arducopter.apj"), "SUCCESS")
+                self.log("[✓] Verified /firmware/arducopter.apj is present (%d bytes)." % os.path.getsize("/firmware/arducopter.apj"), "SUCCESS")
 
-            self._set(progress=25)
+                self._set(progress=25)
 
-            # c) Use system /usr/bin/pixhawk.py --load /firmware/arducopter.apj and verify exit code 0
-            pixhawk_bin = "/usr/bin/pixhawk.py"
-            if not os.path.exists(pixhawk_bin):
-                pixhawk_bin = self._find_pixhawk()
-            _run_local("chmod a+x /usr/bin/pixhawk.py /usr/bin/uploader.py 2>/dev/null || true")
+                # c) Use system /usr/bin/pixhawk.py --load /firmware/arducopter.apj and verify exit code 0
+                pixhawk_bin = "/usr/bin/pixhawk.py"
+                if not os.path.exists(pixhawk_bin):
+                    pixhawk_bin = self._find_pixhawk()
+                _run_local("chmod a+x /usr/bin/pixhawk.py /usr/bin/uploader.py 2>/dev/null || true")
 
-            # The Cube's version is unknown from here until it reports again (header shows "checking")
-            try:
-                import cockpit_mgr
-                cockpit_mgr.invalidate_cube_version()
-            except Exception:
-                pass
-            self.log("[*] %s --load /firmware/arducopter.apj" % pixhawk_bin, "INFO")
-            cmd_load = "%s --load /firmware/arducopter.apj" % pixhawk_bin
-            try:
-                proc_load = subprocess.Popen(
-                    cmd_load, shell=True,
-                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT
-                )
-                while True:
-                    line = proc_load.stdout.readline()
-                    if not line and proc_load.poll() is not None:
-                        break
-                    if line:
-                        l = line.rstrip()
-                        if l:
-                            self.log("    %s" % l, "INFO")
-                rc_load = proc_load.poll()
-            except Exception as ex_load:
-                rc_load = -1
-                self.log("[!] Exception running pixhawk.py: %s" % str(ex_load), "WARNING")
+                # The Cube's version is unknown from here until it reports again (header shows "checking")
+                try:
+                    import cockpit_mgr
+                    cockpit_mgr.invalidate_cube_version()
+                except Exception:
+                    pass
+                try:
+                    rc_load = self._run_pixhawk_load(pixhawk_bin)
+                except Exception as ex_load:
+                    rc_load = -1
+                    self.log("[!] Exception running pixhawk.py: %s" % str(ex_load), "WARNING")
 
-            if rc_load != 0:
-                raise RuntimeError("pixhawk.py failed to flash Cube autopilot (exit code %d)" % rc_load)
-            # Do NOT run rm -f /firmware/*.apj! pixhawk.py handles moving it to /firmware/loaded/
+                if rc_load != 0:
+                    hint = ("The Cube did not take the update. Power-cycle the Solo (battery out and back in) "
+                            "and try again.")
+                    if not solo_has_open_solo():
+                        hint += (" This Solo still runs 3DR's original software: use Full Install, which "
+                                 "updates the Cube after the Solo is on Open Solo.")
+                    if rc_load is None:
+                        raise RuntimeError("pixhawk.py was stopped after %d minutes. %s" % (CUBE_FLASH_TIMEOUT // 60, hint))
+                    raise RuntimeError("pixhawk.py failed to flash Cube autopilot (exit code %d). %s" % (rc_load, hint))
+                # Do NOT run rm -f /firmware/*.apj! pixhawk.py handles moving it to /firmware/loaded/
 
-            self._set(progress=70)
-            self.log("[✓] Cube Autopilot flash complete. Cube reboots automatically.", "SUCCESS")
+                self._set(progress=70)
+                self.log("[✓] Cube Autopilot flash complete. Cube reboots automatically.", "SUCCESS")
 
             # Cube-only mode ends here
             if install_mode == "cube_only":
@@ -1321,16 +1577,25 @@ class FlashManager(object):
             self.status = "success"
             self.is_flashing = False
             self.log("\n" + "=" * 60, "HEADER")
-            self.log("🎉 FULL OPEN SOLO INSTALLATION STAGED: Cube flashed, Copter + Controller rebooting to install.", "SUCCESS")
+            if self._cube_deferred:
+                self.log("🎉 FULL OPEN SOLO INSTALLATION STAGED: Copter + Controller rebooting to install; the Cube updates after the Solo restarts.", "SUCCESS")
+            else:
+                self.log("🎉 FULL OPEN SOLO INSTALLATION STAGED: Cube flashed, Copter + Controller rebooting to install.", "SUCCESS")
             self.log("Firmware packages stay in %s for the next Full Install." % PERSISTENT_FW_DIR, "INFO")
             self.log("Wait ~6 minutes for reboot to finish.", "INFO")
             self.log("Then hold the Pair button on the bottom of the Solo for 5 seconds. The SoloLink Wi-Fi network must also be connected to continue.", "INFO")
+            if self._cube_deferred:
+                self.log("Leave the Solo powered on: a few minutes after it restarts it updates its Cube by itself "
+                         "(the Cube restarts once more). Calibrate only after that.", "WARNING")
             self.log("=" * 60, "HEADER")
 
         except Exception as e:
             self.status = "error"
             self._set(stage="Error: %s" % str(e))
             self.log("[CRITICAL ERROR] %s" % str(e), "ERROR")
+            if self._cube_deferred:
+                clear_pending_cube_flash()
+                self._cube_deferred = False
         finally:
             self.is_flashing = False
 

@@ -703,7 +703,9 @@ class TestSoloWebUtility(unittest.TestCase):
         self.assertNotIn("os.rename(self._solo_src", fm_src)
         self.assertNotIn("shutil.move(self._solo_src", fm_src)
         # pre-flight runs in Stage 1, before the Cube is flashed
-        self.assertLess(fm_src.find("self._full_install_preflight()"), fm_src.find("--load /firmware/arducopter.apj"))
+        _pipe_src = _inspect.getsource(flash_mgr.FlashManager._pipeline)
+        self.assertLess(_pipe_src.find("self._full_install_preflight()"), _pipe_src.find("self._run_pixhawk_load(pixhawk_bin)"))
+        self.assertGreater(_pipe_src.find("self._full_install_preflight()"), 0)
 
         # Verify modules/controller_firmware.py handles RUN_PAIR_ONCE post-update pairing automation
         with open(os.path.join(BASE_DIR, "modules", "controller_firmware.py"), "r", encoding="utf-8") as f:
@@ -3678,6 +3680,337 @@ class TestSoloWebUtility(unittest.TestCase):
         cmd = ns["_uploader_cmd"]()
         self.assertEqual(cmd[-1], os.path.join(root, "bin", "uploader.py"))
         self.assertTrue(os.path.isfile(cmd[-1]))
+
+    def test_47_takeoff_spot_log_and_steady_sending(self):
+        """TAKEOFF SPOT leaves a record: the climb pictures (saved / skipped and why) go to the
+        Cockpit's messages and the Solo's log, and on the way down a line a second says what the
+        looks found. Matches go to the Cube only once they agree and come steadily
+        (SpotFinder.track, checked by tools/test_spotfinder.js), so ArduPilot doesn't start on a
+        burst and then report "PrecLand: Init Failed"."""
+        import cockpit_mgr
+        root = os.path.dirname(os.path.abspath(__file__))
+        state = cockpit_mgr.TelemetryState()
+        pl = cockpit_mgr.PrecisionLanding(cockpit_mgr.LiveMAVLinkClient(cockpit_mgr.TelemetryState()), state=state)
+        n0 = len(state.mavlink_messages)
+        self.assertTrue(pl.note({"text": "TAKEOFF SPOT: picture 1 saved at 2.1 m", "show": True})[0])
+        self.assertEqual(state.mavlink_messages[-1]["text"], "TAKEOFF SPOT: picture 1 saved at 2.1 m")
+        self.assertTrue(pl.note({"text": "TAKEOFF SPOT looking at 9.0 m: 10 looks", "show": False})[0])
+        self.assertEqual(len(state.mavlink_messages), n0 + 1)        # log only, not the Cockpit's messages
+        for bad in (None, {}, {"text": 5}, {"text": "   "}, "x"):
+            self.assertFalse(pl.note(bad)[0], bad)
+        pl._note_time = time.time()
+        pl._note_count = 0
+        oks = [pl.note({"text": "line %d" % i})[0] for i in range(cockpit_mgr.NOTE_MAX_PER_SEC + 3)]
+        self.assertEqual(oks.count(True), cockpit_mgr.NOTE_MAX_PER_SEC)
+        pl._note_time = 0
+        self.assertTrue(pl.note({"text": "x" * 1000 + "\x07", "show": True})[0])
+        self.assertEqual(state.mavlink_messages[-1]["text"], "x" * cockpit_mgr.NOTE_MAX_LEN)
+
+        swa = open(os.path.join(root, "solo_web_app.py"), encoding="utf-8").read()
+        self.assertIn("if path == '/api/precland/note':", swa)
+        self.assertLess(swa.index("Authentication required."), swa.index("if path == '/api/precland/note':"))
+        js = open(os.path.join(root, "static", "cockpit.js"), encoding="utf-8").read()
+        for s in ("SpotFinder.track(spotTrack,", "steadyMs: SPOT_STEADY_MS", "fetch('/api/precland/note'",
+                  "spotLog('TAKEOFF SPOT: picture '", "spotLog('TAKEOFF SPOT: no picture at '",
+                  "spotLog('TAKEOFF SPOT: climb done, '", "'TAKEOFF SPOT looking at '"):
+            self.assertIn(s, js)
+        sf = open(os.path.join(root, "static", "spotfinder.js"), encoding="utf-8").read()
+        self.assertIn("pickReferences: pickReferences, track: track", sf)
+
+    def test_48_precision_status_messages(self):
+        """No false alarms in the Cockpit while flying the finders: /api/precland/check keeps the
+        Cube's last answer when a read fails in flight (no "Could not read PLND_ENABLED" once it has
+        answered), and the video counts as gone only after 2 s without usable frames; a jump to the
+        newest video (seeking) is waited out, and small lags are caught up by playing faster."""
+        import cockpit_mgr
+        root = os.path.dirname(os.path.abspath(__file__))
+        pl = cockpit_mgr.PrecisionLanding(cockpit_mgr.LiveMAVLinkClient(cockpit_mgr.TelemetryState()))
+        none = {"PLND_ENABLED": None, "PLND_TYPE": None, "PLND_LAG": None}
+        good = {"PLND_ENABLED": 1.0, "PLND_TYPE": 1.0, "PLND_LAG": 0.25}
+        first = pl.check_report(none)                       # never answered: say so
+        self.assertFalse(first["ready"])
+        self.assertIn("Could not read PLND_ENABLED", first["message"])
+        ok = pl.check_report(good)
+        self.assertTrue(ok["ready"])
+        kept = pl.check_report(none)                        # a read fails later: the last answer stands
+        self.assertTrue(kept["ready"])
+        self.assertNotIn("Could not read", kept["message"])
+        pl._last_check = (pl._last_check[0] - 300, pl._last_check[1], pl._last_check[2])
+        old = pl.check_report(none)
+        self.assertTrue(old["ready"])
+        self.assertIn("as read 5 min ago", old["message"])
+        off = pl.check_report({"PLND_ENABLED": 0.0, "PLND_TYPE": 1.0, "PLND_LAG": 0.25})
+        self.assertFalse(off["ready"])                      # a real answer always wins
+        self.assertFalse(pl.check_report(none)["ready"])
+
+        swa = open(os.path.join(root, "solo_web_app.py"), encoding="utf-8").read()
+        self.assertIn("cockpit_mgr.precland.check_report(values)", swa)
+        js = open(os.path.join(root, "static", "cockpit.js"), encoding="utf-8").read()
+        for s in ("if (v && v.seeking) return;", "PAD_NO_VIDEO_MSG_MS = 2000", "PAD_VIDEO_FRESH_MS = 1000",
+                  "VIDEO_CATCHUP_RATE", "v.playbackRate = rate"):
+            self.assertIn(s, js)
+
+    def test_49_telemetry_byte_order(self):
+        """The Cockpit decodes VFR_HUD and SYS_STATUS in MAVLink's wire order (fields sorted by
+        size: VFR_HUD = airspeed, groundspeed, alt, climb, heading, throttle; SYS_STATUS has
+        battery_remaining at byte 30). VFR_HUD used to be read as airspeed, groundspeed, heading,
+        throttle, alt, climb: its climb rate landed in the height above home, so in a hover the
+        height read about 0 every other message, and TAKEOFF SPOT said "too low for the saved
+        pictures" all the way down. VFR_HUD's alt is above sea level and no longer touches alt_rel."""
+        import cockpit_mgr, struct as st
+        state = cockpit_mgr.TelemetryState()
+        c = cockpit_mgr.LiveMAVLinkClient(state)
+        # GLOBAL_POSITION_INT: 15.0 m above home, 210.0 m above sea level, climbing 0.5 m/s, heading 270
+        c.decode_payload(33, st.pack('<IiiiihhhH', 1000, 327000000, -971000000, 210000, 15000, 0, 0, -50, 27000))
+        self.assertEqual(state.alt_rel, 15.0)
+        # VFR_HUD: airspeed 1, groundspeed 2, alt (MSL) 210, climb -0.5, heading 271, throttle 55
+        c.decode_payload(74, st.pack('<ffffhH', 1.0, 2.0, 210.0, -0.5, 271, 55))
+        self.assertEqual(state.alt_rel, 15.0)            # not the climb rate, not the sea-level alt
+        self.assertEqual(state.groundspeed, 2.0)
+        self.assertEqual(state.heading, 271.0)
+        self.assertEqual(state.throttle, 55)
+        self.assertEqual(state.climb_rate, -0.5)
+        # MAVLink 2 trims trailing zero bytes (throttle 0): still decoded
+        c.decode_payload(74, st.pack('<ffffhH', 1.0, 3.0, 210.0, 0.25, 90, 0)[:18])
+        self.assertEqual((state.groundspeed, state.heading, state.throttle, state.climb_rate), (3.0, 90.0, 0, 0.25))
+        self.assertEqual(state.alt_rel, 15.0)
+        # SYS_STATUS: 16.2 V, 12.3 A, drop rate 7 %, battery 64 %
+        sys_status = st.pack('<IIIHHhHHHHHHb', 0, 0, 0, 100, 16200, 1230, 700, 0, 0, 0, 0, 0, 64)
+        self.assertEqual(len(sys_status), 31)
+        c.decode_payload(1, sys_status)
+        self.assertEqual(state.voltage, 16.2)
+        self.assertEqual(state.current, 12.3)
+        self.assertEqual(state.battery_remaining, 64)     # not the drop rate's low byte
+        root = os.path.dirname(os.path.abspath(__file__))
+        src = open(os.path.join(root, "cockpit_mgr.py"), encoding="utf-8").read()
+        self.assertNotIn("'<ffhHff'", src)
+
+    def test_50_precland_check_over_cockpit_link(self):
+        """/api/precland/check reads PLND_ENABLED, PLND_TYPE and PLND_LAG over the Cockpit's own,
+        already running telemetry link (PARAM_REQUEST_READ out, PARAM_VALUE back), so it no longer
+        needs a fresh connection that can miss the Cube's heartbeat; the Parameters tab's reader is
+        only the fallback."""
+        import cockpit_mgr, struct as st
+        state = cockpit_mgr.TelemetryState()
+        state.mavlink_connected = True
+        cube = {"PLND_ENABLED": 1.0, "PLND_TYPE": 1.0, "PLND_LAG": 0.25}
+        sent = []
+
+        class Client(cockpit_mgr.LiveMAVLinkClient):
+            def send_packet(self, pkt):            # the Cube answers each request
+                sent.append(pkt)
+                msgid = bytearray(pkt)[5]
+                if msgid != cockpit_mgr.PARAM_REQUEST_READ_MSGID:
+                    return
+                pid = bytes(bytearray(pkt)[10:26]).split(b"\x00")[0].decode("ascii")
+                if pid in cube:
+                    payload = st.pack('<fHH16sB', cube[pid], 900, 1, pid.encode("ascii"), 9)
+                    self.decode_payload(cockpit_mgr.PARAM_VALUE_MSGID, payload)
+
+        c = Client(state)
+        t0 = time.time()
+        vals = c.read_params(cockpit_mgr.PRECLAND_PARAMS, timeout=2.0)
+        self.assertEqual(vals, {"PLND_ENABLED": 1.0, "PLND_TYPE": 1.0, "PLND_LAG": 0.25})
+        self.assertLess(time.time() - t0, 1.0)
+        req = bytearray(sent[0])
+        self.assertEqual((req[0], req[1], req[5]), (0xFE, 20, cockpit_mgr.PARAM_REQUEST_READ_MSGID))
+        self.assertEqual(st.unpack('<hBB', bytes(req[6:10])), (-1, 1, 1))
+        # a Cube that never answers: None after the timeout, nothing invented
+        del cube["PLND_LAG"]
+        vals = c.read_params(cockpit_mgr.PRECLAND_PARAMS, timeout=0.8)
+        self.assertIsNone(vals["PLND_LAG"])
+        self.assertEqual(vals["PLND_ENABLED"], 1.0)
+        self.assertIn(cockpit_mgr.PARAM_VALUE_MSGID, cockpit_mgr.CHECKED_CRC_EXTRA)   # CRC-checked
+        # a value seen on the link recently (e.g. an app downloading the parameter list) counts
+        # when the caller allows it: PLND_LAG no longer answers, but was seen just now
+        vals = c.read_params(cockpit_mgr.PRECLAND_PARAMS, timeout=0.5, max_age=60.0)
+        self.assertEqual(vals["PLND_LAG"], 0.25)
+        with state.lock:                                  # ... but not once it is too old
+            c.param_values["PLND_LAG"] = (0.25, time.time() - 120)
+        self.assertIsNone(c.read_params(cockpit_mgr.PRECLAND_PARAMS, timeout=0.5, max_age=60.0)["PLND_LAG"])
+
+        # a busy Cube (a parameter list download in front of us) answers seconds late: the check
+        # waits for it and doesn't flood the queue with repeats
+        import threading as _th
+        late = []
+
+        class SlowClient(cockpit_mgr.LiveMAVLinkClient):
+            def send_packet(self, pkt):
+                if bytearray(pkt)[5] != cockpit_mgr.PARAM_REQUEST_READ_MSGID:
+                    return
+                late.append(time.time())
+                pid = bytes(bytearray(pkt)[10:26]).split(b"\x00")[0].decode("ascii")
+                payload = st.pack('<fHH16sB', {"PLND_ENABLED": 1.0, "PLND_TYPE": 1.0, "PLND_LAG": 0.25}[pid],
+                                  900, 1, pid.encode("ascii"), 9)
+                _th.Timer(1.2, self.decode_payload, (cockpit_mgr.PARAM_VALUE_MSGID, payload)).start()
+
+        slow = SlowClient(state)
+        vals = slow.read_params(cockpit_mgr.PRECLAND_PARAMS, timeout=3.0, resend=1.0)
+        self.assertEqual(vals, {"PLND_ENABLED": 1.0, "PLND_TYPE": 1.0, "PLND_LAG": 0.25})
+        self.assertLessEqual(len(late), 6)                 # 3 asked, at most once more each
+        self.assertGreater(cockpit_mgr.PRECLAND_CHECK_TIMEOUT, 5.0)   # the Solo was seen answering 4-5 s late
+        self.assertGreater(cockpit_mgr.PRECLAND_CHECK_RESEND, 1.0)
+
+        root = os.path.dirname(os.path.abspath(__file__))
+        swa = open(os.path.join(root, "solo_web_app.py"), encoding="utf-8").read()
+        i = swa.index("if path == '/api/precland/check':")
+        block = swa[i:i + 1200]
+        self.assertLess(block.index("precland.client.read_params("), block.index("param_mgr.mgr.read_live("))
+        for s in ("timeout=cockpit_mgr.PRECLAND_CHECK_TIMEOUT", "max_age=cockpit_mgr.PRECLAND_CHECK_MAX_AGE",
+                  "resend=cockpit_mgr.PRECLAND_CHECK_RESEND"):
+            self.assertIn(s, block)
+
+
+    def test_51_never_updated_solo_cube_after_open_solo(self):
+        """A never-updated Solo (3DR's software, no /usr/bin/pixhawk.py) does not keep its Cube in the
+        bootloader, so the uploader asked it to reboot forever. Full Install now parks the Cube
+        firmware in /log/firmware/pending_cube and the utility flashes it with Open Solo's scripts the
+        first time it starts on Open Solo. pixhawk.py --load has a hard time limit, and the bundled
+        pixhawk.py runs its own Open Solo uploader.py even when another one is on the PATH."""
+        import tempfile
+        import shutil as _shutil
+        import inspect as _inspect
+        import flash_mgr
+        root = os.path.dirname(os.path.abspath(__file__))
+
+        # 1. bundled pixhawk.py: its own uploader.py first; the uploader is stopped on timeout
+        with open(os.path.join(root, "bin", "pixhawk.py"), "r", encoding="utf-8") as f:
+            px = f.read()
+        fn = px[px.index("def _uploader_cmd"):px.index("version_file =")]
+        load_fn = px[px.index("def load("):px.index("# check usb")]
+        self.assertIn("uploader.kill()", load_fn)
+        tmp = tempfile.mkdtemp()
+        saved_path = os.environ.get("PATH", "")
+        saved = dict((k, getattr(flash_mgr, k)) for k in (
+            "OPEN_SOLO_PIXHAWK", "PENDING_CUBE_DIR", "PENDING_CUBE_APJ", "PENDING_CUBE_INFO",
+            "PENDING_CUBE_LOCK", "CUBE_FLASH_EXIT_GRACE", "_other_pixhawk_running"))
+        try:
+            open(os.path.join(tmp, "uploader.py"), "w").close()
+            os.environ["PATH"] = tmp
+            ns = {"os": os, "sys": sys, "__file__": os.path.join(root, "bin", "pixhawk.py")}
+            exec(fn, ns)
+            self.assertEqual(ns["_uploader_cmd"]()[-1], os.path.join(root, "bin", "uploader.py"))
+            os.environ["PATH"] = saved_path
+
+            # 2. Full Install on 3DR's software parks the firmware instead of flashing
+            pend = os.path.join(tmp, "pending_cube")
+            flash_mgr.OPEN_SOLO_PIXHAWK = os.path.join(tmp, "usr_bin_pixhawk.py")
+            flash_mgr.PENDING_CUBE_DIR = pend
+            flash_mgr.PENDING_CUBE_APJ = os.path.join(pend, "arducopter.apj")
+            flash_mgr.PENDING_CUBE_INFO = os.path.join(pend, "pending.json")
+            flash_mgr.PENDING_CUBE_LOCK = os.path.join(pend, "running")
+            flash_mgr._other_pixhawk_running = lambda: False
+            apj = os.path.join(tmp, "arducopter_CubeSolo_4.7.2.apj")
+            with open(apj, "wb") as f:
+                f.write(b"{\"board_id\": 9}" * 1000)
+            self.assertFalse(flash_mgr.solo_has_open_solo())
+            fm = flash_mgr.FlashManager()
+            fm._defer_cube_flash(apj, "solo")
+            self.assertTrue(fm._cube_deferred)
+            info = flash_mgr.read_pending_cube_flash()
+            self.assertEqual(info["cube_type"], "solo")
+            self.assertEqual(info["firmware"], "arducopter_CubeSolo_4.7.2.apj")
+            self.assertEqual(info["tries"], 0)
+            self.assertEqual(info["md5"], flash_mgr._get_file_md5(apj))
+            self.assertEqual(flash_mgr._get_file_md5(flash_mgr.PENDING_CUBE_APJ), info["md5"])
+            # still on 3DR's software after a failed install: nothing starts
+            self.assertFalse(fm.start_pending_cube_flash(delay=0))
+
+            # 3. first start on Open Solo: Cube Only with the parked file, then the record goes
+            open(flash_mgr.OPEN_SOLO_PIXHAWK, "w").close()
+            runs = []
+
+            def _ok(cube_type, mode):
+                runs.append((cube_type, mode, fm._apj_override, fm._pending_run))
+                fm.status = "success"
+                fm.is_flashing = False      # as the real _pipeline does
+            fm._pipeline = _ok
+            fm._pending_cube_worker(flash_mgr.read_pending_cube_flash(), 0)
+            self.assertEqual(runs, [("solo", "cube_only", flash_mgr.PENDING_CUBE_APJ, True)])
+            self.assertIsNone(flash_mgr.read_pending_cube_flash())
+            self.assertFalse(os.path.exists(pend))
+
+            # a failure keeps it for the next start, at most PENDING_CUBE_MAX_TRIES times
+            fm2 = flash_mgr.FlashManager()
+            fm2._defer_cube_flash(apj, "green")
+            fails = []
+
+            def _fail(cube_type, mode):
+                fails.append(cube_type)
+                fm2.status = "error"
+                fm2.is_flashing = False
+            fm2._pipeline = _fail
+            for _ in range(flash_mgr.PENDING_CUBE_MAX_TRIES + 1):
+                fm2._pending_cube_worker(flash_mgr.read_pending_cube_flash(), 0)
+            self.assertEqual(fails, ["green"] * flash_mgr.PENDING_CUBE_MAX_TRIES)
+            self.assertEqual(flash_mgr.read_pending_cube_flash()["tries"], flash_mgr.PENDING_CUBE_MAX_TRIES)
+            self.assertFalse(os.path.exists(flash_mgr.PENDING_CUBE_LOCK))
+            # another copy of the utility holding the lock: this one does not flash
+            flash_mgr.clear_pending_cube_flash()
+            fm2._defer_cube_flash(apj, "solo")
+            os.mkdir(flash_mgr.PENDING_CUBE_LOCK)
+            del fails[:]
+            fm2._pending_cube_worker(flash_mgr.read_pending_cube_flash(), 0)
+            self.assertEqual(fails, [])
+            # a corrupt parked file is dropped, not flashed
+            os.rmdir(flash_mgr.PENDING_CUBE_LOCK)
+            with open(flash_mgr.PENDING_CUBE_APJ, "ab") as f:
+                f.write(b"x")
+            fm2._pending_cube_worker(flash_mgr.read_pending_cube_flash(), 0)
+            self.assertEqual(fails, [])
+            self.assertIsNone(flash_mgr.read_pending_cube_flash())
+
+            # 4. pixhawk.py --load: hard time limit, and a leftover uploader is stopped
+            if hasattr(os, "setsid"):
+                flash_mgr.CUBE_FLASH_EXIT_GRACE = 1
+
+                def _script(name, body):
+                    p = os.path.join(tmp, name)
+                    with open(p, "w") as f:
+                        f.write("#!/bin/sh\n" + body)
+                    os.chmod(p, 0o755)
+                    return p
+                fm3 = flash_mgr.FlashManager()
+                t0 = time.time()
+                rc = fm3._run_pixhawk_load(_script("ok.sh", "echo loaded fine\nexit 0\n"), timeout=20)
+                self.assertEqual(rc, 0)
+                self.assertTrue(any("loaded fine" in e["message"] for e in fm3.log_buffer))
+                pidf = os.path.join(tmp, "pid")
+                stuck = _script("stuck.sh", "echo Attempting reboot\nsleep 60 &\necho $! > %s\nwait\n" % pidf)
+                t0 = time.time()
+                self.assertIsNone(fm3._run_pixhawk_load(stuck, timeout=2))
+                self.assertLess(time.time() - t0, 10)
+                left = _script("left.sh", "sleep 60 &\necho $! > %s\nexit 3\n" % pidf)
+                t0 = time.time()
+                self.assertEqual(fm3._run_pixhawk_load(left, timeout=30), 3)
+                self.assertLess(time.time() - t0, 10)
+                with open(pidf) as f:
+                    pid = int(f.read().strip())
+                time.sleep(0.3)
+                state = ""
+                try:
+                    with open("/proc/%d/status" % pid) as f:
+                        state = [l for l in f.read().splitlines() if l.startswith("State:")][0]
+                except (IOError, OSError):
+                    pass
+                self.assertTrue(state == "" or "Z" in state, state)
+        finally:
+            os.environ["PATH"] = saved_path
+            for k, v in saved.items():
+                setattr(flash_mgr, k, v)
+            _shutil.rmtree(tmp, ignore_errors=True)
+
+        # 5. wiring: Stage 2 defers only Full Install on 3DR's software, a failed Full Install
+        #    drops the parked update, and the web app looks for it when it starts
+        pipe = _inspect.getsource(flash_mgr.FlashManager._pipeline)
+        self.assertIn('if install_mode == "full" and not solo_has_open_solo():', pipe)
+        self.assertIn("self._defer_cube_flash(apj_src, cube_type)", pipe)
+        self.assertIn("rc_load = self._run_pixhawk_load(pixhawk_bin)", pipe)
+        self.assertNotIn("proc_load.stdout.readline()", pipe)
+        self.assertIn("clear_pending_cube_flash()", pipe)
+        self.assertIn("Wait ~6 minutes for reboot to finish.", pipe)
+        with open(os.path.join(root, "solo_web_app.py"), "r", encoding="utf-8") as f:
+            self.assertIn("flash_mgr.flash_engine.start_pending_cube_flash()", f.read())
 
 
 def _struct_float(b4):

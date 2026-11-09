@@ -176,6 +176,27 @@ check('plain ground: no pictures saved', plain.refs.length === 0, plain.reasons.
 const tiles = climb(makeGround('tiles'));
 check('even tiles: no pictures saved', tiles.refs.length === 0, tiles.reasons.join('; '));
 
+// Which matches go to the Cube (track): ArduPilot wants a sighting at least every 0.5 s for 2 s
+function runTrack(seq) {              // seq: [ms, dn, de] at 5 m; -> the sends, in order
+    let st = null; const out = [];
+    seq.forEach(function(x) {
+        const r = SF.track(st, x[1], x[2], 5, x[0], { agreeM: 0.6, agreeCount: 3, lostMs: 1500, steadyMs: 1000 });
+        st = r.st;
+        out.push(r.send ? 1 : 0);
+    });
+    return out.join('');
+}
+check('track: 3 steady matches that agree start sending',
+      runTrack([[0, 0, 0], [100, 0.1, 0], [200, 0.05, 0.05], [300, 0, 0.1]]) === '0011');
+check('track: one match that disagrees (a stripe away) is ignored',
+      runTrack([[0, 0, 0], [100, 0, 0], [200, 0, 0], [300, 0.9, 0], [400, 0.05, 0]]) === '00101');
+check('track: two in a row that disagree start again',
+      runTrack([[0, 0, 0], [100, 0, 0], [200, 0, 0], [300, 2, 0], [400, 2, 0], [500, 2, 0], [600, 2, 0]]) === '0010001');
+check('track: matches that agree but come slowly (0.8 s apart) are never sent',
+      runTrack([[0, 0, 0], [800, 0, 0], [1600, 0, 0], [2400, 0, 0], [3200, 0, 0]]) === '00000');
+check('track: lost for more than 1.5 s starts again',
+      runTrack([[0, 0, 0], [100, 0, 0], [200, 0, 0], [2000, 0, 0], [2100, 0, 0], [2200, 0, 0]]) === '001001');
+
 if (failures) {
     console.log(failures + ' SPOTFINDER CASE(S) FAILED');
     process.exit(1);

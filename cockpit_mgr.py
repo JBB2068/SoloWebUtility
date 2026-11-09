@@ -123,6 +123,10 @@ STATUSTEXT_MSGID = 253
 STATUSTEXT_CRC_EXTRA = 83
 LANDING_TARGET_MSGID = 149
 LANDING_TARGET_CRC_EXTRA = 200
+PARAM_REQUEST_READ_MSGID = 20
+PARAM_REQUEST_READ_CRC_EXTRA = 214
+PARAM_VALUE_MSGID = 22
+PARAM_VALUE_CRC_EXTRA = 220
 MAV_FRAME_LOCAL_FRD = 20          # level, heading-aligned (ArduPilot 4.7 AC_PrecLand_MAVLink)
 MAV_CMD_DO_MOUNT_CONTROL = 205
 MAV_CMD_DO_AUX_FUNCTION = 218
@@ -132,7 +136,7 @@ AUX_FUNC_PRECISION_LOITER = 39
 # Messages whose content we act on are only accepted with a valid CRC
 # (STATUSTEXT too: a random 0xFE/0xFD byte must never put garbage text on the OSD bar)
 CHECKED_CRC_EXTRA = {0: HEARTBEAT_CRC_EXTRA, AUTOPILOT_VERSION_MSGID: AUTOPILOT_VERSION_CRC_EXTRA,
-                     STATUSTEXT_MSGID: STATUSTEXT_CRC_EXTRA}
+                     STATUSTEXT_MSGID: STATUSTEXT_CRC_EXTRA, PARAM_VALUE_MSGID: PARAM_VALUE_CRC_EXTRA}
 
 # OSD messages bar: only real vehicle STATUSTEXT messages (never the utility's own notes)
 OSD_HISTORY_MAX = 20      # kept on the server
@@ -477,6 +481,7 @@ class LiveMAVLinkClient(threading.Thread):
         self.last_heartbeat_sent = 0.0
         self.last_stream_req_sent = 0.0
         self.last_version_req_sent = 0.0
+        self.param_values = {}            # PARAM_VALUE seen on the link: name -> (value, time), under state.lock
         self.last_rate_time = time.time()
         self.pkt_counter = 0
 
@@ -549,6 +554,36 @@ class LiveMAVLinkClient(threading.Thread):
         p = [float(x) for x in params] + [0.0] * (7 - len(params))
         payload = struct.pack('<fffffffHBBB', p[0], p[1], p[2], p[3], p[4], p[5], p[6], int(command), 1, 1, 0)
         self.send_packet(self.build_mavlink_v1_packet(76, payload, 152))
+
+    def read_params(self, names, timeout=3.0, max_age=0.0, resend=0.7):
+        """Read a few parameters over this (already running) telemetry link: PARAM_REQUEST_READ
+        to the Cube, answers picked up by decode_payload. No new connection, so it works in flight
+        while the Cockpit is open. max_age: a value seen on the link that recently (any PARAM_VALUE:
+        a parameter list download, a change on the Parameters tab) counts without asking again.
+        resend: seconds between requests for what is still missing. -> {NAME: value or None}"""
+        names = [n.upper() for n in names]
+        note_demand()
+        start = time.time()
+        deadline = start + timeout
+        oldest = start - max_age
+        next_send = 0.0
+        while True:
+            now = time.time()
+            with self.state.lock:
+                got = dict((n, self.param_values[n][0]) for n in names
+                           if n in self.param_values and self.param_values[n][1] >= oldest)
+            if len(got) == len(names) or now >= deadline:
+                break
+            if now >= next_send and self.state.mavlink_connected:
+                for n in names:
+                    if n not in got:
+                        pid = n.encode("ascii")[:16]
+                        payload = struct.pack('<hBB16s', -1, 1, 1, pid + b'\x00' * (16 - len(pid)))
+                        self.send_packet(self.build_mavlink_v1_packet(
+                            PARAM_REQUEST_READ_MSGID, payload, PARAM_REQUEST_READ_CRC_EXTRA))
+                next_send = now + resend
+            time.sleep(0.05)
+        return dict((n, got.get(n)) for n in names)
 
     def send_landing_target(self, angle_x, angle_y, distance, size_x, size_y):
         """LANDING_TARGET (msg ID 149, CRC extra 200), MAVLink 1 fields only, in MAV_FRAME_LOCAL_FRD:
@@ -749,8 +784,13 @@ class LiveMAVLinkClient(threading.Thread):
                         self.state.system_status = sys_status
 
                 # SYS_STATUS (1)
-                elif msgid == 1 and len(payload) >= 19:
-                    v_mv, c_ca, rem_pct = struct.unpack('<Hhb', payload[14:19])
+                elif msgid == 1 and len(payload) >= 18:
+                    # SYS_STATUS on the wire: 3 x uint32, load, voltage_battery, current_battery,
+                    # drop_rate_comm, errors_comm, errors_count1-4 (uint16 each), battery_remaining
+                    # (int8) at byte 30. MAVLink 2 drops trailing zero bytes, so pad it back.
+                    p31 = payload[:31] + b'\x00' * (31 - min(len(payload), 31))
+                    v_mv, c_ca = struct.unpack('<Hh', p31[14:18])
+                    rem_pct = struct.unpack('<b', p31[30:31])[0]
                     if v_mv > 0:
                         self.state.voltage = round(v_mv / 1000.0, 2)
                         self.state.cell_voltage = round(self.state.voltage / 4.0, 2)
@@ -804,14 +844,26 @@ class LiveMAVLinkClient(threading.Thread):
                     self.state.update_distance_bearing()
 
                 # VFR_HUD (74)
-                elif msgid == 74 and len(payload) >= 20:
-                    aspd, gspd, hdg, thr, alt, climb = struct.unpack('<ffhHff', payload[:20])
+                elif msgid == 74 and len(payload) >= 8:
+                    # VFR_HUD on the wire: airspeed, groundspeed, alt, climb (floats), then heading
+                    # (int16) and throttle (uint16). Its alt is above sea level, so the height above
+                    # home (alt_rel) comes from GLOBAL_POSITION_INT only. MAVLink 2 drops trailing
+                    # zero bytes, so pad it back.
+                    p20 = payload[:20] + b'\x00' * (20 - min(len(payload), 20))
+                    aspd, gspd, alt_msl, climb, hdg, thr = struct.unpack('<ffffhH', p20)
                     self.state.airspeed = round(aspd, 1)
                     self.state.groundspeed = round(gspd, 1)
                     self.state.heading = round(float(hdg), 1)
                     self.state.throttle = int(thr)
-                    self.state.alt_rel = round(alt, 1)
                     self.state.climb_rate = round(climb, 2)
+
+                # PARAM_VALUE (22): kept for read_params()
+                elif msgid == PARAM_VALUE_MSGID and len(payload) >= 8:
+                    p25 = payload[:25] + b'\x00' * (25 - min(len(payload), 25))
+                    value, _count, _index, pid, _ptype = struct.unpack('<fHH16sB', p25)
+                    name = pid.split(b'\x00')[0].decode('ascii', 'replace').upper()
+                    if name:
+                        self.param_values[name] = (float(value), now)
 
                 # BATTERY_STATUS (147)
                 elif msgid == 147 and len(payload) >= 35:
@@ -2060,8 +2112,17 @@ PRECLAND_PARAMS = ("PLND_ENABLED", "PLND_TYPE", "PLND_LAG")
 # velocity (and turn) over the delay the Cube doesn't cover, so Precision Loiter doesn't chase
 # where the pad was.
 PRECLAND_CUBE_LAG_DEFAULT = 0.25  # s: PLND_LAG from the Precision Landing preset
+NOTE_MAX_PER_SEC = 5              # PrecisionLanding.note(): Cockpit log lines a second
+NOTE_MAX_LEN = 300                # ... characters each
 PRECLAND_MAX_DELAY = 1.5          # s: a longer video delay is refused
 PRECLAND_VEL_MAX_AGE = 1.0        # s: older velocity isn't used to move a sighting on
+# /api/precland/check: while something downloads the Cube's whole parameter list (an app, the
+# Parameters tab), a single PARAM_REQUEST_READ is answered 4-5 s late, and repeating it only adds
+# to the queue. So wait longer, ask again less often, and use a PLND_ value already seen on the
+# link in the last few minutes (the parameter list download passes them too).
+PRECLAND_CHECK_TIMEOUT = 8.0      # s
+PRECLAND_CHECK_RESEND = 2.5       # s between requests
+PRECLAND_CHECK_MAX_AGE = 600.0    # s
 
 
 def _finite(value):
@@ -2126,6 +2187,9 @@ class PrecisionLanding(object):
         self.seen = False                 # a sighting went out within PRECLAND_SENDING_SECS
         self.source = "pad"               # what the last sighting was: "pad" / "spot" (takeoff spot)
         self.cube_lag = PRECLAND_CUBE_LAG_DEFAULT   # PLND_LAG as last read from the Cube
+        self._note_time = 0.0             # note(): the current second, and lines in it
+        self._last_check = None           # check_report(): (time, values, report) the Cube last gave
+        self._note_count = 0
         self.lead = 0.0                   # s the last sighting was moved on (video delay - PLND_LAG)
         self.loiter = None                # last Precision Loiter request: True / False / None (never sent)
         self.camera = None                # last camera request: "down" / "paddle" / None
@@ -2138,6 +2202,55 @@ class PrecisionLanding(object):
         if self.state is not None:
             with self.state.lock:
                 self.state.add_message(text, severity)
+
+    def check_report(self, values):
+        """precland_param_report() for /api/precland/check, remembering the last answer the Cube
+        gave: when a later read fails (the Cube busy in flight), that answer is kept rather than
+        "Could not read", which only shows when the Cube has never answered since the server started."""
+        report = precland_param_report(values)
+        now = time.time()
+        with self.lock:
+            if values.get("PLND_ENABLED") is not None:
+                self._last_check = (now, values.copy(), report)
+                return report
+            last = self._last_check
+        if last is None:
+            return report
+        age = now - last[0]
+        kept = dict(last[2])
+        kept["message"] = "%s (as read %d min ago; the Cube didn't answer just now)" % (
+            last[2]["message"].rstrip("."), int(age // 60)) if age >= 60 else last[2]["message"]
+        kept["stale_secs"] = int(age)
+        return kept
+
+    def note(self, data):
+        """A line from the Cockpit for the Solo's log (the takeoff spot's climb pictures and, once a
+        second, what its looks found on the way down). data: {text, show}. show: also put it in the
+        Cockpit's messages. At most NOTE_MAX_PER_SEC lines a second, NOTE_MAX_LEN characters each.
+        -> (ok, message)"""
+        if not isinstance(data, dict):
+            return False, "Bad note."
+        text = data.get("text")
+        if not isinstance(text, basestring if sys.version_info[0] < 3 else str):
+            return False, "Bad note."
+        # plain ASCII only: the Solo's Python 2 log can't take anything else
+        text = "".join(c if 32 <= ord(c) < 127 else ("" if ord(c) < 32 else "?") for c in text)
+        text = text.strip()[:NOTE_MAX_LEN]
+        if not text:
+            return False, "Empty note."
+        now = time.time()
+        with self.lock:
+            if now - self._note_time >= 1.0:
+                self._note_time = now
+                self._note_count = 0
+            if self._note_count >= NOTE_MAX_PER_SEC:
+                return False, "Too many notes."
+            self._note_count += 1
+        if data.get("show"):
+            self._log(text, 6)
+        else:
+            print("[precland] %s" % text)
+        return True, "noted"
 
     def set_cube_lag(self, value):
         """PLND_LAG as read from the Cube (None: unknown, keep the last)."""

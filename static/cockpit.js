@@ -46,7 +46,8 @@
     let hudDirty = true;            // redraw the HUD canvas only when something changed
     const VIDEO_FPS = 24;           // Solo HDMI encoder frame rate
     const VIDEO_MAX_LAG_S = 0.5;    // jump to the newest frame when playback falls further behind
-    const VIDEO_FINDER_MAX_LAG_S = 0.15;    // ... while the pad finder or TAKEOFF SPOT is on
+    const VIDEO_FINDER_MAX_LAG_S = 0.15;    // ... while the pad finder or TAKEOFF SPOT is on: catch up to this
+    const VIDEO_CATCHUP_RATE = 1.25;        // ... by playing a little faster (a jump stalls the decoder)
     // OSD messages bar state
     let osdSession = null;
     let osdLastId = 0;
@@ -586,7 +587,8 @@
     const PAD_WORK_WIDTH_MAX = 960;      // pixels across the frame the pad finder works on
     const PAD_WORK_WIDTH_MIN = 640;      // ... when a look takes too long on this phone
     const PAD_SLOW_MS = 70;
-    const PAD_VIDEO_FRESH_MS = 500;      // older video is not used: the Solo has moved on
+    const PAD_VIDEO_FRESH_MS = 1000;     // no video data for longer: the frame on screen is old, not used
+    const PAD_NO_VIDEO_MSG_MS = 2000;    // ... and only after this long without usable video say so
     const PAD_LOST_MS = 1500;
     const PAD_CHECK_EVERY_MS = 60000;    // re-read the Cube's PLND_ settings at most this often
     const PAD_LAND_MODES = ['LAND', 'RTL', 'SMART_RTL'];
@@ -613,6 +615,7 @@
     let padWorkWidth = PAD_WORK_WIDTH_MAX;
     let padSlowMs = 0;                   // smoothed time one look takes
     let padLastFrameTime = -1;
+    let padNoVideoSince = 0;             // when the video stopped being usable (0: it is)
     let padPostBusy = false;
     let padLastSeen = 0;
     let padCheck = null;                 // last /api/precland/check answer: {ready, message}
@@ -641,6 +644,8 @@
     const SPOT_TRACK_M = 1.5;            // ... once it has been found (+5% of the height)
     const SPOT_AGREE_M = 0.6;            // matches in a row must agree this well (+5% of the height)
     const SPOT_AGREE_COUNT = 3;          // ... this many before anything goes to the Cube
+    const SPOT_STEADY_MS = 1000;         // ... and the last 3 within this (the Cube wants one every 0.5 s)
+    const SPOT_LOG_MS = 1000;            // the way down: one summary line a second in the Solo's log
     const SPOT_NEAR_M = 15;              // only look when GPS has the Solo this close (+ its height)
     let spotOn = false;
     let spotRefs = [];                   // SpotFinder references from the last climb
@@ -651,7 +656,8 @@
     let spotDownTime = 0;
     let spotNotes = [];                  // why a height was skipped
     let spotLastReason = '';             // why the last try at the next height failed
-    let spotTrack = null;                // {dn, de: the spot vs GPS (m), count, time, scale}
+    let spotTrack = null;                // SpotFinder.track(): {dn, de: the spot vs GPS (m), count, locked, ...}
+    let spotStats = null;                // the way down: what the last second's looks found (for the log)
     let spotLastArmed = null;
     let spotLastSeen = 0;
     let spotMsgUntil = 0;                // the end-of-climb message stays up until then
@@ -831,12 +837,14 @@
         spotNotes = [];
         spotLastReason = '';
         spotTrack = null;
+        spotStats = null;
         let pts = spotGround.slice();
         if (!pts.length && t && t.gps_fix_type >= 3 && (t.lat || t.lon)) pts = [[t.lat, t.lon]];
         if (!pts.length) {
             spotHome = null;
             setSpotButton();
             setPrecisionMsg('TAKEOFF SPOT: no GPS fix when armed, so the spot can\'t be saved. The landing uses GPS.', true);
+            spotLog('TAKEOFF SPOT: no GPS fix when armed, nothing saved', true);
             return;
         }
         spotHome = [0, 1].map(function(i) {
@@ -848,6 +856,7 @@
         setSpotButton();
         setPrecisionMsg('TAKEOFF SPOT: camera down. Pictures at 2, 4 and 8 m on the climb; the camera goes back to the paddle by 10 m.', false);
         speak('Camera down for the takeoff spot');
+        spotLog('TAKEOFF SPOT: armed, camera down for the climb pictures (2, 4, 8 m)', true);
     }
 
     // Done with the climb pictures (or gave up): the camera goes back to the paddle
@@ -868,6 +877,8 @@
                             '. The landing uses GPS. Camera back on the paddle.', true);
             speak('Takeoff spot not saved');
         }
+        spotLog('TAKEOFF SPOT: climb done, ' + n + ' of 3 pictures saved' + (reason ? ' (' + reason + ')' : '') +
+                (spotNotes.length ? '; skipped: ' + spotNotes.join('; ') : '') + '. Camera back on the paddle', true);
     }
 
     // Telemetry side of the takeoff spot: arming, and when to stop the climb pictures
@@ -904,11 +915,14 @@
             spotLastReason = '';
             setSpotButton();
             setPrecisionMsg('TAKEOFF SPOT: ' + spotRefs.length + ' of 3 pictures saved (' + target + ' m).', false);
+            spotLog('TAKEOFF SPOT: picture ' + spotRefs.length + ' saved at ' + view.height.toFixed(1) + ' m (for ' +
+                    target + ' m), ' + Math.hypot(off.n, off.e).toFixed(1) + ' m from the spot', true);
         } else if (late) {
             spotNotes.push(target + ' m: ' + res.reason);
             spotNext++;
             spotLastReason = '';
             setPrecisionMsg('TAKEOFF SPOT: no picture at ' + target + ' m (' + res.reason + ').', true);
+            spotLog('TAKEOFF SPOT: no picture at ' + target + ' m (' + res.reason + '), now ' + view.height.toFixed(1) + ' m', true);
             if (spotNext < SPOT_HEIGHTS.length) {
                 spotCapture(t, pyr, cam);          // the next height may be due now
                 return;
@@ -937,18 +951,55 @@
             ? { n: gn + spotTrack.dn, e: ge + spotTrack.de, radius: SPOT_TRACK_M + 0.05 * view.height, scale: spotTrack.scale }
             : { n: gn, e: ge, radius: SPOT_SEARCH_M, scale: spotTrack ? spotTrack.scale : 1 };
         const m = SpotFinder.match(pyr, cam, view, spotRefs, prior);
+        spotCount(view, m, null, false);
         if (!m.ok) return { m: m, send: false };
         const dn = m.n - gn, de = m.e - ge;
-        if (spotTrack && Math.hypot(dn - spotTrack.dn, de - spotTrack.de) < SPOT_AGREE_M + 0.05 * view.height) {
-            spotTrack.count++;
-        } else {
-            spotTrack = { count: 1 };
+        const r = SpotFinder.track(spotTrack, dn, de, view.height, now, {
+            agreeM: SPOT_AGREE_M, agreeCount: SPOT_AGREE_COUNT, lostMs: PAD_LOST_MS, steadyMs: SPOT_STEADY_MS });
+        spotTrack = r.st;
+        if (r.event !== 'miss') spotTrack.scale = m.scale;
+        spotCount(view, m, r.event, r.send);
+        return { m: m, send: r.send };
+    }
+
+    // The way down: count what each look found, and once a second put a line in the Solo's log
+    function spotCount(view, m, event, send) {
+        const now = Date.now();
+        if (!spotStats) spotStats = { since: now, looks: 0, matched: 0, agree: 0, miss: 0, reset: 0, sent: 0,
+                                      best: 0, next: 0, reasons: {}, height: 0 };
+        const s = spotStats;
+        if (event === null) {                     // a look
+            s.looks++;
+            s.height = view.height;
+            if (m.ok) {
+                s.matched++;
+                if ((m.score || 0) > s.best) { s.best = m.score || 0; s.next = m.second || 0; }
+            } else {
+                const why = m.reason || 'no match';
+                s.reasons[why] = (s.reasons[why] || 0) + 1;
+            }
+        } else {                                  // what the tracker made of a match
+            if (event === 'agree') s.agree++;
+            else if (event === 'miss') s.miss++;
+            else if (event === 'reset') s.reset++;
+            if (send) s.sent++;
         }
-        spotTrack.dn = dn;
-        spotTrack.de = de;
-        spotTrack.time = now;
-        spotTrack.scale = m.scale;
-        return { m: m, send: spotTrack.count >= SPOT_AGREE_COUNT };
+        if (now - s.since < SPOT_LOG_MS) return;
+        const why = Object.keys(s.reasons).map(function(k) { return k + ' x' + s.reasons[k]; }).join(', ');
+        spotLog('TAKEOFF SPOT looking at ' + s.height.toFixed(1) + ' m: ' + s.looks + ' looks, ' + s.matched +
+                ' matched (best score ' + s.best.toFixed(2) + ', next ' + s.next.toFixed(2) + '), ' + s.agree +
+                ' agreed, ' + s.miss + ' disagreed, ' + s.reset + ' restarts, ' + s.sent + ' sent to the Cube' +
+                (why ? '; not matched: ' + why : ''), false);
+        spotStats = null;
+    }
+
+    // A line in the Solo's log (/log/solowebutility.log); show: also in the Cockpit's messages
+    function spotLog(text, show) {
+        fetch('/api/precland/note', {
+            method: 'POST',
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ text: text, show: !!show })
+        }).catch(function() {});
     }
 
     if (btnTakeoffSpot) {
@@ -1134,13 +1185,18 @@
         const spotActive = typeof SpotFinder !== 'undefined' && !!t && (spotCapturing || spotWanted(t));
         if (!padFinderOn && !spotActive) return;
         const v = liveVideoFeed;
+        if (v && v.seeking) return;               // a jump to the newest video: frames again in a moment
         if (!videoWanted() || !v || v.readyState < 2 || !v.videoWidth ||
                 Date.now() - lastVideoPacketTime > PAD_VIDEO_FRESH_MS) {
-            clearPadOverlay();
-            setPrecisionMsg((padFinderOn ? 'Pad finder' : 'TAKEOFF SPOT') +
-                            ' on, but there is no live video (is Solex using it?). Nothing is sent.', true);
+            if (!padNoVideoSince) padNoVideoSince = Date.now();
+            if (Date.now() - padNoVideoSince >= PAD_NO_VIDEO_MSG_MS) {
+                clearPadOverlay();
+                setPrecisionMsg((padFinderOn ? 'Pad finder' : 'TAKEOFF SPOT') +
+                                ' on, but there is no live video (is Solex using it?). Nothing is sent.', true);
+            }
             return;
         }
+        padNoVideoSince = 0;
         if (v.currentTime === padLastFrameTime) return;          // no new frame yet
         padLastFrameTime = v.currentTime;
         const t0 = performance.now();
@@ -2372,14 +2428,21 @@
         const last = v.buffered.length - 1;
         const end = v.buffered.end(last);
         const lag = end - v.currentTime;
-        // the pad finder and the takeoff spot steer the Solo by this video: keep it nearer live
-        const maxLag = (padFinderOn || spotOn) ? VIDEO_FINDER_MAX_LAG_S : VIDEO_MAX_LAG_S;
-        if (lag > maxLag || v.currentTime < v.buffered.start(last)) {
+        // The pad finder and the takeoff spot steer the Solo by this video: keep it nearer live.
+        // Small lags are made up by playing a little faster; only a big one is jumped, because a
+        // jump makes the browser decode again from the last key frame and the video stalls (the
+        // finders then see no frame, and the Cube no sighting).
+        const finders = padFinderOn || spotOn;
+        if (lag > VIDEO_MAX_LAG_S || v.currentTime < v.buffered.start(last)) {
             try {
                 v.currentTime = Math.max(v.buffered.start(last), end - 0.05);
                 liveEdgeJumps++;
             } catch (e) {}
             if (v.paused && videoWanted()) v.play().catch(function() {});
+        }
+        const rate = finders && lag > VIDEO_FINDER_MAX_LAG_S ? VIDEO_CATCHUP_RATE : 1.0;
+        if (v.playbackRate !== rate) {
+            try { v.playbackRate = rate; } catch (e) {}
         }
     }, 250);
 

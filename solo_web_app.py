@@ -453,9 +453,15 @@ class SoloApiHandler(BaseHTTPRequestHandler):
             if gimbal_update_running():
                 self._send_json({"ready": False, "message": "A gimbal firmware update is running."})
                 return
-            values = param_mgr.mgr.read_live(cockpit_mgr.PRECLAND_PARAMS)
+            # over the Cockpit's own telemetry link first (no new connection: works in flight),
+            # then the Parameters tab's way
+            values = cockpit_mgr.precland.client.read_params(
+                cockpit_mgr.PRECLAND_PARAMS, timeout=cockpit_mgr.PRECLAND_CHECK_TIMEOUT,
+                max_age=cockpit_mgr.PRECLAND_CHECK_MAX_AGE, resend=cockpit_mgr.PRECLAND_CHECK_RESEND)
+            if values.get("PLND_ENABLED") is None:
+                values = param_mgr.mgr.read_live(cockpit_mgr.PRECLAND_PARAMS)
             cockpit_mgr.precland.set_cube_lag(values.get("PLND_LAG"))
-            self._send_json(cockpit_mgr.precland_param_report(values))
+            self._send_json(cockpit_mgr.precland.check_report(values))
             return
 
         if path == '/api/video/h264':
@@ -784,6 +790,12 @@ class SoloApiHandler(BaseHTTPRequestHandler):
         if path == '/api/precland/target':
             cockpit_mgr.note_demand()
             ok, msg = cockpit_mgr.precland.report_target(body)
+            self._send_json({"ok": ok, "message": msg})
+            return
+
+        # A line for the Solo's log from the Cockpit (takeoff spot pictures and looks)
+        if path == '/api/precland/note':
+            ok, msg = cockpit_mgr.precland.note(body)
             self._send_json({"ok": ok, "message": msg})
             return
 
@@ -1161,6 +1173,13 @@ def run_server(port=PORT):
             print("[gimbal] unfinished gimbal update found: putting MNT1_TYPE back in the background")
     except Exception as e:
         print("[!] Warning: gimbal update recovery check failed: %s" % e)
+
+    # Full Install on a never-updated Solo leaves the Cube update for the first start on Open Solo
+    try:
+        if flash_mgr.flash_engine.start_pending_cube_flash():
+            print("[flash] parked Cube update found: it starts in %d s" % flash_mgr.PENDING_CUBE_START_DELAY)
+    except Exception as e:
+        print("[!] Warning: parked Cube update check failed: %s" % e)
 
     # Safety: drop the Controller's home Wi-Fi link as soon as the vehicle arms
     try:

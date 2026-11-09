@@ -1,4 +1,4 @@
-image 3a277e589d4cf46a4f8c305dc0fe3007
+image e7019de7547334d325080ca8f06d6e49
 ecbd052cf4cf20692fa8b09b3769b8ab  (recipe) tools/bake_squashfs.sh
 2baed77a8919d189bdc48c784f618dbf  app.py
 456e45a4a98a5d615a8e809228e2785d  arducopter_builder.py
@@ -15,11 +15,11 @@ ab0900c7bffaf66ef0657cb3b34e2201  bin/gimbal_update/gimbal_update.py
 cb693e6f8ff4bf733af678291c3e3cfd  bin/gimbal_update/loadGimbal_fixed.py
 a61a8f789b94400e0e42858842c77964  bin/golden_update/golden_update.py
 4ef80bc460415e0225e04d38e388b226  bin/golden_update/golden_write.sh
-ed76d99ed66ae7b56c4311bddf0c4496  bin/pixhawk.py
+05148c38fd660883068dcef3087a7081  bin/pixhawk.py
 6571f4ec8ac1eff07f768d1b8256a0cf  bin/uploader.py
 e377ee917663f6636541005d66dcad39  calib_mgr.py
 4b865d86eb34df1667ed7e40345bc8a6  change_password.py
-5dba2446b4a8409cb8d83ded12a654cb  cockpit_mgr.py
+188e4628f66f8aeb663937cf427a6d90  cockpit_mgr.py
 f0e5f52ffc2e83218f5e2460ebfa48d0  compat.py
 05f7f0e5dfaff09161af85b769f34706  controller_mgr.py
 6b116278690caf341f8026d88e529b8e  firmware/Solo.param
@@ -29,7 +29,7 @@ a34c0af87aded146acf6a867608b22ff  firmware/arducopter_CubeSolo_4.7.2.apj
 1873fa632b9e5fbc4e10f5fc7a88f322  firmware/previous/arducopter_CubeGreen_4.7.1.apj
 3da170d81845f20b7914787a75f2f80e  firmware/previous/arducopter_CubeSolo_4.7.1.apj
 983faaec81bd094442d94ea19096fd98  firmware/solocustombuild.yaml
-9c31086e8883e873ddca743d95548f83  flash_mgr.py
+5c6578a349fc3c884851a845e78c51b6  flash_mgr.py
 a232e546eb38e1f8992c0e52c38f7c8d  modules/__init__.py
 e01e79ba02d94dd9a1aecef626ec21ce  modules/auth.py
 51c4382fd8aaf270b64438dd72c6656e  modules/calib_mgr.py
@@ -49,7 +49,7 @@ d4d2517d66a0c06d7c8239b9351bd06e  pair_mgr.py
 0d36f176d4de19c0976b5c7e5619c965  param_mgr.py
 3a8a94e77f11feeee1ec3f0c0cb0ebcf  presets.py
 d467aa145c5cd9196d9fcb95a20c5225  solo.param
-be5b524aa221cd3919b49ce695629c2e  solo_web_app.py
+f2c552b63e454cafd38902cce99d472f  solo_web_app.py
 d7f76dd75c19ffd78619845a103d376a  static/3DR_Solo_User_Manual_Updated_2026.pdf
 0a99f75697bfb732c37207c30b32f67b  static/BMSOne-Configurator.html
 8cce400c95b5762203e3a0283714bae3  static/BMSOne-User-Manual.pdf
@@ -57,21 +57,21 @@ d7f76dd75c19ffd78619845a103d376a  static/3DR_Solo_User_Manual_Updated_2026.pdf
 a661b0b31bbbc6c0eb14c2ce8d74b6d6  static/Solo_Web_Utility_Owners_Manual.pdf
 e653de2ac5b0f7ee6e8a5d8567d50ece  static/app.js
 4e1890ca0719bc1c982e6974a23ccfff  static/cockpit.css
-4cffd9325051b6c80ef4ab696ef7ac54  static/cockpit.js
-aa4bda25a088ea4589745654d138d470  static/index.html
+f80ca6a3b54e28380e6c844789e36c55  static/cockpit.js
+e0ebbfd7d3d237b93fc297ccd11d019b  static/index.html
 075c6c464b218fa88d56eb974bdd98e6  static/jmuxer.min.js
 1202946825a3d95924b77c5ae9e01b3b  static/landing_pad.html
-e7e83d7fd345302d27a45eb53613dc48  static/manual.html
+8da0ced7d6ad0c73f8beef0edd797e70  static/manual.html
 9023bd57f2757cf82a06849c72bc9db1  static/padfinder.js
-3e33478ae255f303253879fb979db1c1  static/solo_drone_manual.html
+342932bc573b48a546b5135468d9f27b  static/solo_drone_manual.html
 d022df64c87d6939a0203ab09a50b4ba  static/solo_icon.png
 d4c5749deda789b47c7e72a46bfd0e61  static/solo_icon_512.png
 fa7c6f4b930e109381e41c10845f2c67  static/sololink_viewer.apk.bin
-aa276dfdb6b45847e9baa919c31f20a4  static/spotfinder.js
+e11b1295b9d40d3cd182992526d40a7a  static/spotfinder.js
 437a2bf0ac2f53db77069b8d6bea9372  static/style.css
-aa4bda25a088ea4589745654d138d470  templates/index.html
+e0ebbfd7d3d237b93fc297ccd11d019b  templates/index.html
 9ba0e69ed82438d5b621c2d6f7de2149  templates/updates.html
-605949ba7b29d68cd7baa4be2b52b153  version.json
+3b02eb1f2cbbeebebdb142060dbfb9f1  version.json
 ba65e63da86b93d1ed42e0132ae649d5  version_mgr.py
 213496a3823c54db7a5b656776f66c5a  webcore.py
 a85f2d4f485912b64751985af54d76df  wifi_mgr.py
