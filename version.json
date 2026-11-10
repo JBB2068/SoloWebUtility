@@ -1,7 +1,7 @@
 {
-  "version": "1.2.9",
-  "iteration": 81,
-  "updated_at": 1793901453,
+  "version": "1.2.10",
+  "iteration": 82,
+  "updated_at": 1794258027,
   "changelog": [
     {
       "version": "1.0.67",
@@ -460,6 +460,12 @@
       "iteration": 81,
       "date": "2026-11-05 11:57:33",
       "description": "TAKEOFF SPOT leaves a record and sends steadier: the climb pictures (saved, or skipped and why) go to the Cockpit's messages and the Solo's log (/log/solowebutility.log, [precland] lines), and on the way down a line a second says what the matching found (new /api/precland/note). Matches go to the Cube only once 3 agree and the last 3 came within 1 s (ArduPilot wants a sighting every 0.5 s for 2 s, otherwise 'PrecLand: Init Failed'); one match that disagrees is ignored (stripes, cracks). SpotFinder.track, test_47, tools/test_spotfinder.js track cases. Manuals: striped paving, where the record is. No false alarms while the finders run: the video counts as gone only after 2 s without usable frames (a jump to the newest video is waited out, small lags are caught up by playing 1.25x instead of jumping, which stalled the decoder), and /api/precland/check keeps the Cube's last answer when a read fails in flight instead of 'Could not read PLND_ENABLED'. test_48. Telemetry fix: VFR_HUD was decoded in the wrong field order, so its climb rate overwrote the height above home (about 0 in a hover, every other message) and its heading, throttle and climb rate were garbage; TAKEOFF SPOT then saw 'too low for the saved pictures' all the way down. VFR_HUD is now read in MAVLink's wire order and no longer sets the height (its alt is above sea level). SYS_STATUS battery % is read from byte 30 (was the drop-rate byte). MAVLink 2 trimmed payloads are padded. test_49. The precision landing check reads PLND_ENABLED/PLND_TYPE/PLND_LAG over the Cockpit's own telemetry link (PARAM_REQUEST_READ / PARAM_VALUE) instead of opening a new connection that missed the Cube's heartbeat ('Could not read PLND_ENABLED'). test_50. Manuals: camera control is now described correctly. Full GoPro control is supported natively only on the HERO3+ Black, HERO4 Silver and HERO4 Black; the HERO3+ Silver and all HERO3 models give the live video feed but no camera control. Full Install on a never-updated Solo (still on 3DR's original software) no longer gets stuck flashing the Cube: it installs Open Solo first and the Solo updates its Cube by itself the first time it starts on Open Solo. The Cube flash also has a time limit now, so a Cube that never enters its bootloader gives an error instead of an endless log (test_51)."
+    },
+    {
+      "version": "1.2.10",
+      "iteration": 82,
+      "date": "2026-11-09 15:00:27",
+      "description": "Full Install on a never-updated Solo now updates the Cube the way Solex does: on the first start on Open Solo the utility puts the saved firmware in Open Solo's /firmware and restarts the Solo once, and Open Solo flashes the Cube at boot (the arm lights cycle colors for a few minutes). On the next start the utility checks the result: firmware moved to /firmware/loaded = done; still waiting = power-cycle; deleted (failed) = it frees the Cube and asks for a power-cycle, at most 3 times. Cube Only no longer reports success when the flash failed: pixhawk.py exits 0 even then, so the utility now checks that the firmware went to /firmware/loaded. A Cube left in its bootloader by a failed flash (Open Solo's pixhawk.py forgets to restart it) is started on its previous firmware by the new bin/cube_bootloader.py, so the Solo no longer sits with cycling lights until a power-cycle. Every Cube update writes /log/solowebutility_cube_update.log. New Download logs button above the Firmware page's terminal: one zip with a summary of the Solo and the utility, install, Cube update and Open Solo logs. Manual updated. test_51, test_52. New Flight Logs card on the Parameters page: lists the Cube's flight logs saved on the Solo (/log/dataflash/<n>.BIN), newest first, with Download and View (only while disarmed), plus Open a .BIN file for logs saved earlier. The viewer works without internet: flight summary (flight time, max height, distance, top speed, battery, GPS, vibration, errors and warnings), flight mode and armed timeline, charts of any logged value with zoom and readout, the Cube's messages with severity and text/regex filters, and the parameters recorded in the log. It is self-contained (modules/log_viewer/ and static/log-viewer/, own Shadow DOM, state, error guard, parsing in a Web Worker); its only hooks are one route block and the mount point (test_53, tools/test_logviewer.js)."
     }
   ]
 }

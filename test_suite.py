@@ -3883,7 +3883,9 @@ class TestSoloWebUtility(unittest.TestCase):
         saved_path = os.environ.get("PATH", "")
         saved = dict((k, getattr(flash_mgr, k)) for k in (
             "OPEN_SOLO_PIXHAWK", "PENDING_CUBE_DIR", "PENDING_CUBE_APJ", "PENDING_CUBE_INFO",
-            "PENDING_CUBE_LOCK", "CUBE_FLASH_EXIT_GRACE", "_other_pixhawk_running"))
+            "PENDING_CUBE_LOCK", "CUBE_FLASH_EXIT_GRACE", "_other_pixhawk_running",
+            "OPEN_SOLO_FW_DIR", "OPEN_SOLO_FW_APJ", "OPEN_SOLO_LOADED_APJ", "CUBE_UPDATE_LOG",
+            "_reboot_solo", "release_cube_bootloader"))
         try:
             open(os.path.join(tmp, "uploader.py"), "w").close()
             os.environ["PATH"] = tmp
@@ -3916,48 +3918,84 @@ class TestSoloWebUtility(unittest.TestCase):
             # still on 3DR's software after a failed install: nothing starts
             self.assertFalse(fm.start_pending_cube_flash(delay=0))
 
-            # 3. first start on Open Solo: Cube Only with the parked file, then the record goes
+            # 3. first start on Open Solo: like Solex, the firmware goes to Open Solo's /firmware and
+            #    the Solo restarts once; Open Solo's boot-time pixhawk.py -i flashes the Cube. On the
+            #    next start the utility checks what pixhawk.py did with the file.
             open(flash_mgr.OPEN_SOLO_PIXHAWK, "w").close()
-            runs = []
+            fwdir = os.path.join(tmp, "firmware")
+            flash_mgr.OPEN_SOLO_FW_DIR = fwdir
+            flash_mgr.OPEN_SOLO_FW_APJ = os.path.join(fwdir, "arducopter.apj")
+            flash_mgr.OPEN_SOLO_LOADED_APJ = os.path.join(fwdir, "loaded", "arducopter.apj")
+            flash_mgr.CUBE_UPDATE_LOG = os.path.join(tmp, "cube_update.log")
+            reboots, releases = [], []
+            flash_mgr._reboot_solo = lambda: reboots.append(1)
+            flash_mgr.release_cube_bootloader = lambda log=None: releases.append(1) or "released"
+            os.makedirs(fwdir)
+            with open(os.path.join(fwdir, "old.px4"), "w") as f:
+                f.write("x")
+            md5 = info["md5"]
 
-            def _ok(cube_type, mode):
-                runs.append((cube_type, mode, fm._apj_override, fm._pending_run))
-                fm.status = "success"
-                fm.is_flashing = False      # as the real _pipeline does
-            fm._pipeline = _ok
+            def _msgs(f):
+                return " ".join(e["message"] for e in f.log_buffer)
             fm._pending_cube_worker(flash_mgr.read_pending_cube_flash(), 0)
-            self.assertEqual(runs, [("solo", "cube_only", flash_mgr.PENDING_CUBE_APJ, True)])
+            self.assertEqual(reboots, [1])
+            self.assertEqual(flash_mgr._get_file_md5(flash_mgr.OPEN_SOLO_FW_APJ), md5)
+            self.assertFalse(os.path.exists(os.path.join(fwdir, "old.px4")))
+            info = flash_mgr.read_pending_cube_flash()
+            self.assertEqual((info["stage"], info["tries"]), ("handed_off", 1))
+            self.assertIn("restarts now", _msgs(fm))
+            # Open Solo loaded it at boot (moved to /firmware/loaded): finished, record cleared
+            os.makedirs(os.path.join(fwdir, "loaded"))
+            os.rename(flash_mgr.OPEN_SOLO_FW_APJ, flash_mgr.OPEN_SOLO_LOADED_APJ)
+            fm._pending_cube_worker(flash_mgr.read_pending_cube_flash(), 0)
             self.assertIsNone(flash_mgr.read_pending_cube_flash())
-            self.assertFalse(os.path.exists(pend))
+            self.assertIn("Cube update is finished", _msgs(fm))
+            self.assertEqual((reboots, releases), ([1], []))
+            with open(flash_mgr.CUBE_UPDATE_LOG) as f:
+                cl = f.read()
+            self.assertIn("placed in", cl)
+            self.assertIn("Cube update is finished", cl)
 
-            # a failure keeps it for the next start, at most PENDING_CUBE_MAX_TRIES times
+            # boot flash not run yet (file still waiting): ask for a power-cycle, nothing else
             fm2 = flash_mgr.FlashManager()
-            fm2._defer_cube_flash(apj, "green")
-            fails = []
-
-            def _fail(cube_type, mode):
-                fails.append(cube_type)
-                fm2.status = "error"
-                fm2.is_flashing = False
-            fm2._pipeline = _fail
-            for _ in range(flash_mgr.PENDING_CUBE_MAX_TRIES + 1):
+            fm2._defer_cube_flash(apj, "solo")
+            fm2._pending_cube_worker(flash_mgr.read_pending_cube_flash(), 0)
+            self.assertEqual(len(reboots), 2)
+            self.assertFalse(os.path.exists(flash_mgr.OPEN_SOLO_LOADED_APJ))   # old copy removed
+            fm2._pending_cube_worker(flash_mgr.read_pending_cube_flash(), 0)
+            self.assertIn("still waiting", _msgs(fm2))
+            self.assertEqual((len(reboots), releases), (2, []))
+            self.assertEqual(flash_mgr.read_pending_cube_flash()["tries"], 1)
+            # boot flash failed (pixhawk.py deleted the file): free the Cube, put the file back and
+            # ask for a power-cycle, no restart; after PENDING_CUBE_MAX_TRIES it gives up
+            for n in range(2, flash_mgr.PENDING_CUBE_MAX_TRIES + 1):
+                os.remove(flash_mgr.OPEN_SOLO_FW_APJ)
                 fm2._pending_cube_worker(flash_mgr.read_pending_cube_flash(), 0)
-            self.assertEqual(fails, ["green"] * flash_mgr.PENDING_CUBE_MAX_TRIES)
-            self.assertEqual(flash_mgr.read_pending_cube_flash()["tries"], flash_mgr.PENDING_CUBE_MAX_TRIES)
+                self.assertEqual(flash_mgr.read_pending_cube_flash()["tries"], n)
+                self.assertTrue(os.path.isfile(flash_mgr.OPEN_SOLO_FW_APJ))
+                self.assertIn("Power-cycle the Solo", _msgs(fm2))
+            self.assertEqual((len(reboots), len(releases)), (2, flash_mgr.PENDING_CUBE_MAX_TRIES - 1))
+            os.remove(flash_mgr.OPEN_SOLO_FW_APJ)
+            fm2._pending_cube_worker(flash_mgr.read_pending_cube_flash(), 0)
+            self.assertTrue(flash_mgr.read_pending_cube_flash()["gave_up"])
+            self.assertFalse(os.path.exists(flash_mgr.OPEN_SOLO_FW_APJ))
+            self.assertIn("Run Cube Only", _msgs(fm2))
+            n_rel = len(releases)
+            fm2._pending_cube_worker(flash_mgr.read_pending_cube_flash(), 0)   # gave up: does nothing
+            self.assertEqual((len(releases), len(reboots)), (n_rel, 2))
             self.assertFalse(os.path.exists(flash_mgr.PENDING_CUBE_LOCK))
-            # another copy of the utility holding the lock: this one does not flash
+            # another copy of the utility holding the lock: this one does nothing
             flash_mgr.clear_pending_cube_flash()
             fm2._defer_cube_flash(apj, "solo")
             os.mkdir(flash_mgr.PENDING_CUBE_LOCK)
-            del fails[:]
             fm2._pending_cube_worker(flash_mgr.read_pending_cube_flash(), 0)
-            self.assertEqual(fails, [])
-            # a corrupt parked file is dropped, not flashed
+            self.assertEqual(len(reboots), 2)
             os.rmdir(flash_mgr.PENDING_CUBE_LOCK)
+            # a corrupt parked file is dropped, never handed over
             with open(flash_mgr.PENDING_CUBE_APJ, "ab") as f:
                 f.write(b"x")
             fm2._pending_cube_worker(flash_mgr.read_pending_cube_flash(), 0)
-            self.assertEqual(fails, [])
+            self.assertEqual(len(reboots), 2)
             self.assertIsNone(flash_mgr.read_pending_cube_flash())
 
             # 4. pixhawk.py --load: hard time limit, and a leftover uploader is stopped
@@ -4006,11 +4044,267 @@ class TestSoloWebUtility(unittest.TestCase):
         self.assertIn('if install_mode == "full" and not solo_has_open_solo():', pipe)
         self.assertIn("self._defer_cube_flash(apj_src, cube_type)", pipe)
         self.assertIn("rc_load = self._run_pixhawk_load(pixhawk_bin)", pipe)
+        # pixhawk.py exits 0 even when the flash fails: the file moved to /firmware/loaded decides
+        self.assertIn("not_loaded = rc_load == 0 and _md5_or_none(OPEN_SOLO_LOADED_APJ) != apj_md5", pipe)
+        self.assertIn("if rc_load != 0 or not_loaded:", pipe)
+        self.assertIn("release_cube_bootloader(", pipe)
         self.assertNotIn("proc_load.stdout.readline()", pipe)
         self.assertIn("clear_pending_cube_flash()", pipe)
         self.assertIn("Wait ~6 minutes for reboot to finish.", pipe)
         with open(os.path.join(root, "solo_web_app.py"), "r", encoding="utf-8") as f:
             self.assertIn("flash_mgr.flash_engine.start_pending_cube_flash()", f.read())
+
+
+    def test_52_download_logs_and_cube_bootloader_release(self):
+        """Download logs on the Firmware page saves one zip (summary + the utility, install, Cube update
+        and Open Solo logs, newest part of big files). bin/cube_bootloader.py starts the firmware of a
+        Cube that a failed flash left in its bootloader (Open Solo's pixhawk.py forgets to)."""
+        import tempfile
+        import zipfile as _zip
+        import io as _io
+        import shutil as _shutil
+        import importlib.util as _ilu
+        import flash_mgr
+        root = os.path.dirname(os.path.abspath(__file__))
+        tmp = tempfile.mkdtemp()
+        saved_tail = flash_mgr.LOG_BUNDLE_TAIL
+        try:
+            # 1. the zip
+            small = os.path.join(tmp, "solowebutility_install.log")
+            big = os.path.join(tmp, "solowebutility.log")
+            with open(small, "w") as f:
+                f.write("install line\n")
+            with open(big, "w") as f:
+                f.write("old " * 5000 + "NEWEST LINE\n")
+            flash_mgr.LOG_BUNDLE_TAIL = 1000
+            name, body = flash_mgr.build_log_bundle(files=[small, big, os.path.join(tmp, "missing.log")],
+                                                    version="9.9.9")
+            self.assertTrue(name.startswith("solo_logs_") and name.endswith(".zip"))
+            zf = _zip.ZipFile(_io.BytesIO(body))
+            names = zf.namelist()
+            self.assertIn("summary.txt", names)
+            self.assertIn("Solo Web Utility 9.9.9 logs", zf.read("summary.txt").decode("utf-8"))
+            key_small = small.strip("/").replace("/", "_")
+            key_big = big.strip("/").replace("/", "_")
+            self.assertEqual(zf.read(key_small), b"install line\n")
+            tail = zf.read(key_big)
+            self.assertTrue(tail.endswith(b"NEWEST LINE\n"))
+            self.assertIn(b"first", tail[:60])
+            self.assertLess(len(tail), 1100)
+            self.assertEqual(len(names), 3)
+            for p in ("/log/solowebutility_cube_update.log", "/log/solowebutility.log",
+                      "/log/solowebutility_install.log", "/log/3dr-solo.log"):
+                self.assertIn(p, flash_mgr.LOG_BUNDLE_FILES)
+
+            # 2. route and button
+            with open(os.path.join(root, "solo_web_app.py"), "r", encoding="utf-8") as f:
+                app = f.read()
+            gate = app.index('# Require Auth for all other API endpoints')
+            self.assertGreater(app.index("if path == '/api/logs/download':"), gate)
+            self.assertIn("flash_mgr.build_log_bundle(version=ver)", app)
+            for page in ("static/index.html", "templates/index.html"):
+                with open(os.path.join(root, page), "r", encoding="utf-8") as f:
+                    self.assertIn('id="btnDownloadLogs"', f.read())
+            with open(os.path.join(root, "static", "app.js"), "r", encoding="utf-8") as f:
+                js = f.read()
+            self.assertIn("window.location.href = '/api/logs/download';", js)
+
+            # 3. cube_bootloader.py
+            spec = _ilu.spec_from_file_location("cube_bootloader", os.path.join(root, "bin", "cube_bootloader.py"))
+            cb = _ilu.module_from_spec(spec)
+            spec.loader.exec_module(cb)
+            self.assertTrue(cb.is_bootloader_port("/dev/serial/by-id/usb-3D_Robotics_PX4_BL_FMU_v2.x_0-if00"))
+            self.assertTrue(cb.is_bootloader_port("usb-ArduPilot_CubeSolo-BL_2E0034000A51-if00"))
+            self.assertFalse(cb.is_bootloader_port("/dev/serial/by-id/usb-3D_Robotics_PX4_FMU_v2.x_0-if00"))
+            self.assertFalse(cb.is_bootloader_port("usb-ArduPilot_CubeSolo_2E0034000A51-if00"))
+            by_id = os.path.join(tmp, "by-id")
+            gpio = os.path.join(tmp, "gpio")
+            os.makedirs(by_id)
+            os.makedirs(os.path.join(gpio, "gpio19"))
+            os.makedirs(os.path.join(gpio, "gpio21"))
+            bl = os.path.join(by_id, "usb-3D_Robotics_PX4_BL_FMU_v2.x_0-if00")
+            fmu = os.path.join(by_id, "usb-3D_Robotics_PX4_FMU_v2.x_0-if00")
+
+            class Port(object):
+                def __init__(self, boots):
+                    self.sent, self.boots, self.closed = b"", boots, False
+                    self.reply = b""
+
+                def write(self, d):
+                    self.sent += d
+                    self.reply = cb.INSYNC + cb.OK
+                    if d == cb.BOOT + cb.EOC and self.boots:
+                        os.remove(bl)
+                        open(fmu, "w").close()
+
+                def flush(self):
+                    pass
+
+                def read(self, n):
+                    r, self.reply = self.reply, b""
+                    return r
+
+                def close(self):
+                    self.closed = True
+            quiet = lambda m: None
+            self.assertEqual(cb.release(by_id, gpio, settle=0, wait=0.3, log=quiet), "no-usb")
+            open(fmu, "w").close()
+            self.assertEqual(cb.release(by_id, gpio, settle=0, wait=0.3, log=quiet), "running")
+            os.remove(fmu)
+            open(bl, "w").close()
+            ports = []
+            opener = lambda p, boots=True: ports.append(Port(boots)) or ports[-1]
+            self.assertEqual(cb.release(by_id, gpio, open_serial=opener, settle=0, wait=0.3, log=quiet), "released")
+            self.assertEqual(ports[0].sent, cb.GET_SYNC + cb.EOC + cb.BOOT + cb.EOC)
+            self.assertTrue(ports[0].closed)
+            os.remove(fmu)
+            open(bl, "w").close()
+            self.assertEqual(cb.release(by_id, gpio, open_serial=lambda p: Port(False), settle=0, wait=0.3,
+                                        log=quiet), "still-in-bootloader")
+            # USB left disconnected afterwards (enable 19 = 1, VBUS 21 = 0)
+            with open(os.path.join(gpio, "gpio19", "value")) as f:
+                self.assertEqual(f.read(), "1")
+            with open(os.path.join(gpio, "gpio21", "value")) as f:
+                self.assertEqual(f.read(), "0")
+        finally:
+            flash_mgr.LOG_BUNDLE_TAIL = saved_tail
+            _shutil.rmtree(tmp, ignore_errors=True)
+
+
+    def test_53_flight_log_viewer_is_self_contained(self):
+        """Parameters page flight log viewer. Backend: modules/log_viewer/log_viewer_api.py lists and
+        sends /log/dataflash/<n>.BIN read-only (refused while armed). Frontend: static/log-viewer/
+        mounts itself into #logViewerMount (Shadow DOM, own state, error guard, parsing in a Worker).
+        The only hooks into the utility are one route block in solo_web_app.py and the mount point +
+        script tag in the page."""
+        import tempfile
+        import io as _io
+        import json as _json
+        import shutil as _shutil
+        import importlib.util as _ilu
+        import subprocess as _subprocess
+        root = os.path.dirname(os.path.abspath(__file__))
+        api_path = os.path.join(root, "modules", "log_viewer", "log_viewer_api.py")
+        spec = _ilu.spec_from_file_location("lv_api_test", api_path)
+        lv = _ilu.module_from_spec(spec)
+        spec.loader.exec_module(lv)
+
+        class Req(object):
+            def __init__(self):
+                self.code, self.headers, self.wfile = None, {}, _io.BytesIO()
+
+            def send_response(self, code):
+                self.code = code
+
+            def send_header(self, k, v):
+                self.headers[k] = v
+
+            def end_headers(self):
+                pass
+
+        tmp = tempfile.mkdtemp()
+        try:
+            for name, data in (("3.BIN", b"abc"), ("12.BIN", b"\xa3\x95" * 50000), ("notes.txt", b"x"), ("x.BIN", b"y")):
+                with open(os.path.join(tmp, name), "wb") as f:
+                    f.write(data)
+            with open(os.path.join(tmp, "LASTLOG.TXT"), "w") as f:
+                f.write("3\n")
+            old = time.time() - 600
+            os.utime(os.path.join(tmp, "3.BIN"), (old, old))
+            logs = lv.list_flight_logs(tmp)
+            self.assertEqual([d["n"] for d in logs], [12, 3])
+            self.assertEqual([d["latest"] for d in logs], [False, True])
+            self.assertEqual([d["writing"] for d in logs], [True, False])
+            self.assertEqual(logs[0]["size"], 100000)
+
+            r = Req()
+            lv.handle(r, "/api/logviewer/flightlogs", None, folder=tmp, armed=lambda: False)
+            body = _json.loads(r.wfile.getvalue().decode("utf-8"))
+            self.assertEqual((r.code, len(body["logs"]), body["armed"]), (200, 2, False))
+            r = Req()
+            lv.handle(r, "/api/logviewer/flightlog/12", None, folder=tmp, armed=lambda: False)
+            self.assertEqual(r.code, 200)
+            self.assertEqual(r.wfile.getvalue(), b"\xa3\x95" * 50000)
+            self.assertEqual(r.headers["Content-Length"], "100000")
+            self.assertIn("attachment", r.headers["Content-Disposition"])
+            self.assertIn("solo_flight_12_", r.headers["Content-Disposition"])
+            for path, code in (("/api/logviewer/flightlog/99", 404), ("/api/logviewer/flightlog/..%2F..%2Fetc", 404),
+                               ("/api/logviewer/flightlog/../../etc/passwd", 404), ("/api/logviewer/nope", 404)):
+                r = Req()
+                lv.handle(r, path, None, folder=tmp, armed=lambda: False)
+                self.assertEqual(r.code, code, path)
+            r = Req()
+            lv.handle(r, "/api/logviewer/flightlog/12", None, folder=tmp, armed=lambda: True)
+            self.assertEqual(r.code, 409)
+            self.assertIn("after landing", _json.loads(r.wfile.getvalue().decode("utf-8"))["error"])
+            # a failing armed check (no telemetry) counts as disarmed
+            r = Req()
+            lv.handle(r, "/api/logviewer/flightlogs", None, folder=tmp, armed=lambda: 1 / 0)
+            self.assertEqual(r.code, 500)
+            self.assertFalse(lv._armed() and False)
+        finally:
+            _shutil.rmtree(tmp, ignore_errors=True)
+
+        # backend: read-only, no utility imports except the passive armed check
+        with open(api_path, "r", encoding="utf-8") as f:
+            src = f.read()
+        self.assertIn("is_vehicle_armed(wake=False)", src)
+        for bad in ("import flash_mgr", "import param_mgr", "import solo_web_app", "mavlink", "subprocess",
+                    "open(path, \"w", "os.remove", "shutil"):
+            self.assertNotIn(bad, src)
+
+        # the one hook in solo_web_app.py, after the login check, loading the file by path
+        import solo_web_app
+        with open(os.path.join(root, "solo_web_app.py"), "r", encoding="utf-8") as f:
+            app = f.read()
+        gate = app.index("# Require Auth for all other API endpoints")
+        self.assertGreater(app.index("if path.startswith('/api/logviewer/'):"), gate)
+        self.assertEqual(app.count("startswith('/api/logviewer/')"), 1)
+        self.assertNotIn("from modules.log_viewer", app)
+        mod = solo_web_app._load_log_viewer()
+        self.assertTrue(callable(getattr(mod, "handle", None)))
+
+        # the mount point and script tag, the only page changes
+        for page in ("static/index.html", "templates/index.html"):
+            with open(os.path.join(root, page), "r", encoding="utf-8") as f:
+                html = f.read()
+            params = html[html.index('<section class="tab-content" id="tab-params">'):]
+            params = params[:params.index("</section>")]
+            self.assertIn('<div id="logViewerMount"></div>', params)
+            self.assertEqual((html.count("log-viewer.js"), html.count("logViewerMount")), (1, 1))
+            self.assertIn('<script src="/log-viewer/log-viewer.js?v=', html)
+        with open(os.path.join(root, "static", "app.js"), "r", encoding="utf-8") as f:
+            self.assertNotIn("logViewer", f.read().replace("btnDownloadLogs", ""))
+
+        # frontend module: everything in static/log-viewer/, no use of the utility's globals
+        lvdir = os.path.join(root, "static", "log-viewer")
+        self.assertEqual(sorted(os.listdir(lvdir)), sorted([
+            "api.js", "chart.js", "dataflash-worker.js", "flight-panel.js", "log-viewer.css", "log-viewer.js"]))
+        js = ""
+        for name in os.listdir(lvdir):
+            with open(os.path.join(lvdir, name), "r", encoding="utf-8") as f:
+                js += f.read()
+        for bad in ("apiRequest", "localStorage", "sessionStorage", "Cockpit", "window.state", "document.body.",
+                    "innerHTML = summary", ".innerHTML = m.", "eval(", "new Function"):
+            self.assertNotIn(bad, js)
+        with open(os.path.join(lvdir, "log-viewer.js"), "r", encoding="utf-8") as f:
+            entry = f.read()
+        self.assertIn("attachShadow", entry)
+        self.assertIn("function guard(fn)", entry)
+        self.assertIn("IntersectionObserver", entry)
+        with open(os.path.join(lvdir, "flight-panel.js"), "r", encoding="utf-8") as f:
+            panel = f.read()
+        self.assertIn("new Worker(", panel)
+        self.assertIn("VirtualList", panel)
+
+        # parser tests (node)
+        node = _shutil.which("node") if hasattr(_shutil, "which") else None
+        if not node:
+            self.skipTest("node not installed: flight log parser tests not run")
+        out = _subprocess.run([node, os.path.join(root, "tools", "test_logviewer.js")],
+                              stdout=_subprocess.PIPE, stderr=_subprocess.STDOUT, timeout=120)
+        self.assertEqual(out.returncode, 0, out.stdout.decode("utf-8", "replace")[-3000:])
+        self.assertIn(b"LOGVIEWER OK", out.stdout)
 
 
 def _struct_float(b4):

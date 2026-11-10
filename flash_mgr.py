@@ -14,8 +14,10 @@ import re
 import compat
 import sys
 import time
+import glob
 import json
 import shutil
+import zipfile
 import signal
 import hashlib
 import subprocess
@@ -111,21 +113,42 @@ SSH_OPTS      = "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o 
 PIXHAWK_BINS = ["/usr/bin/pixhawk.py", os.path.join(BIN_DIR, "pixhawk.py")]
 
 # A Solo that was never updated still runs 3DR's original software: it has no Open Solo
-# /usr/bin/pixhawk.py, and from that software the Cube does not stay in its bootloader, so the
-# uploader asks it to reboot forever. Full Install on such a Solo does not flash the Cube; it parks
-# the firmware in /log (which survives the update) and the utility flashes it with Open Solo's own
-# scripts the first time it starts on Open Solo after the reboot.
+# /usr/bin/pixhawk.py, and flashing the Cube from there left the uploader asking it to reboot
+# forever. Full Install on such a Solo does not flash the Cube; it parks the firmware in /log
+# (which survives the update). The first time the utility starts on Open Solo it hands the firmware
+# to Open Solo's boot-time flash and restarts the Solo (see OPEN_SOLO_FW_DIR below).
 OPEN_SOLO_PIXHAWK        = "/usr/bin/pixhawk.py"
 PENDING_CUBE_DIR         = os.path.join(PERSISTENT_FW_DIR, "pending_cube")
 PENDING_CUBE_APJ         = os.path.join(PENDING_CUBE_DIR, "arducopter.apj")
 PENDING_CUBE_INFO        = os.path.join(PENDING_CUBE_DIR, "pending.json")
 PENDING_CUBE_LOCK        = os.path.join(PENDING_CUBE_DIR, "running")
-PENDING_CUBE_MAX_TRIES   = 3      # starts of the utility; then it waits for the user (Cube Only)
+PENDING_CUBE_MAX_TRIES   = 3      # hand-overs to Open Solo's boot-time flash; then Cube Only
 PENDING_CUBE_START_DELAY = 45     # seconds after the utility starts, so boot can settle
 PENDING_CUBE_LOCK_STALE  = 900    # a lock older than this was left by a crash or power loss
 # pixhawk.py --load gives its uploader 2 minutes; this is the hard limit for the whole step.
 CUBE_FLASH_TIMEOUT       = 360
 CUBE_FLASH_EXIT_GRACE    = 10     # seconds to wait for output after pixhawk.py itself exits
+
+# The parked update is not flashed live: like Solex and SidePilot, the utility puts it in Open Solo's
+# /firmware and restarts the Solo, and Open Solo's own "pixhawk.py -i" flashes it at boot. On success
+# pixhawk.py moves it to /firmware/loaded; on failure it deletes it.
+OPEN_SOLO_FW_DIR         = "/firmware"
+OPEN_SOLO_FW_APJ         = os.path.join(OPEN_SOLO_FW_DIR, "arducopter.apj")
+OPEN_SOLO_LOADED_APJ     = os.path.join(OPEN_SOLO_FW_DIR, "loaded", "arducopter.apj")
+CUBE_BOOTLOADER_TOOL     = os.path.join(BIN_DIR, "cube_bootloader.py")
+CUBE_UPDATE_LOG          = "/log/solowebutility_cube_update.log"
+CUBE_UPDATE_LOG_MAX      = 512 * 1024   # bytes; the older half is dropped beyond this
+
+# Download logs (Firmware page): files put in the zip, newest LOG_BUNDLE_TAIL bytes of each
+LOG_BUNDLE_FILES = [
+    CUBE_UPDATE_LOG,
+    "/log/solowebutility.log",
+    "/log/solowebutility_install.log",
+    "/log/3dr-solo.log", "/log/3dr-solo.log.1",
+    "/log/3dr-telem.log",
+    os.path.join(PERSISTENT_FW_DIR, "pending_cube", "pending.json"),
+]
+LOG_BUNDLE_TAIL = 2 * 1024 * 1024
 
 
 def _fmt_size(n):
@@ -910,6 +933,110 @@ def _other_pixhawk_running():
     return False
 
 
+def _md5_or_none(path):
+    try:
+        return _get_file_md5(path) if os.path.isfile(path) else None
+    except Exception:
+        return None
+
+
+def append_cube_update_log(line):
+    """One line into /log/solowebutility_cube_update.log (kept under CUBE_UPDATE_LOG_MAX)."""
+    try:
+        if os.path.isfile(CUBE_UPDATE_LOG) and os.path.getsize(CUBE_UPDATE_LOG) > CUBE_UPDATE_LOG_MAX:
+            with open(CUBE_UPDATE_LOG, "rb") as f:
+                f.seek(-CUBE_UPDATE_LOG_MAX // 2, 2)
+                keep = f.read()
+            with open(CUBE_UPDATE_LOG, "wb") as f:
+                f.write(keep)
+        if not isinstance(line, bytes):
+            line = line.encode("utf-8", "replace")
+        with open(CUBE_UPDATE_LOG, "ab") as f:
+            f.write(line + b"\n")
+    except Exception:
+        pass
+
+
+def _reboot_solo():
+    """Restart the Solo (i.MX6) in 5 s; the Cube keeps running."""
+    os.system("sync")
+    subprocess.Popen("sleep 5 && reboot", shell=True)
+
+
+def release_cube_bootloader(log=None):
+    """Run bin/cube_bootloader.py: if the Cube was left in its bootloader, start its firmware.
+    Returns its result word (running / released / still-in-bootloader / no-usb / busy / error)."""
+    log = log or (lambda m: None)
+    if not os.path.isfile(CUBE_BOOTLOADER_TOOL):
+        return "error"
+    try:
+        proc = subprocess.Popen([sys.executable or "python", CUBE_BOOTLOADER_TOOL],
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        out = proc.communicate()[0]
+    except Exception as ex:
+        log("    cube_bootloader.py: %s" % ex)
+        return "error"
+    if not isinstance(out, str):
+        out = out.decode("utf-8", "replace")
+    lines = [l.strip() for l in out.splitlines() if l.strip()]
+    for l in lines[:-1]:
+        log("    %s" % l)
+    return lines[-1] if lines else "error"
+
+
+def _read_tail(path, limit):
+    with open(path, "rb") as f:
+        f.seek(0, 2)
+        size = f.tell()
+        f.seek(max(0, size - limit))
+        data = f.read()
+    if size > limit:
+        data = ("[... first %d bytes left out ...]\n" % (size - limit)).encode("ascii") + data
+    return data
+
+
+def _cmd_output(cmd):
+    try:
+        p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        out = p.communicate()[0]
+        return out if isinstance(out, bytes) else out.encode("utf-8", "replace")
+    except Exception as ex:
+        return ("(%s)" % ex).encode("utf-8", "replace")
+
+
+def build_log_bundle(files=None, version=None):
+    """(filename, zip bytes) with the utility, install, Cube update and Open Solo logs plus a short
+    summary of the Solo, for the Firmware page's Download logs button."""
+    import io as _io
+    files = LOG_BUNDLE_FILES if files is None else files
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    buf = _io.BytesIO()
+    zf = zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED)
+    summary = []
+    summary.append("Solo Web Utility %s logs, %s" % (version or "?", time.strftime("%Y-%m-%d %H:%M:%S")))
+    summary.append("Open Solo /usr/bin/pixhawk.py: %s" % ("yes" if solo_has_open_solo() else "no (3DR software)"))
+    for name, cmd in (("Solo version (/VERSION)", "cat /VERSION 2>/dev/null"),
+                      ("Cube version (/PIX_VERSION)", "cat /PIX_VERSION 2>/dev/null"),
+                      ("/firmware", "ls -la /firmware /firmware/loaded 2>&1"),
+                      ("/log/firmware", "ls -la /log/firmware /log/firmware/pending_cube 2>&1"),
+                      ("/log/updates", "ls -la /log/updates 2>&1"),
+                      ("USB devices", "ls -la /dev/serial/by-id 2>&1"),
+                      ("uptime", "uptime 2>&1"),
+                      ("disk", "df -h 2>&1")):
+        summary.append("")
+        summary.append("== %s" % name)
+        summary.append(_cmd_output(cmd).decode("utf-8", "replace").rstrip())
+    zf.writestr("summary.txt", ("\n".join(summary) + "\n").encode("utf-8"))
+    for p in files:
+        if os.path.isfile(p):
+            try:
+                zf.writestr(p.strip("/").replace("/", "_"), _read_tail(p, LOG_BUNDLE_TAIL))
+            except Exception as ex:
+                zf.writestr(p.strip("/").replace("/", "_") + ".error.txt", str(ex))
+    zf.close()
+    return ("solo_logs_%s.zip" % stamp, buf.getvalue())
+
+
 def _stop_process_group(proc):
     """Stop proc and everything it started (it runs in its own process group)."""
     for sig in (signal.SIGTERM, getattr(signal, "SIGKILL", signal.SIGTERM)):
@@ -946,6 +1073,8 @@ class FlashManager(object):
             if len(self.log_buffer) > 600:
                 self.log_buffer = self.log_buffer[-600:]
         print("[%s] [%s] %s" % (ts, level, message))
+        if getattr(self, "_cube_log_on", False):
+            append_cube_update_log("%s [%s] %s" % (time.strftime("%Y-%m-%d %H:%M:%S"), level, message))
 
     # -----------------------------------------------------------------------
     # State access
@@ -1282,9 +1411,10 @@ class FlashManager(object):
     def _defer_cube_flash(self, apj_src, cube_type):
         """Full Install on a Solo still on 3DR's software: park the Cube firmware in /log for the
         first start on Open Solo instead of flashing it now."""
-        self.log("[*] This Solo still runs 3DR's original software, which cannot put the Cube into its "
-                 "bootloader, so the Cube is not updated now.", "WARNING")
-        self.log("    The Solo updates its Cube by itself a few minutes after it restarts on Open Solo.", "INFO")
+        self.log("[*] This Solo still runs 3DR's original software, so the Cube is not updated now: it is "
+                 "updated after Open Solo is installed.", "WARNING")
+        self.log("    After it restarts on Open Solo, the Solo restarts once more and Open Solo updates the Cube "
+                 "at boot, the way Solex does.", "INFO")
         compat.makedirs(PENDING_CUBE_DIR)
         _release_pending_lock()
         tmp = PENDING_CUBE_APJ + ".new"
@@ -1299,6 +1429,7 @@ class FlashManager(object):
             "md5": md5,
             "created": time.strftime("%Y-%m-%d %H:%M:%S"),
             "tries": 0,
+            "stage": "parked",
         })
         self._cube_deferred = True
         self.log("[✓] %s parked in %s for the automatic Cube update." % (os.path.basename(apj_src), PENDING_CUBE_DIR), "SUCCESS")
@@ -1320,20 +1451,19 @@ class FlashManager(object):
 
     def _pending_cube_worker(self, info, delay):
         time.sleep(delay)
-        tries = int(info.get("tries", 0) or 0) + 1
-        if tries > PENDING_CUBE_MAX_TRIES:
-            print("[flash] parked Cube update already failed %d times; run Cube Only from the Firmware page." % (tries - 1))
+        if info.get("gave_up"):
+            print("[flash] parked Cube update failed %s times; run Cube Only from the Firmware page."
+                  % info.get("tries"))
             return
         if not _take_pending_lock():
-            print("[flash] parked Cube update is already running in another copy of the utility")
+            print("[flash] parked Cube update is already handled by another copy of the utility")
             return
+        self._cube_log_on = True
         try:
             if _get_file_md5(PENDING_CUBE_APJ) != info.get("md5"):
-                print("[flash] parked Cube firmware %s is corrupt; removed. Run Cube Only." % PENDING_CUBE_APJ)
+                self.log("[!] Parked Cube firmware %s is corrupt; removed. Run Cube Only." % PENDING_CUBE_APJ, "ERROR")
                 clear_pending_cube_flash()
                 return
-            info["tries"] = tries
-            _write_pending_cube_info(info)
             for _ in range(60):                      # up to 5 minutes
                 busy = self.is_flashing or _other_pixhawk_running()
                 if not busy:
@@ -1348,31 +1478,70 @@ class FlashManager(object):
             else:
                 print("[flash] parked Cube update postponed: Solo busy (flashing, pixhawk.py or armed)")
                 return
-            self.reset_state()
-            self.is_flashing = True
-            self.status = "running"
-            self._apj_override = PENDING_CUBE_APJ
-            self._pending_run = True
-            self.log("[AUTO] Finishing Full Install: updating the Cube with %s (attempt %d of %d)." % (
-                info.get("firmware", "arducopter.apj"), tries, PENDING_CUBE_MAX_TRIES), "HEADER")
-            self._pipeline(info.get("cube_type", "solo"), "cube_only")
-            if self.status == "success":
-                clear_pending_cube_flash()
-                self.log("[✓] Automatic Cube update finished. Now calibrate (IMU and compass).", "SUCCESS")
-            elif tries < PENDING_CUBE_MAX_TRIES:
-                self.log("[!] Automatic Cube update failed. It is tried again the next time the Solo starts "
-                         "(power-cycle it), or run Cube Only from the Firmware page.", "ERROR")
-            else:
-                self.log("[!] Automatic Cube update failed %d times. Run Cube Only from the Firmware page." % tries, "ERROR")
+            fw = info.get("firmware", "arducopter.apj")
+            md5 = info.get("md5")
+            if info.get("stage") == "handed_off":
+                if _md5_or_none(OPEN_SOLO_LOADED_APJ) == md5:
+                    clear_pending_cube_flash()
+                    self.log("[✓] Open Solo loaded %s onto the Cube at boot. The Cube update is finished: "
+                             "now calibrate (IMU and compass)." % fw, "SUCCESS")
+                    return
+                if _md5_or_none(OPEN_SOLO_FW_APJ) == md5:
+                    self.log("[!] The Cube update is still waiting in %s. Power-cycle the Solo (battery out "
+                             "and back in) to finish it." % OPEN_SOLO_FW_DIR, "WARNING")
+                    return
+                # pixhawk.py deletes the file when the flash fails, and leaves the Cube in its bootloader
+                rel = release_cube_bootloader(lambda m: self.log(m, "INFO"))
+                self.log("[!] Open Solo could not load %s onto the Cube at boot (Cube now: %s)." % (fw, rel), "ERROR")
+                if int(info.get("tries", 0) or 0) >= PENDING_CUBE_MAX_TRIES:
+                    info["gave_up"] = True
+                    _write_pending_cube_info(info)
+                    self.log("[!] The Cube update failed %s times. Run Cube Only from the Firmware page, and use "
+                             "Download logs there if it fails." % info.get("tries"), "ERROR")
+                    return
+                self._handoff_cube_to_open_solo(info)
+                self.log("[*] Power-cycle the Solo (battery out and back in) to try again (attempt %d of %d)."
+                         % (info["tries"], PENDING_CUBE_MAX_TRIES), "WARNING")
+                return
+            # first start on Open Solo after Full Install
+            self._handoff_cube_to_open_solo(info)
+            self.log("[AUTO] Finishing Full Install: the Solo restarts now and Open Solo loads %s onto the Cube "
+                     "at boot. The arm lights cycle colors for a few minutes, then the Cube plays its startup "
+                     "tune. If they are still cycling after 10 minutes, power-cycle the Solo." % fw, "HEADER")
+            _reboot_solo()
+        except Exception as ex:
+            self.log("[!] Automatic Cube update: %s" % ex, "ERROR")
         finally:
-            self._pending_run = False
+            self._cube_log_on = False
             _release_pending_lock()
+
+    def _handoff_cube_to_open_solo(self, info):
+        """Put the parked firmware where Open Solo's boot-time 'pixhawk.py -i' loads it from."""
+        compat.makedirs(OPEN_SOLO_FW_DIR)
+        for old in glob.glob(os.path.join(OPEN_SOLO_FW_DIR, "*.apj")) + glob.glob(os.path.join(OPEN_SOLO_FW_DIR, "*.px4")):
+            os.remove(old)
+        if os.path.isfile(OPEN_SOLO_LOADED_APJ):
+            os.remove(OPEN_SOLO_LOADED_APJ)          # so an old copy cannot look like success
+        tmp = OPEN_SOLO_FW_APJ + ".new"              # not *.apj: pixhawk.py must not pick it up half-written
+        shutil.copyfile(PENDING_CUBE_APJ, tmp)
+        if _get_file_md5(tmp) != info.get("md5"):
+            os.remove(tmp)
+            raise IOError("copy of the Cube firmware in %s is corrupt" % OPEN_SOLO_FW_DIR)
+        os.rename(tmp, OPEN_SOLO_FW_APJ)
+        os.system("sync")
+        info["stage"] = "handed_off"
+        info["tries"] = int(info.get("tries", 0) or 0) + 1
+        info["handed_off"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        _write_pending_cube_info(info)
+        self.log("[✓] %s placed in %s for Open Solo's boot-time Cube update (attempt %d of %d)." % (
+            info.get("firmware", "arducopter.apj"), OPEN_SOLO_FW_APJ, info["tries"], PENDING_CUBE_MAX_TRIES), "SUCCESS")
 
     # -----------------------------------------------------------------------
     # Main pipeline
     # -----------------------------------------------------------------------
     def _pipeline(self, cube_type, install_mode):
         self._cube_deferred = False
+        self._cube_log_on = False
         try:
             self.saved_ssid = None
             self.modified_profiles = []
@@ -1467,6 +1636,10 @@ class FlashManager(object):
                 self._defer_cube_flash(apj_src, cube_type)
                 self._set(progress=70)
             else:
+                self._cube_log_on = True
+                append_cube_update_log("")
+                append_cube_update_log("==== %s Cube flash (%s): %s" % (
+                    time.strftime("%Y-%m-%d %H:%M:%S"), install_mode, os.path.basename(apj_src)))
                 # a) Release/close active MAVLink connection before flashing so /dev/ttyS1 is not locked
                 self.log("[*] Releasing active MAVLink telemetry connections...", "INFO")
                 release_mavlink_connections()
@@ -1503,20 +1676,43 @@ class FlashManager(object):
                     cockpit_mgr.invalidate_cube_version()
                 except Exception:
                     pass
+                # pixhawk.py exits 0 even when the flash fails. What it does with the file tells:
+                # moved to /firmware/loaded = loaded, deleted = failed.
+                apj_md5 = _md5_or_none("/firmware/arducopter.apj")
+                try:
+                    if os.path.isfile(OPEN_SOLO_LOADED_APJ):
+                        os.remove(OPEN_SOLO_LOADED_APJ)
+                except OSError:
+                    pass
                 try:
                     rc_load = self._run_pixhawk_load(pixhawk_bin)
                 except Exception as ex_load:
                     rc_load = -1
                     self.log("[!] Exception running pixhawk.py: %s" % str(ex_load), "WARNING")
+                not_loaded = rc_load == 0 and _md5_or_none(OPEN_SOLO_LOADED_APJ) != apj_md5
+                if not_loaded:
+                    self.log("[!] pixhawk.py finished but did not load the firmware (it removed "
+                             "/firmware/arducopter.apj instead of moving it to /firmware/loaded).", "ERROR")
 
-                if rc_load != 0:
-                    hint = ("The Cube did not take the update. Power-cycle the Solo (battery out and back in) "
-                            "and try again.")
+                if rc_load != 0 or not_loaded:
+                    rel = release_cube_bootloader(lambda m: self.log(m, "INFO"))
+                    self.log("[*] Cube after the failed flash: %s" % rel, "WARNING")
+                    if rel == "released":
+                        hint = ("The Cube was in its bootloader and has been restarted on its previous "
+                                "firmware. Try again, or power-cycle the Solo (battery out and back in) first.")
+                    elif rel == "still-in-bootloader":
+                        hint = ("The Cube has no working firmware right now (arm lights cycling colors): "
+                                "run Cube Only again.")
+                    else:
+                        hint = ("The Cube did not take the update. Power-cycle the Solo (battery out and back in) "
+                                "and try again.")
                     if not solo_has_open_solo():
                         hint += (" This Solo still runs 3DR's original software: use Full Install, which "
                                  "updates the Cube after the Solo is on Open Solo.")
                     if rc_load is None:
                         raise RuntimeError("pixhawk.py was stopped after %d minutes. %s" % (CUBE_FLASH_TIMEOUT // 60, hint))
+                    if not_loaded:
+                        raise RuntimeError("The Cube firmware was not loaded. %s" % hint)
                     raise RuntimeError("pixhawk.py failed to flash Cube autopilot (exit code %d). %s" % (rc_load, hint))
                 # Do NOT run rm -f /firmware/*.apj! pixhawk.py handles moving it to /firmware/loaded/
 
@@ -1585,8 +1781,10 @@ class FlashManager(object):
             self.log("Wait ~6 minutes for reboot to finish.", "INFO")
             self.log("Then hold the Pair button on the bottom of the Solo for 5 seconds. The SoloLink Wi-Fi network must also be connected to continue.", "INFO")
             if self._cube_deferred:
-                self.log("Leave the Solo powered on: a few minutes after it restarts it updates its Cube by itself "
-                         "(the Cube restarts once more). Calibrate only after that.", "WARNING")
+                self.log("Leave the Solo powered on: after it restarts on Open Solo it restarts once more and updates "
+                         "its Cube (the arm lights cycle colors for a few minutes, then the Cube plays its startup "
+                         "tune). If pairing does not work yet, wait for that and try again. If the lights are still "
+                         "cycling after 10 minutes, power-cycle the Solo. Calibrate only after the Cube update.", "WARNING")
             self.log("=" * 60, "HEADER")
 
         except Exception as e:
@@ -1598,6 +1796,7 @@ class FlashManager(object):
                 self._cube_deferred = False
         finally:
             self.is_flashing = False
+            self._cube_log_on = False
 
 
 # Singleton

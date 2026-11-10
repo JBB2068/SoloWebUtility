@@ -75,6 +75,7 @@ function setUploadProgressVisible(visible) {
     var flashPercentLabel   = el('flashPercentLabel');
     var flashTerminal       = el('flashTerminal');
     var btnClearLogs        = el('btnClearLogs');
+    var btnDownloadLogs     = el('btnDownloadLogs');
     var rebootTimerBox      = el('rebootTimerBox');
     var rebootCountdown     = el('rebootCountdown');
     var stepCube            = el('stepCube');
@@ -898,6 +899,13 @@ function setUploadProgressVisible(visible) {
                     if (timeoutId) { clearTimeout(timeoutId); }
                 });
         }, 3000);
+    }
+
+    // One zip with the utility, install, Cube update and Open Solo logs (GET, uses the login cookie)
+    if (btnDownloadLogs) {
+        btnDownloadLogs.addEventListener('click', function () {
+            window.location.href = '/api/logs/download';
+        });
     }
 
     btnClearLogs.addEventListener('click', function () {

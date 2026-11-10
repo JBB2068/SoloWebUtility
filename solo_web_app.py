@@ -49,6 +49,31 @@ except Exception:
     pass
 
 
+_LOG_VIEWER = []
+
+
+def _load_log_viewer():
+    """Load modules/log_viewer/log_viewer_api.py by path (not through the modules package, whose
+    __init__ imports everything). A broken viewer only disables /api/logviewer/*."""
+    if not _LOG_VIEWER:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "modules", "log_viewer", "log_viewer_api.py")
+        mod = None
+        try:
+            try:
+                import importlib.util as _ilu
+                spec = _ilu.spec_from_file_location("solo_log_viewer_api", path)
+                mod = _ilu.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+            except ImportError:
+                import imp
+                mod = imp.load_source("solo_log_viewer_api", path)
+        except Exception as e:
+            print("[!] Log viewer unavailable: %s" % e)
+            mod = None
+        _LOG_VIEWER.append(mod)
+    return _LOG_VIEWER[0]
+
+
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
@@ -423,6 +448,36 @@ class SoloApiHandler(BaseHTTPRequestHandler):
         # Require Auth for all other API endpoints
         if not self._is_authenticated():
             self._send_error("Authentication required.", 401)
+            return
+
+        # Flight log viewer (Parameters page). Self-contained in modules/log_viewer/ and
+        # static/log-viewer/; this is its only hook into the utility.
+        if path.startswith('/api/logviewer/'):
+            viewer = _load_log_viewer()
+            if viewer is None:
+                self._send_error("Log viewer unavailable.", 503)
+            else:
+                viewer.handle(self, path, query)
+            return
+
+        # Firmware page "Download logs": one zip with the utility, install, Cube update and Open Solo logs
+        if path == '/api/logs/download':
+            try:
+                ver = version_mgr.get_version_info().get("version")
+            except Exception:
+                ver = None
+            try:
+                name, body = flash_mgr.build_log_bundle(version=ver)
+            except Exception as e:
+                self._send_error("Could not collect the logs: %s" % e, 500)
+                return
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/zip')
+            self.send_header('Content-Disposition', 'attachment; filename="%s"' % name)
+            self.send_header('Content-Length', str(len(body)))
+            self.send_header('Cache-Control', 'no-cache')
+            self.end_headers()
+            self.wfile.write(body)
             return
 
         # Cockpit Telemetry & Live Video API
