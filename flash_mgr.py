@@ -540,75 +540,85 @@ except ImportError:
 SOLO_ROOT_PASSWORD = "TjSDBkAu"
 
 
-def _run_with_ssh_auth(cmd, host="10.1.1.1", password=SOLO_ROOT_PASSWORD, timeout=600):
+def _controller_ssh_helper():
+    """modules/controller_ssh.py (shared with Update Controller and the controller log viewer installer)."""
+    d = os.path.join(BASE_DIR, "modules")
+    if d not in sys.path:
+        sys.path.insert(0, d)
+    import controller_ssh
+    return controller_ssh
+
+
+def _run_with_ssh_auth(cmd, host="10.1.1.1", password=SOLO_ROOT_PASSWORD, timeout=600, _retry=True):
     """
     Run an ssh or scp command. If public key authentication works, it connects immediately.
-    If the remote host prompts for password:, the pseudo-terminal sends password automatically.
+    If the remote host asks for the password, it is answered once. OpenSSH asks on its controlling
+    terminal, so the command runs under pty.fork(), which makes the pty exactly that (a pty that is
+    only wired to stdin/stdout never gets the prompt when the utility runs as a service).
+    When the Controller refuses the Solo's key (it was erased by a settings reset), the key is put back
+    once, so the next transfers log in with it.
     """
     cwd_dir = TMP_UPDATES_DIR if os.path.exists(TMP_UPDATES_DIR) else None
-    if pty is not None and select is not None:
-        master, slave = pty.openpty()
+    if pty is None or select is None:
+        return _run_local(cmd)
+    pid, master = pty.fork()
+    if pid == 0:
         try:
-            proc = subprocess.Popen(
-                cmd, shell=True, cwd=cwd_dir,
-                stdin=slave, stdout=slave, stderr=slave,
-                close_fds=True, preexec_fn=os.setsid
-            )
-        except Exception:
-            proc = subprocess.Popen(
-                cmd, shell=True, cwd=cwd_dir,
-                stdin=slave, stdout=slave, stderr=slave,
-                close_fds=True
-            )
-        os.close(slave)
-
-        output = []
-        start = time.time()
-        sent_pass = False
-
-        while proc.poll() is None:
-            r, _, _ = select.select([master], [], [], 0.5)
-            if r:
-                try:
-                    data = os.read(master, 2048)
-                    if not data:
-                        break
-                    output.append(data)
-                    if not sent_pass and b"password:" in data.lower():
-                        os.write(master, (password + "\n").encode("utf-8"))
-                        sent_pass = True
-                except OSError:
-                    break
+            if cwd_dir:
+                os.chdir(cwd_dir)
+            os.execv("/bin/sh", ["sh", "-c", cmd])
+        finally:
+            os._exit(127)
+    output = []
+    start = time.time()
+    prompts = 0
+    status = None
+    try:
+        while True:
             if time.time() - start > timeout:
                 try:
-                    proc.kill()
+                    os.kill(pid, 9)
                 except Exception:
                     pass
                 break
-
-        # Drain remaining buffer
-        while True:
-            r, _, _ = select.select([master], [], [], 0.2)
-            if r:
-                try:
-                    data = os.read(master, 2048)
-                    if not data:
-                        break
-                    output.append(data)
-                except OSError:
-                    break
-            else:
+            r, _, _ = select.select([master], [], [], 0.5)
+            if not r:
+                continue
+            try:
+                data = os.read(master, 2048)
+            except OSError:
                 break
-        os.close(master)
-        proc.wait()
-        raw = b"".join(output)
-        if sys.version_info[0] >= 3:
-            out_str = raw.decode("utf-8", "ignore")
-        else:
-            out_str = raw
-        return proc.returncode, out_str
+            if not data:
+                break
+            output.append(data)
+            tail = b"".join(output)[-120:].lower().rstrip()
+            if tail.endswith(b"password:") and prompts == 0:
+                prompts = 1
+                os.write(master, (password + "\n").encode("utf-8"))
+        try:
+            _, status = os.waitpid(pid, 0)
+        except OSError:
+            status = None
+    finally:
+        try:
+            os.close(master)
+        except OSError:
+            pass
+    raw = b"".join(output).replace(b"\r", b"")
+    out_str = raw.decode("utf-8", "ignore") if sys.version_info[0] >= 3 else raw
+    if status is None:
+        rc = 255
+    elif os.WIFEXITED(status):
+        rc = os.WEXITSTATUS(status)
     else:
-        return _run_local(cmd)
+        rc = -os.WTERMSIG(status)
+    if _retry and host == CONTROLLER_IP and (prompts or "permission denied" in out_str.lower()):
+        # the key was refused: restore it (once per process), so later transfers need no password
+        try:
+            _controller_ssh_helper().ensure_authorized()
+        except Exception:
+            pass
+    return rc, out_str
 
 
 def _ssh(cmd, host, saved_ssid=None, log_callback=None):

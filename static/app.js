@@ -6,6 +6,10 @@
 (function () {
     'use strict';
 
+    // Always open at the top: stop the browser putting a refreshed page back where it was scrolled to.
+    try { if ('scrollRestoration' in history) { history.scrollRestoration = 'manual'; } } catch (e) { /* old browser */ }
+    try { window.scrollTo(0, 0); } catch (e2) { /* no window */ }
+
     // =========================================================================
     // State
     // =========================================================================
@@ -2769,6 +2773,8 @@ function setUploadProgressVisible(visible) {
         if (btnPresets) { btnPresets.addEventListener('click', openCtrlPresetsModal); }
         if (btnRaw) { btnRaw.addEventListener('click', openCtrlRawModal); }
         if (btnSave) { btnSave.addEventListener('click', openCtrlConfirmModal); }
+        var btnDefaults = el('btnCtrlDefaults');
+        if (btnDefaults) { btnDefaults.addEventListener('click', restoreCtrlDefaults); }
 
         var inputTime = el('inputCtrlTimeOffset');
         var displayTime = el('ctrlTimeOffsetDisplay');
@@ -3282,6 +3288,28 @@ function setUploadProgressVisible(visible) {
 
         var m = el('ctrlConfirmModal');
         if (m) { m.style.display = 'flex'; }
+    }
+
+    // Put /usr/bin/extSettings.conf back to the utility's default (the Solo keeps a dated copy of the old file).
+    function restoreCtrlDefaults() {
+        if (!confirm('Restore the controller button settings to their defaults?\n\n' +
+                     'This replaces every button action and the time offset with the factory settings and writes them to the Solo now. ' +
+                     'The Solo keeps a dated backup of the settings it replaces.')) { return; }
+        var btn = el('btnCtrlDefaults');
+        if (btn) { btn.disabled = true; }
+        apiRequest('/api/controller/reset', 'POST', {})
+        .then(function (res) {
+            if (btn) { btn.disabled = false; }
+            if (res && (res.remote_saved || res.success)) {
+                showToast('Controller settings restored to defaults.');
+                return loadControllerConfig(true).then(function () { setCtrlDirty(false); });
+            }
+            showToast('Could not restore the defaults: ' + ((res && res.error) || 'unknown error'), true);
+        })
+        .catch(function (err) {
+            if (btn) { btn.disabled = false; }
+            showToast('Could not restore the defaults: ' + err.message, true);
+        });
     }
 
     function executeCtrlSave() {

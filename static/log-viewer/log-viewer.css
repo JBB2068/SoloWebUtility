@@ -131,3 +131,13 @@
 .lv-sev-error .lv-text { color: var(--accent-red, #ef4444); font-weight: 600; }
 
 .lv-crash p { color: var(--accent-red, #ef4444); margin: 0 0 10px; }
+
+/* Controller viewer card (Solo's utility only) */
+.lv-ctl { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border, #1e293b); }
+.lv-ctl h3 { margin: 0 0 6px; font-size: 13px; font-weight: 700; }
+.lv-ctl[hidden] { display: none; }
+.lv-ctl .lv-link { align-self: center; font-size: 12px; }
+
+/* Cube SD card copy progress */
+.lv-bar { height: 8px; border-radius: 4px; background: var(--border, #1e293b); overflow: hidden; margin: 8px 0; }
+.lv-barfill { height: 100%; width: 0; background: var(--accent-blue, #38bdf8); transition: width 0.4s linear; }

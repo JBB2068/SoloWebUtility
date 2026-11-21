@@ -1,17 +1,14 @@
-/* Solo Web Utility flight log viewer: ArduPilot DataFlash (.BIN) parser, run as a Web Worker.
+/* Solo Web Utility flight log viewer: ArduPilot DataFlash (.BIN) reader.
  *
- * Part of the self-contained log viewer (static/log-viewer/). Parsing runs here, off the page's
- * main thread, so a big or damaged log cannot freeze the utility, and an exception here only
- * reaches the viewer (as an "error" message), never the rest of the page.
+ * Loaded by log-worker.js inside a Web Worker (never on the page's main thread), and by
+ * tools/test_logviewer.js under node. The format is self-describing: every log starts with FMT
+ * messages (id 128) that give each message type's name, length, field types and field names.
+ * The first pass only records where each message starts; fields are decoded when the summary
+ * or a chart needs them.
  *
- * Messages in:  {cmd: "parse", id, buffer: ArrayBuffer}
- *               {cmd: "series", id, type, fields: [..], maxPoints}
- * Messages out: {id, ok: true, result} or {id, ok: false, error}
- *
- * The format is self-describing: every log starts with FMT messages (id 128) that give each
- * message type's name, length, field types and field names. The first pass only records where
- * each message starts; fields are decoded when the summary or a chart needs them.
+ * API: LVDataflash.looksLike(u8), .parse(buffer) -> summary, .series(type, fields, maxPoints)
  */
+var LVDataflash = (function () {
 'use strict';
 
 var HEAD1 = 0xA3, HEAD2 = 0x95, FMT_ID = 128;
@@ -38,7 +35,7 @@ var EVENTS = { 10: 'Armed', 11: 'Disarmed', 15: 'Auto armed', 17: 'Land complete
     43: 'Motor interlock disabled', 44: 'Motor interlock enabled', 54: 'EKF yaw reset',
     56: 'Surfaced', 57: 'Not surfaced', 58: 'Bottom reached', 59: 'Not bottom' };
 
-var log = null;   // {buf, dv, u8, fmts: {id: fmt}, byName: {name: fmt}, offsets: {id: Uint32Array}, counts: {id: n}}
+var log = null;    // {buf, dv, u8, fmts: {id: fmt}, byName: {name: fmt}, offsets: {id: Uint32Array}, counts: {id: n}}
 
 function readText(u8, pos, len) {
     var s = '';
@@ -371,29 +368,25 @@ function series(type, fields, maxPoints) {
     return out;
 }
 
-function onMessage(ev) {
-    var msg = ev.data || {};
-    try {
-        if (msg.cmd === 'parse') {
-            log = index(msg.buffer);
-            if (!log.byName || !Object.keys(log.byName).length) throw new Error('This is not an ArduPilot .BIN flight log (no FMT messages found).');
-            log.summary = summarize();
-            self.postMessage({ id: msg.id, ok: true, result: log.summary });
-        } else if (msg.cmd === 'series') {
-            if (!log) throw new Error('No log loaded');
-            self.postMessage({ id: msg.id, ok: true, result: series(msg.type, msg.fields, msg.maxPoints || 2000) });
-        } else {
-            throw new Error('Unknown command ' + msg.cmd);
-        }
-    } catch (e) {
-        self.postMessage({ id: msg.id, ok: false, error: String(e && e.message || e) });
-    }
-}
-if (typeof self !== 'undefined' && typeof importScripts === 'function') self.onmessage = onMessage;
+return {
+    looksLike: function (u8) { return u8.length > 3 && u8[0] === HEAD1 && u8[1] === HEAD2; },
+    parse: function (buffer) {
+        log = index(buffer);
+        if (!Object.keys(log.byName).length) throw new Error('This is not an ArduPilot flight log (no FMT messages found).');
+        log.summary = summarize();
+        log.summary.kind = 'bin';
+        return log.summary;
+    },
+    series: function (type, fields, maxPoints) {
+        if (!log) throw new Error('No log loaded');
+        return series(type, fields, maxPoints);
+    },
+    // for tools/test_logviewer.js
+    index: index, makeFmt: makeFmt, readField: readField, severityOf: severityOf,
+    _setLog: function (l) { log = l; },
+    summarize: function () { log.summary = summarize(); return log.summary; },
+    seriesRaw: series, COPTER_MODES: COPTER_MODES
+};
+})();
 
-/* Node tests load this file with require(); the worker API above is unused there. */
-if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { index: index, makeFmt: makeFmt, readField: readField, severityOf: severityOf,
-        _setLog: function (l) { log = l; }, summarize: function () { log.summary = summarize(); return log.summary; },
-        series: series, COPTER_MODES: COPTER_MODES };
-}
+if (typeof module !== 'undefined' && module.exports) module.exports = LVDataflash;

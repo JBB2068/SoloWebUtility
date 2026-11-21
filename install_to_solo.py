@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-3DR Solo Web Utility -- Remote Installer v1.2.10
+3DR Solo Web Utility -- Remote Installer v1.2.11
 Uploads the web server and firmware to Solo Copter (10.1.1.10)
 and configures automatic startup on boot via /etc/rc.local.
 
@@ -60,10 +60,10 @@ def get_installer_version():
         vpath = get_local_path("version.json")
         if os.path.exists(vpath):
             with open(vpath, "r") as f:
-                return json.load(f).get("version", "1.2.10")
+                return json.load(f).get("version", "1.2.11")
     except Exception:
         pass
-    return "1.2.10"
+    return "1.2.11"
 
 
 def format_size(n):

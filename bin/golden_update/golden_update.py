@@ -31,6 +31,8 @@ import threading
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)), "modules"))
+import controller_ssh      # noqa: E402  shared with flash_mgr.py and the controller log viewer installer
 SCRIPT = os.path.join(HERE, "golden_write.sh")
 
 PATHS = {
@@ -140,47 +142,12 @@ def run_local(action, on_line, timeout):
 
 
 def ssh(cmd, timeout=60):
-    """Run cmd on the Controller. Returns (exit code, output). Answers the password prompt if one comes."""
-    full = "ssh %s root@%s %s" % (SSH_OPTS, CONTROLLER_IP, "'" + cmd.replace("'", "'\\''") + "'")
-    try:
-        import pty
-        import select
-    except ImportError:
-        pty = None
-    if pty is None:
-        p = subprocess.Popen(full, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        out, _ = p.communicate()
-        return p.returncode, _text(out)
-    master, slave = pty.openpty()
-    proc = subprocess.Popen(full, shell=True, stdin=slave, stdout=slave, stderr=slave, close_fds=True)
-    os.close(slave)
-    output, sent, start = [], False, time.time()
-    try:
-        while True:
-            r, _, _ = select.select([master], [], [], 0.5)
-            if r:
-                try:
-                    data = os.read(master, 4096)
-                except OSError:
-                    data = b""
-                if not data:
-                    if proc.poll() is not None:
-                        break
-                else:
-                    output.append(data)
-                    if not sent and b"password:" in data.lower():
-                        os.write(master, (CONTROLLER_PASSWORD + "\n").encode("ascii"))
-                        sent = True
-            elif proc.poll() is not None:
-                break
-            if time.time() - start > timeout:
-                proc.kill()
-                break
-        proc.wait()
-    finally:
-        os.close(master)
-    text = _text(b"".join(output)).replace("\r", "")
-    return proc.returncode, text
+    """Run cmd on the Controller. Returns (exit code, output).
+
+    Logs in with the Solo's key. If the Controller refuses the key (a settings reset erases it), the
+    shared helper puts the key back once with the default root password through a real controlling
+    terminal, and retries. When that is not possible the output is the explanation."""
+    return controller_ssh.run(cmd, None, timeout)
 
 
 def run_controller(action, on_line, timeout):
@@ -193,8 +160,13 @@ def run_controller(action, on_line, timeout):
             "%s %s && echo PUSH_OK" % (REMOTE_SCRIPT, b64))
     rc, out = ssh(push, 60)
     if "PUSH_OK" not in out:
-        line = "[GOLDEN_FAILED] could not reach the Controller over SSH (%s)" % (out.strip().splitlines()[-1:] or ["no answer"])[0]
+        if out.strip() in (controller_ssh.NOT_AUTHORIZED, controller_ssh.UNREACHABLE):
+            line = "[GOLDEN_FAILED] " + out.strip()
+        else:
+            line = "[GOLDEN_FAILED] could not reach the Controller over SSH (%s)" % (out.strip().splitlines()[-1:] or ["no answer"])[0]
         on_line(line)
+        if controller_ssh._state.get("detail") and "could not reach" not in line:
+            on_line("[ssh detail] " + controller_ssh._state["detail"])   # what ssh actually said, for the log
         return line
     start = ("rm -f %(out)s %(rc)s; (sh %(s)s %(a)s > %(out)s 2>&1; echo $? > %(rc)s) </dev/null >/dev/null 2>&1 & "
              "echo STARTED" % {"out": REMOTE_OUT, "rc": REMOTE_RC, "s": REMOTE_SCRIPT, "a": action})

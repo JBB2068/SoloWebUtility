@@ -450,7 +450,7 @@ class SoloApiHandler(BaseHTTPRequestHandler):
             self._send_error("Authentication required.", 401)
             return
 
-        # Flight log viewer (Parameters page). Self-contained in modules/log_viewer/ and
+        # Flight log viewer (Flight Logs tab). Self-contained in modules/log_viewer/ and
         # static/log-viewer/; this is its only hook into the utility.
         if path.startswith('/api/logviewer/'):
             viewer = _load_log_viewer()

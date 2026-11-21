@@ -36,7 +36,7 @@
 
     LV.parts.Chart = function (canvas, legend, guard, onZoom) {
         var ctx = canvas.getContext('2d'), data = [], extras = { modes: [], armed: [] };
-        var full = [0, 1], view = [0, 1], cursor = null, drag = null;
+        var full = [0, 1], view = [0, 1], cursor = null, drag = null, win = null;
 
         function size() {
             var dpr = window.devicePixelRatio || 1, w = canvas.clientWidth || 300, h = canvas.clientHeight || 240;
@@ -207,9 +207,20 @@
                 if (hi <= lo) hi = lo + 1;
                 full = [lo, hi];
                 view = full.slice();
+                if (win) {                       // a preferred window (e.g. the flights in a long telemetry log)
+                    var a = Math.max(lo, win[0]), b = Math.min(hi, win[1]);
+                    if (b > a) view = [a, b];
+                }
                 cursor = null;
-                if (onZoom) onZoom(false);
+                if (onZoom) onZoom(view[0] > full[0] || view[1] < full[1]);
                 draw();
+            },
+            /* Open at this time range from now on (null = the whole log). Reset zoom still shows everything. */
+            setWindow: function (a, b) { win = (b > a) ? [a, b] : null; },
+            zoomTo: function (a, b) {
+                if (!(b > a)) return;
+                var x = Math.max(full[0], a), y = Math.min(full[1], b);
+                if (y > x) { view = [x, y]; if (onZoom) onZoom(true); draw(); }
             },
             resetZoom: function () { view = full.slice(); if (onZoom) onZoom(false); draw(); },
             redraw: draw,

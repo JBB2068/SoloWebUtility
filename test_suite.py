@@ -4268,9 +4268,14 @@ class TestSoloWebUtility(unittest.TestCase):
         for page in ("static/index.html", "templates/index.html"):
             with open(os.path.join(root, page), "r", encoding="utf-8") as f:
                 html = f.read()
+            # the viewer has its own Flight Logs tab, not a card on the Parameters page
+            self.assertIn('<button class="nav-tab" data-tab="tab-logs" id="navTabLogs">', html)
             params = html[html.index('<section class="tab-content" id="tab-params">'):]
             params = params[:params.index("</section>")]
-            self.assertIn('<div id="logViewerMount"></div>', params)
+            self.assertNotIn("logViewerMount", params)
+            logs = html[html.index('<section class="tab-content" id="tab-logs">'):]
+            logs = logs[:logs.index("</section>")]
+            self.assertIn('<div id="logViewerMount"></div>', logs)
             self.assertEqual((html.count("log-viewer.js"), html.count("logViewerMount")), (1, 1))
             self.assertIn('<script src="/log-viewer/log-viewer.js?v=', html)
         with open(os.path.join(root, "static", "app.js"), "r", encoding="utf-8") as f:
@@ -4279,7 +4284,8 @@ class TestSoloWebUtility(unittest.TestCase):
         # frontend module: everything in static/log-viewer/, no use of the utility's globals
         lvdir = os.path.join(root, "static", "log-viewer")
         self.assertEqual(sorted(os.listdir(lvdir)), sorted([
-            "api.js", "chart.js", "dataflash-worker.js", "flight-panel.js", "log-viewer.css", "log-viewer.js"]))
+            "api.js", "chart.js", "dataflash.js", "flight-panel.js", "log-viewer.css", "log-viewer.js",
+            "log-worker.js", "tlog.js"]))
         js = ""
         for name in os.listdir(lvdir):
             with open(os.path.join(lvdir, name), "r", encoding="utf-8") as f:
@@ -4287,6 +4293,7 @@ class TestSoloWebUtility(unittest.TestCase):
         for bad in ("apiRequest", "localStorage", "sessionStorage", "Cockpit", "window.state", "document.body.",
                     "innerHTML = summary", ".innerHTML = m.", "eval(", "new Function"):
             self.assertNotIn(bad, js)
+        self.assertIn("solo-auth-required", js)      # an expired login opens the utility's login box
         with open(os.path.join(lvdir, "log-viewer.js"), "r", encoding="utf-8") as f:
             entry = f.read()
         self.assertIn("attachShadow", entry)
@@ -4305,6 +4312,1019 @@ class TestSoloWebUtility(unittest.TestCase):
                               stdout=_subprocess.PIPE, stderr=_subprocess.STDOUT, timeout=120)
         self.assertEqual(out.returncode, 0, out.stdout.decode("utf-8", "replace")[-3000:])
         self.assertIn(b"LOGVIEWER OK", out.stdout)
+
+    def test_54_controller_log_viewer_server_and_installer(self):
+        """The read-only viewer server that runs on the Solo controller (modules/log_viewer/controller/
+        log_server.py) and the installer the Solo utility uses to put it there (controller_install.py)."""
+        import tempfile
+        import shutil as _shutil
+        import struct as _struct
+        import json as _json
+        import threading as _threading
+        import importlib.util as _ilu
+        import http.client as _http
+        root = os.path.dirname(os.path.abspath(__file__))
+        lvdir = os.path.join(root, "modules", "log_viewer")
+
+        def load(name, path):
+            spec = _ilu.spec_from_file_location(name, path)
+            m = _ilu.module_from_spec(spec)
+            spec.loader.exec_module(m)
+            return m
+
+        srv = load("lv_ctl_server_test", os.path.join(lvdir, "controller", "log_server.py"))
+        inst = load("lv_ctl_install_test", os.path.join(lvdir, "controller_install.py"))
+
+        # --- the server never writes: no write calls, no shell, no MAVLink sender
+        with open(os.path.join(lvdir, "controller", "log_server.py"), "r", encoding="utf-8") as f:
+            ssrc = f.read()
+        for bad in ("subprocess", "os.system", "os.remove", "shutil", "open(path, \"w", "'wb'", "\"wb\"",
+                    "os.rename", "send_mavlink", "pymavlink"):
+            self.assertNotIn(bad, ssrc)
+
+        def frame(ts_us, sysid, comp, msgid, payload):
+            return (_struct.pack(">Q", ts_us) + bytes(bytearray([0xFE, len(payload), 0, sysid, comp, msgid])) +
+                    payload + b"\x00\x00")
+
+        def heartbeat(ts_us, armed):
+            pay = _struct.pack("<I", 5) + bytes(bytearray([2, 3, 0x80 if armed else 0, 0, 3]))
+            body = bytes(bytearray([len(pay), 0, 1, 1, 0])) + pay
+            crc = srv._crc_x25(body, 0xFFFF)
+            crc = srv._crc_x25(bytes(bytearray([0x32])), crc)
+            return _struct.pack(">Q", ts_us) + b"\xfe" + body + _struct.pack("<H", crc)
+
+        tmp = tempfile.mkdtemp()
+        httpd = None
+        try:
+            log_dir = os.path.join(tmp, "log")
+            rootdir = os.path.join(tmp, "lv")
+            os.makedirs(os.path.join(rootdir, "web", "log-viewer"))
+            os.makedirs(os.path.join(rootdir, "bin"))
+            os.makedirs(log_dir)
+            with open(os.path.join(rootdir, "web", "index.html"), "w") as f:
+                f.write("<html>v=%VERSION%</html>")
+            with open(os.path.join(rootdir, "VERSION"), "w") as f:
+                f.write("abc123\n")
+            with open(os.path.join(rootdir, "web", "log-viewer", "log-viewer.js"), "w") as f:
+                f.write("// viewer")
+            t0 = 1762527600 * 10 ** 6
+            data = b"".join([heartbeat(t0 + k * 10 ** 6, False) for k in range(5)])
+            with open(os.path.join(log_dir, "solo.tlog"), "wb") as f:
+                f.write(data)
+            with open(os.path.join(log_dir, "solo.tlog.1"), "wb") as f:
+                f.write(data * 2)
+            with open(os.path.join(rootdir, "bin", "7.BIN"), "wb") as f:
+                f.write(b"\xa3\x95" * 1000)
+            with open(os.path.join(log_dir, "other.txt"), "w") as f:
+                f.write("secret")
+
+            # armed detection from the last Cube heartbeat (CRC checked)
+            self.assertFalse(srv.last_heartbeat_armed(data))
+            self.assertTrue(srv.last_heartbeat_armed(data + heartbeat(t0 + 9 * 10 ** 6, True)))
+            self.assertFalse(srv.last_heartbeat_armed(b"\xfe" * 500))
+            bad = bytearray(heartbeat(t0, True))
+            bad[-1] ^= 0xFF
+            self.assertFalse(srv.last_heartbeat_armed(bytes(bad)))
+
+            cfg = srv.make_config(rootdir, log_dir, armed=lambda: False)
+            httpd = srv.Server(("127.0.0.1", 0), cfg)
+            port = httpd.server_address[1]
+            th = _threading.Thread(target=httpd.serve_forever)
+            th.daemon = True
+            th.start()
+
+            def get(path, headers=None, method="GET"):
+                c = _http.HTTPConnection("127.0.0.1", port, timeout=10)
+                c.request(method, path, headers=headers or {})
+                r = c.getresponse()
+                body = r.read()
+                c.close()
+                return r.status, dict((k.lower(), v) for k, v in r.getheaders()), body
+
+            st, hd, body = get("/")
+            self.assertEqual(st, 200)
+            self.assertIn(b"v=abc123", body)
+            st, hd, body = get("/log-viewer/log-viewer.js")
+            self.assertEqual((st, body), (200, b"// viewer"))
+            st, hd, body = get("/api/logviewer/ping")
+            self.assertEqual(st, 200)
+            st, hd, body = get("/api/logviewer/flightlogs")
+            lst = _json.loads(body.decode("utf-8"))
+            self.assertEqual((st, lst["mode"], lst["armed"]), (200, "controller", False))
+            ids = [d["id"] for d in lst["logs"]]
+            self.assertEqual(sorted(ids), ["b7", "t0", "t1"])
+            # downloads, ranges
+            st, hd, body = get("/api/logviewer/flightlog/t1")
+            self.assertEqual((st, body), (200, data * 2))
+            self.assertIn("attachment", hd["content-disposition"])
+            st, hd, body = get("/api/logviewer/flightlog/t1", {"Range": "bytes=10-19"})
+            self.assertEqual((st, body, hd["content-range"]), (206, (data * 2)[10:20], "bytes 10-19/%d" % (len(data) * 2)))
+            st, hd, body = get("/api/logviewer/flightlog/t1", {"Range": "bytes=%d-" % (len(data) * 2 - 4)})
+            self.assertEqual((st, len(body)), (206, 4))
+            st, hd, body = get("/api/logviewer/flightlog/t1", {"Range": "bytes=999999-"})
+            self.assertEqual(st, 416)
+            # nothing outside the log list can be fetched
+            for path in ("/api/logviewer/flightlog/other.txt", "/api/logviewer/flightlog/t99", "/api/logviewer/flightlog/..%2Fetc%2Fpasswd",
+                         "/api/logviewer/flightlog/../../etc/passwd", "/log-viewer/../log_server.py", "/log-viewer/..%2Findex.html",
+                         "/log-viewer/nope.js", "/etc/passwd", "/api/logviewer/nope"):
+                self.assertEqual(get(path)[0], 404, path)
+            # read-only
+            for method in ("POST", "PUT", "DELETE", "PATCH"):
+                self.assertEqual(get("/api/logviewer/flightlogs", method=method)[0] in (405, 501), True, method)
+            # armed: logs are refused (409), the list still says why
+            cfg["armed"] = lambda: True
+            st, hd, body = get("/api/logviewer/flightlog/t1")
+            self.assertEqual(st, 409)
+            self.assertTrue(_json.loads(get("/api/logviewer/flightlogs")[2].decode("utf-8"))["armed"])
+            cfg["armed"] = lambda: False
+            # a failing armed check counts as disarmed
+            cfg["armed"] = lambda: 1 / 0
+            self.assertEqual(get("/api/logviewer/flightlog/t0")[0], 200)
+            cfg["armed"] = lambda: False
+        finally:
+            if httpd is not None:
+                httpd.shutdown()
+                httpd.server_close()
+            _shutil.rmtree(tmp, ignore_errors=True)
+
+        # --- the installer, with a fake ssh
+        files, ident = inst.bundle()
+        names = [n for n, _d, _m in files]
+        self.assertIn("log_server.py", names)
+        self.assertIn("web/index.html", names)
+        for name in inst.VIEWER_FILES:
+            self.assertIn("web/log-viewer/" + name, names)
+        self.assertEqual(ident, inst.bundle()[1])
+        self.assertTrue(all(b"\r" not in d for n, d, _m in files if n.endswith((".sh", ".py"))))
+        # every file the viewer page loads is in the bundle
+        with open(os.path.join(root, "static", "log-viewer", "log-worker.js"), "r", encoding="utf-8") as f:
+            wsrc = f.read()
+        for needed in ("dataflash.js", "tlog.js"):
+            self.assertIn(needed, wsrc)
+            self.assertIn(needed, inst.VIEWER_FILES)
+        with open(os.path.join(root, "static", "log-viewer", "log-viewer.js"), "r", encoding="utf-8") as f:
+            lvsrc = f.read()
+        for part in ("api.js", "chart.js", "flight-panel.js"):
+            self.assertIn(part, lvsrc)
+        self.assertEqual(sorted(inst.VIEWER_FILES), sorted(
+            n for n in os.listdir(os.path.join(root, "static", "log-viewer"))))
+
+        # rc.local editing: other lines kept, one marked block before the last exit, idempotent, removable
+        none = inst.rc_local_with_hook("")
+        self.assertTrue(none.startswith("#!/bin/sh") and none.rstrip().endswith("exit 0"))
+        self.assertEqual(none.count(inst.RC_BEGIN), 1)
+        mine = "#!/bin/sh\necho hello\nexit 0\n"
+        a = inst.rc_local_with_hook(mine)
+        self.assertEqual(inst.rc_local_with_hook(a), a)
+        self.assertLess(a.index("echo hello"), a.index(inst.RC_BEGIN))
+        self.assertLess(a.index(inst.RC_END), a.rindex("exit 0"))
+        self.assertEqual(inst.rc_local_without_hook(a), mine)
+        self.assertEqual(inst.rc_local_with_hook("echo no exit line\n").count("exit 0"), 1)
+
+        class Fake(object):
+            def __init__(self, rc_local, version):
+                self.rc_local, self.version, self.calls, self.tar = rc_local, version, [], None
+                self.running = False
+
+            def __call__(self, args, data=None, timeout=20):
+                cmd = args[-1]
+                self.calls.append(cmd)
+                assert args[0] == "ssh" and "root@10.1.1.1" in args
+                if cmd == "echo ok":
+                    return 0, "ok\n"
+                if cmd.startswith("mkdir -p"):
+                    self.tar = data
+                    self.version = "NEWVER"
+                    return 0, ""
+                if cmd.startswith("cat /etc/rc.local"):
+                    return (0, self.rc_local) if self.rc_local is not None else (1, "")
+                if cmd.startswith("cat > /etc/rc.local"):
+                    self.rc_local = data.decode("utf-8")
+                    return 0, ""
+                if "restart.sh" in cmd:
+                    self.running = True
+                    return 0, ""
+                if "stop.sh" in cmd:
+                    self.running = False
+                    self.version = None
+                    return 0, ""
+                if cmd.startswith("cat /log/logviewer/VERSION"):
+                    hook = "1" if self.rc_local and inst.RC_BEGIN in self.rc_local else "0"
+                    return 0, "%s\n---\n%s\n---\n%d\n" % (self.version or "", hook, 1 if self.running else 0)
+                return 1, "unexpected: " + cmd
+
+        tmpst = tempfile.mkdtemp()
+        try:
+            sp = os.path.join(tmpst, "state.json")
+            fake = Fake(None, None)
+            res = inst.status(fake, sp, lambda: False, use_cache=False, expect="NEWVER")
+            self.assertEqual((res["reachable"], res["installed"], res["wasInstalled"]), (True, False, False))
+            res = inst.install(fake, sp, lambda: True, lambda s: None)
+            self.assertTrue(res["ok"], res)
+            self.assertTrue(res["installed"] and res["hook"] and res["running"])
+            self.assertIn(inst.RC_BEGIN, fake.rc_local)
+            self.assertTrue(fake.tar and len(fake.tar) > 1000)
+            with open(sp) as sf:
+                self.assertTrue(_json.load(sf)["installed"])
+            # a second install changes nothing in rc.local
+            before = fake.rc_local
+            self.assertTrue(inst.install(fake, sp, lambda: True, lambda s: None)["ok"])
+            self.assertEqual(fake.rc_local, before)
+            # a controller reset empties rc.local: the status shows what is missing and that it was installed
+            fake.rc_local, fake.running = None, False
+            res = inst.status(fake, sp, lambda: False, use_cache=False, expect="NEWVER")
+            self.assertEqual((res["installed"], res["hook"], res["running"], res["wasInstalled"]), (True, False, False, True))
+            # server not answering after install -> not ok, with a hint
+            res = inst.install(fake, sp, lambda: False, lambda s: None)
+            self.assertFalse(res["ok"])
+            self.assertIn("did not answer", res["error"])
+            # remove
+            res = inst.remove(fake, sp)
+            self.assertTrue(res["ok"])
+            self.assertNotIn(inst.RC_BEGIN, fake.rc_local or "")
+            with open(sp) as sf:
+                self.assertFalse(_json.load(sf)["installed"])
+            # unreachable controller
+            res = inst.install(lambda a, d=None, t=20: (255, ""), sp, lambda: False, lambda s: None)
+            self.assertFalse(res["ok"])
+            self.assertIn("Cannot reach", res["error"])
+        finally:
+            _shutil.rmtree(tmpst, ignore_errors=True)
+
+        # the Solo-side API: install/remove need the header and a disarmed Solo
+        lvapi = load("lv_api_test2", os.path.join(lvdir, "log_viewer_api.py"))
+
+        class Req(object):
+            def __init__(self, headers=None):
+                import io as _io
+                self.code, self.headers, self.wfile, self.sent = None, dict(headers or {}), _io.BytesIO(), {}
+
+            def send_response(self, code):
+                self.code = code
+
+            def send_header(self, k, v):
+                self.sent[k] = v
+
+            def end_headers(self):
+                pass
+
+        class FakeInstaller(object):
+            def __init__(self):
+                self.did = []
+
+            def status(self, **kw):
+                return {"reachable": True, "installed": True}
+
+            def install(self, **kw):
+                self.did.append("install")
+                return {"ok": True}
+
+            def remove(self, **kw):
+                self.did.append("remove")
+                return {"ok": True}
+
+        fi = FakeInstaller()
+        for sub, want in (("install", "install"), ("remove", "remove")):
+            r = Req()
+            lvapi.handle(r, "/api/logviewer/controller/" + sub, None, folder=tempfile.gettempdir(), armed=lambda: False, installer=fi)
+            self.assertEqual(r.code, 403)                                  # no header
+            fi.did = []
+            r = Req({"X-Log-Viewer": "1"})
+            lvapi.handle(r, "/api/logviewer/controller/" + sub, None, folder=tempfile.gettempdir(), armed=lambda: True, installer=fi)
+            self.assertEqual(r.code, 409)                                  # armed
+            self.assertEqual(fi.did, [])
+            r = Req({"X-Log-Viewer": "1"})
+            lvapi.handle(r, "/api/logviewer/controller/" + sub, None, folder=tempfile.gettempdir(), armed=lambda: False, installer=fi)
+            self.assertEqual(r.code, 200)
+            self.assertEqual(fi.did[-1], want)
+        r = Req()
+        lvapi.handle(r, "/api/logviewer/controller", None, folder=tempfile.gettempdir(), armed=lambda: True, installer=fi)
+        self.assertEqual(r.code, 200)                                      # status is always readable
+
+    def test_55_cube_sd_card_copy_over_mavftp(self):
+        """modules/log_viewer/cube_sd.py: lists and copies the Cube's SD card logs over MAVFTP, read-only,
+        only while disarmed, with limits. Tested against a simulated Cube."""
+        import tempfile
+        import shutil as _shutil
+        import struct as _struct
+        import json as _json
+        import io as _io
+        import importlib.util as _ilu
+        root = os.path.dirname(os.path.abspath(__file__))
+        lvdir = os.path.join(root, "modules", "log_viewer")
+
+        def load(name, path):
+            spec = _ilu.spec_from_file_location(name, path)
+            m = _ilu.module_from_spec(spec)
+            spec.loader.exec_module(m)
+            return m
+
+        sd = load("lv_cube_sd_test", os.path.join(lvdir, "cube_sd.py"))
+        api = load("lv_api_test3", os.path.join(lvdir, "log_viewer_api.py"))
+
+        # --- the module never writes to the Cube and stays out of the rest of the utility
+        with open(os.path.join(lvdir, "cube_sd.py"), "r", encoding="utf-8") as f:
+            src = f.read()
+        for bad in ("import flash_mgr", "import param_mgr", "import calib_mgr", "import solo_web_app",
+                    "import cockpit_mgr", "subprocess", "param_set", "PARAM_SET", "command_long", "set_mode",
+                    "OP_WRITE", "OP_CREATE", "OP_REMOVE", "OP_RENAME", "shutil"):
+            self.assertNotIn(bad, src)
+        self.assertEqual(sorted(sd.ALLOWED_OPS), [1, 2, 3, 4, 5, 15])
+        real_init = sd.FtpClient.__init__
+
+        def quick_init(self, transport, check=None, reply_timeout=1.0, retries=4, clock=None):
+            real_init(self, transport, check, reply_timeout=0.05, retries=retries)   # the simulated Cube answers at once
+        sd.FtpClient.__init__ = quick_init
+
+        class FakeCube(object):
+            """Speaks the Cube's side of MAVFTP for /APM/LOGS."""
+
+            def __init__(self, files, burst=True, drop_every=0, arm_after=None, silent=False, page=239):
+                self.files, self.burst, self.drop_every = files, burst, drop_every
+                self.arm_after, self.silent = arm_after, silent
+                self.queue, self.ops, self.sessions, self.sent = [], [], {}, 0
+                self.is_armed = None
+                self.closed = False
+                self.names = sorted(files)
+                self.nbursts = 0
+
+            def reply(self, seq, req, op, data=b"", offset=0, burst=0, session=0):
+                hdr = _struct.pack(sd.HDR_FMT, (seq + 1) & 0xFFFF, session, op, len(data), req, burst, 0, offset)
+                self.queue.append(hdr + data + b"\x00" * (251 - 12 - len(data)))
+
+            def send(self, raw):
+                seq, session, op, size, _r, _b, _p, offset = _struct.unpack(sd.HDR_FMT, raw[:12])
+                self.ops.append(op)
+                data = raw[12:12 + size]
+                if self.silent:
+                    return
+                if op == sd.OP_RESET:
+                    return
+                if op == sd.OP_TERMINATE:
+                    self.sessions.pop(session, None)
+                    return
+                if op == sd.OP_LIST:
+                    entries = [b"F" + n.encode() + b"\t" + str(len(self.files[n])).encode() for n in self.names]
+                    entries = [b"D.."] + entries if False else entries
+                    chunk, used = [], 0
+                    for e in entries[offset:]:
+                        if used + len(e) + 1 > sd.MAX_DATA:
+                            break
+                        chunk.append(e)
+                        used += len(e) + 1
+                    if not chunk:
+                        return self.reply(seq, op, sd.OP_NAK, b"\x06")
+                    return self.reply(seq, op, sd.OP_ACK, b"\x00".join(chunk) + b"\x00")
+                if op == sd.OP_OPEN_RO:
+                    path = data.decode()
+                    name = path.rsplit("/", 1)[-1]
+                    if not path.startswith("/APM/LOGS/") or name not in self.files:
+                        return self.reply(seq, op, sd.OP_NAK, b"\x01")
+                    self.sessions[3] = name
+                    return self.reply(seq, op, sd.OP_ACK, _struct.pack("<I", len(self.files[name])), session=3)
+                if op == sd.OP_READ:
+                    blob = self.files[self.sessions[session]]
+                    if offset >= len(blob):
+                        return self.reply(seq, op, sd.OP_NAK, b"\x06", session=session)
+                    return self.reply(seq, op, sd.OP_ACK, blob[offset:offset + size], offset, session=session)
+                if op == sd.OP_BURST:
+                    if not self.burst:
+                        return self.reply(seq, op, sd.OP_NAK, b"\x07", session=session)
+                    self.nbursts += 1
+                    blob = self.files[self.sessions[session]]
+                    pos, n = offset, 0
+                    while pos < len(blob) and n < 40:
+                        piece = blob[pos:pos + size]
+                        n += 1
+                        last = n == 40 or pos + len(piece) >= len(blob)
+                        if not (self.drop_every and n % self.drop_every == 0):
+                            self.reply(seq, op, sd.OP_ACK, piece, pos, 1 if last else 0, session)
+                        pos += len(piece)
+                    return
+                raise AssertionError("unexpected opcode %d" % op)
+
+            def recv(self, timeout):
+                if self.arm_after is not None and len(self.ops) >= self.arm_after:
+                    self.is_armed = True
+                if self.queue:
+                    return self.queue.pop(0)
+                time.sleep(0.001)
+                return None
+
+            def armed(self):
+                return self.is_armed
+
+            def close(self):
+                self.closed = True
+
+        import os as _os
+        blob7 = bytes(bytearray((k * 7) % 256 for k in range(50000)))
+        blob8 = bytes(bytearray((k * 3) % 256 for k in range(1234)))
+        files = {"00000007.BIN": blob7, "00000008.BIN": blob8}
+        tmp = tempfile.mkdtemp()
+        try:
+            dest = os.path.join(tmp, "cubesd")
+
+            def run_job(cube, kind, n=None, armed=lambda: False, **kw):
+                mgr = sd.CubeSD(connect=lambda: cube, dest=dest, free=lambda p: 10 ** 12, **kw)
+                if kind == "list":
+                    ok, msg = mgr.start_list(armed)
+                else:
+                    mgr.listing = [{"n": 7, "name": "00000007.BIN", "size": len(blob7)},
+                                   {"n": 8, "name": "00000008.BIN", "size": len(blob8)}]
+                    ok, msg = mgr.start_copy(n, armed)
+                self.assertTrue(ok, msg)
+                mgr.wait(20)
+                return mgr
+
+            # listing
+            cube = FakeCube(files)
+            mgr = run_job(cube, "list")
+            st = mgr.status()
+            self.assertEqual(st["job"]["state"], "done", st)
+            self.assertEqual([(x["n"], x["size"]) for x in st["list"]], [(8, 1234), (7, 50000)])
+            self.assertTrue(cube.closed)
+            self.assertEqual(set(cube.ops) - set(sd.ALLOWED_OPS), set())
+
+            # a big directory is read in pages
+            many = dict(("%08d.BIN" % k, b"x") for k in range(1, 41))
+            cube = FakeCube(many)
+            self.assertEqual(len(run_job(cube, "list").status()["list"]), 40)
+
+            # copy with burst reads
+            cube = FakeCube(files)
+            mgr = run_job(cube, "copy", 7)
+            st = mgr.status()
+            self.assertEqual(st["job"]["state"], "done", st)
+            with open(os.path.join(dest, "7.BIN"), "rb") as f:
+                self.assertEqual(f.read(), blob7)
+            self.assertEqual([n for n in os.listdir(dest) if n.endswith(".part")], [])
+            self.assertGreater(cube.nbursts, 0)
+            self.assertEqual(set(cube.ops) - set(sd.ALLOWED_OPS), set())
+            self.assertEqual(sd.list_copies(dest)[0]["n"], 7)
+            # shown as already copied once the list is known
+            mgr.listing = [{"n": 7, "name": "00000007.BIN", "size": len(blob7)}]
+            self.assertTrue(mgr.status()["list"][0]["copied"])
+
+            # lost packets in a burst: the next burst restarts where the data stopped
+            cube = FakeCube(files, drop_every=5)
+            run_job(cube, "copy", 7)
+            with open(os.path.join(dest, "7.BIN"), "rb") as f:
+                self.assertEqual(f.read(), blob7)
+
+            # no burst support: plain reads
+            cube = FakeCube(files, burst=False)
+            run_job(cube, "copy", 8)
+            with open(os.path.join(dest, "8.BIN"), "rb") as f:
+                self.assertEqual(f.read(), blob8)
+            self.assertIn(sd.OP_READ, cube.ops)
+
+            # armed when asked: nothing starts
+            cube = FakeCube(files)
+            mgr = sd.CubeSD(connect=lambda: cube, dest=dest, free=lambda p: 10 ** 12)
+            ok, msg = mgr.start_list(lambda: True)
+            self.assertFalse(ok)
+            self.assertIn("disarmed", msg)
+            self.assertEqual(cube.ops, [])
+
+            # the Cube arms during the copy: stops at once, no partial file left
+            shutil_dest = os.path.join(tmp, "cubesd2")
+            cube = FakeCube(files, arm_after=6)
+            mgr = sd.CubeSD(connect=lambda: cube, dest=shutil_dest, free=lambda p: 10 ** 12)
+            mgr.listing = [{"n": 7, "name": "00000007.BIN", "size": len(blob7)}]
+            self.assertTrue(mgr.start_copy(7, lambda: False)[0])
+            mgr.wait(20)
+            self.assertEqual(mgr.status()["job"]["state"], "cancelled")
+            self.assertEqual(os.listdir(shutil_dest), [])
+            self.assertTrue(cube.closed)
+
+            # the Solo's own armed check stops it too, and a second job cannot start while one runs
+            flag = {"armed": False}
+            cube = FakeCube(files)
+            orig_recv = cube.recv
+
+            def recv(t):
+                flag["armed"] = len(cube.ops) > 5
+                return orig_recv(t)
+            cube.recv = recv
+            mgr = sd.CubeSD(connect=lambda: cube, dest=shutil_dest, free=lambda p: 10 ** 12)
+            mgr.listing = [{"n": 7, "name": "00000007.BIN", "size": len(blob7)}]
+            mgr.start_copy(7, lambda: flag["armed"])
+            mgr.wait(20)
+            self.assertEqual(mgr.status()["job"]["state"], "cancelled")
+
+            # cancel
+            cube = FakeCube(files)
+            orig_recv = cube.recv
+            holder = {}
+
+            def recv2(t):
+                if len(cube.ops) > 5:
+                    holder["m"].cancel()
+                return orig_recv(t)
+            cube.recv = recv2
+            mgr = sd.CubeSD(connect=lambda: cube, dest=shutil_dest, free=lambda p: 10 ** 12)
+            holder["m"] = mgr
+            mgr.listing = [{"n": 7, "name": "00000007.BIN", "size": len(blob7)}]
+            mgr.start_copy(7, lambda: False)
+            mgr.wait(20)
+            self.assertEqual(mgr.status()["job"]["message"], "Cancelled.")
+
+            # a silent Cube: a clear error, not a hang
+            cube = FakeCube(files, silent=True)
+            mgr = sd.CubeSD(connect=lambda: cube, dest=shutil_dest, free=lambda p: 10 ** 12)
+            mgr.start_list(lambda: False)
+            mgr.wait(20)
+            st = mgr.status()["job"]
+            self.assertEqual(st["state"], "error")
+            self.assertIn("did not answer", st["error"])
+
+            # ...and it says what the Cube did send, so a silent file service can be told from a dead link
+            class Msg(object):
+                def __init__(self, kind, payload=b""):
+                    self._k, self.payload, self.base_mode = kind, payload, 0
+                def get_type(self):
+                    return self._k
+            class StubMav(object):
+                def __init__(self):
+                    self.queue = [Msg("ATTITUDE")] * 5 + [Msg("HEARTBEAT")] + [Msg("FILE_TRANSFER_PROTOCOL", bytes(bytearray([7, 0, 0, 128, 0, 3, 0, 0, 0, 0, 0, 0])))]
+                def recv_match(self, blocking=True, timeout=None, **kw):
+                    return self.queue.pop(0) if self.queue else None
+            tr = sd.MavTransport(StubMav())
+            seen_raw = [tr.recv(0.01) for _ in range(7)]
+            self.assertEqual(tr.ftp_seen, 1)
+            self.assertEqual(seen_raw[-1][:2], bytes(bytearray([7, 0])))
+            text = tr.summary()
+            self.assertIn("ATTITUDE 5", text)
+            self.assertIn("file-transfer packets: 1", text)
+            self.assertIn("reply to 3", text)
+            tr.send = lambda raw: None
+            tr.recv = lambda timeout: None
+            try:
+                sd.FtpClient(tr, reply_timeout=0.05, retries=2).request(sd.OP_LIST, 0, 0, 0)
+                self.fail("a silent Cube must raise")
+            except sd.CubeSDError as ex:
+                self.assertIn("did not answer (MAVFTP 3)", str(ex))
+                self.assertIn("ATTITUDE 5", str(ex))
+
+            # cannot reach the Cube at all
+            def no_link():
+                raise sd.CubeSDError("Cannot reach the Cube over the Solo's telemetry link.")
+            mgr = sd.CubeSD(connect=no_link, dest=shutil_dest, free=lambda p: 10 ** 12)
+            mgr.start_list(lambda: False)
+            mgr.wait(20)
+            self.assertIn("Cannot reach", mgr.status()["job"]["error"])
+            self.assertTrue(mgr.job_lock.acquire(False))     # released after the failure
+            mgr.job_lock.release()
+
+            # not enough room on the Solo
+            cube = FakeCube(files)
+            mgr = sd.CubeSD(connect=lambda: cube, dest=shutil_dest, free=lambda p: 1000)
+            mgr.listing = [{"n": 7, "name": "00000007.BIN", "size": len(blob7)}]
+            mgr.start_copy(7, lambda: False)
+            mgr.wait(20)
+            self.assertIn("Not enough space", mgr.status()["job"]["error"])
+            # a log not in the list is refused
+            mgr = sd.CubeSD(connect=lambda: FakeCube(files), dest=shutil_dest, free=lambda p: 10 ** 12)
+            mgr.start_copy(99, lambda: False)
+            mgr.wait(20)
+            self.assertIn("Check the Cube", mgr.status()["job"]["error"])
+
+            # retention: newest copies kept, the one just copied always kept
+            keep_dir = os.path.join(tmp, "keep")
+            os.makedirs(keep_dir)
+            for k in range(1, 8):
+                p = os.path.join(keep_dir, "%d.BIN" % k)
+                with open(p, "wb") as f:
+                    f.write(b"x" * 100)
+                os.utime(p, (1000 + k, 1000 + k))
+            with open(os.path.join(keep_dir, "notes.txt"), "w") as f:
+                f.write("mine")
+            sd.enforce_limits(keep_dir, max_copies=3, max_bytes=10 ** 9)
+            self.assertEqual(sorted(n for n in os.listdir(keep_dir)), ["5.BIN", "6.BIN", "7.BIN", "notes.txt"])
+            sd.enforce_limits(keep_dir, max_copies=10, max_bytes=250, keep=5)
+            self.assertEqual(sorted(n for n in os.listdir(keep_dir)), ["5.BIN", "7.BIN", "notes.txt"])
+        finally:
+            sd.FtpClient.__init__ = real_init
+            _shutil.rmtree(tmp, ignore_errors=True)
+
+        # --- the API: copies show up in the log list, and the Cube routes are guarded
+        class Req(object):
+            def __init__(self, headers=None):
+                self.code, self.headers, self.wfile, self.sent = None, dict(headers or {}), _io.BytesIO(), {}
+
+            def send_response(self, code):
+                self.code = code
+
+            def send_header(self, k, v):
+                self.sent[k] = v
+
+            def end_headers(self):
+                pass
+
+        class FakeMgr(object):
+            def __init__(self):
+                self.calls = []
+
+            def status(self):
+                return {"job": {"state": "idle"}, "list": None, "listedAt": None, "copies": 0}
+
+            def start_list(self, armed):
+                self.calls.append("list")
+                return True, ""
+
+            def start_copy(self, n, armed):
+                self.calls.append("copy%d" % n)
+                return True, ""
+
+            def cancel(self):
+                self.calls.append("cancel")
+
+        tmp = tempfile.mkdtemp()
+        try:
+            flash, copies = os.path.join(tmp, "dataflash"), os.path.join(tmp, "cubesd")
+            os.makedirs(flash)
+            os.makedirs(copies)
+            with open(os.path.join(flash, "3.BIN"), "wb") as f:
+                f.write(b"abc")
+            with open(os.path.join(copies, "12.BIN"), "wb") as f:
+                f.write(b"\xa3\x95" * 500)
+            with open(os.path.join(copies, "junk.txt"), "wb") as f:
+                f.write(b"x")
+            r = Req()
+            api.handle(r, "/api/logviewer/flightlogs", None, folder=flash, armed=lambda: False, copies=copies)
+            body = _json.loads(r.wfile.getvalue().decode("utf-8"))
+            ids = sorted(d["id"] for d in body["logs"])
+            self.assertEqual(ids, ["3", "c12"])
+            cube_entry = [d for d in body["logs"] if d["id"] == "c12"][0]
+            self.assertEqual((cube_entry["kind"], cube_entry["size"], cube_entry["source"]), ("bin", 1000, "cube"))
+            r = Req()
+            api.handle(r, "/api/logviewer/flightlog/c12", None, folder=flash, armed=lambda: False, copies=copies)
+            self.assertEqual((r.code, r.wfile.getvalue()), (200, b"\xa3\x95" * 500))
+            self.assertIn("cube_log_12_", r.sent["Content-Disposition"])
+            r = Req()
+            api.handle(r, "/api/logviewer/flightlog/c12", None, folder=flash, armed=lambda: True, copies=copies)
+            self.assertEqual(r.code, 409)
+            for p in ("/api/logviewer/flightlog/c99", "/api/logviewer/flightlog/cx", "/api/logviewer/flightlog/c../1"):
+                r = Req()
+                api.handle(r, p, None, folder=flash, armed=lambda: False, copies=copies)
+                self.assertEqual(r.code, 404, p)
+            fm = FakeMgr()
+            r = Req()
+            api.handle(r, "/api/logviewer/cubesd", None, folder=flash, armed=lambda: True, cubesd=fm)
+            self.assertEqual(r.code, 200)                              # status always readable
+            for sub in ("cubesd/list", "cubesd/copy/7", "cubesd/cancel"):
+                r = Req()
+                api.handle(r, "/api/logviewer/" + sub, None, folder=flash, armed=lambda: False, cubesd=fm)
+                self.assertEqual(r.code, 403, sub)                      # needs our header
+            self.assertEqual(fm.calls, [])
+            r = Req({"X-Log-Viewer": "1"})
+            api.handle(r, "/api/logviewer/cubesd/list", None, folder=flash, armed=lambda: True, cubesd=fm)
+            self.assertEqual(r.code, 409)                               # armed
+            self.assertEqual(fm.calls, [])
+            for sub in ("cubesd/list", "cubesd/copy/7", "cubesd/cancel"):
+                r = Req({"X-Log-Viewer": "1"})
+                api.handle(r, "/api/logviewer/" + sub, None, folder=flash, armed=lambda: False, cubesd=fm)
+                self.assertEqual(r.code, 200, sub)
+            self.assertEqual(fm.calls, ["list", "copy7", "cancel"])
+            r = Req({"X-Log-Viewer": "1"})
+            api.handle(r, "/api/logviewer/cubesd/copy/abc", None, folder=flash, armed=lambda: False, cubesd=fm)
+            self.assertEqual(r.code, 404)
+            # cancelling is allowed even when armed
+            fm.calls = []
+            r = Req({"X-Log-Viewer": "1"})
+            api.handle(r, "/api/logviewer/cubesd/cancel", None, folder=flash, armed=lambda: True, cubesd=fm)
+            self.assertEqual((r.code, fm.calls), (200, ["cancel"]))
+        finally:
+            _shutil.rmtree(tmp, ignore_errors=True)
+
+
+    def test_56_controller_ssh_restores_the_solos_key(self):
+        """modules/controller_ssh.py (shared by Update Controller and the controller log viewer installer):
+        when the Controller refuses the Solo's key (settings reset), the key is put back with the default
+        root password through a real controlling terminal, once, then key login works. A wrong password
+        gives one clear message. Tested with a fake ssh that, like OpenSSH, prompts only on /dev/tty."""
+        import textwrap
+        import importlib.util as _ilu
+        root = os.path.dirname(os.path.abspath(__file__))
+        FAKE_SSH = textwrap.dedent('''\
+            #!/usr/bin/env python3
+            import os, sys, subprocess
+            args = sys.argv[1:]
+            ctl = os.environ["FAKE_CTRL"]
+            batch = "BatchMode=yes" in args
+            cmd = args[-1]
+            auth = os.path.join(ctl, "home_root_ssh", "authorized_keys")
+            key = os.path.join(os.environ["FAKE_SOLO_KEYDIR"], "id_rsa.pub")
+            blob = open(key).read().split()[1] if os.path.exists(key) else None
+            def count(name):
+                p = os.path.join(ctl, name)
+                n = int(open(p).read()) if os.path.exists(p) else 0
+                open(p, "w").write(str(n + 1))
+            def run_cmd():
+                c = cmd.replace("/home/root/.ssh", os.path.join(ctl, "home_root_ssh")).replace("/root/.ssh", os.path.join(ctl, "root_ssh"))
+                r = subprocess.run(["sh", "-c", c], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                sys.stdout.write(r.stdout.decode()); sys.exit(r.returncode)
+            if batch:
+                if blob and os.path.exists(auth) and blob in open(auth).read():
+                    run_cmd()
+                print("root@10.1.1.1: Permission denied (publickey,password,keyboard-interactive).")
+                sys.exit(255)
+            try:
+                tty = open("/dev/tty", "r+b", buffering=0)
+            except OSError:
+                print("ssh: no tty present and no askpass program specified"); sys.exit(255)
+            count("password_prompts")
+            tty.write(b"root@10.1.1.1's password: ")
+            line = b""
+            while not line.endswith(b"\\n"):
+                ch = tty.read(1)
+                if not ch: break
+                line += ch
+            if line.strip().decode() == os.environ["FAKE_PASSWORD"]:
+                run_cmd()
+            print("Permission denied, please try again."); sys.exit(255)
+        ''')
+        FAKE_KEYGEN = textwrap.dedent('''\
+            #!/usr/bin/env python3
+            import sys
+            f = sys.argv[sys.argv.index("-f") + 1]
+            open(f, "w").write("PRIVATE"); open(f + ".pub", "w").write("ssh-rsa AAAAFAKEBLOB123 root@solo\\n")
+        ''')
+
+
+        d = tempfile.mkdtemp()
+        env_keys = ("FAKE_CTRL", "FAKE_SOLO_KEYDIR", "FAKE_PASSWORD")
+        env_old = dict((k, os.environ.get(k)) for k in env_keys)
+        path_old = list(sys.path)
+        try:
+            ctl = os.path.join(d, "ctl")
+            os.makedirs(os.path.join(ctl, "home_root_ssh"))
+            os.makedirs(os.path.join(ctl, "root_ssh"))
+            os.makedirs(os.path.join(d, "solo"))
+            for name, text in (("fake_ssh", FAKE_SSH), ("fake_keygen", FAKE_KEYGEN)):
+                with open(os.path.join(d, name), "w") as f:
+                    f.write(text)
+                os.chmod(os.path.join(d, name), 0o755)
+            os.environ.update(FAKE_CTRL=ctl, FAKE_SOLO_KEYDIR=os.path.join(d, "solo"), FAKE_PASSWORD="TjSDBkAu")
+            spec = _ilu.spec_from_file_location("controller_ssh_test", os.path.join(root, "modules", "controller_ssh.py"))
+            cs = _ilu.module_from_spec(spec)
+            spec.loader.exec_module(cs)
+            cs.SSH_BIN, cs.KEYGEN_BIN = os.path.join(d, "fake_ssh"), os.path.join(d, "fake_keygen")
+            cs.KEY_PATH = os.path.join(d, "solo", "id_rsa")
+
+            def prompts():
+                p = os.path.join(ctl, "password_prompts")
+                if not os.path.exists(p):
+                    return 0
+                with open(p) as f:
+                    return int(f.read())
+
+            def auth_text(sub):
+                with open(os.path.join(ctl, sub, "authorized_keys")) as f:
+                    return f.read()
+
+            # 1. the Controller forgot the key: restored with the default password, Solo key created
+            rc, out = cs.run("echo hello")
+            self.assertEqual(rc, 0)
+            self.assertIn("hello", out)
+            self.assertTrue(os.path.exists(cs.KEY_PATH + ".pub"))
+            for sub in ("home_root_ssh", "root_ssh"):
+                self.assertIn("AAAAFAKEBLOB123", auth_text(sub))
+            self.assertEqual(prompts(), 1)
+            rc, out = cs.run("echo again")                       # key login now: no password asked
+            self.assertEqual((rc, out.strip()), (0, "again"))
+            self.assertEqual(prompts(), 1)
+            cs.ensure_authorized(force=True)                     # the key is not added twice
+            self.assertEqual(auth_text("home_root_ssh").count("AAAAFAKEBLOB123"), 1)
+
+            # 2. golden_update.ssh() goes through it (the old pty-without-terminal code got no prompt at all)
+            sys.path.insert(0, os.path.join(root, "bin", "golden_update"))
+            import golden_update as gu
+            gcs = gu.controller_ssh                              # the helper as Update Controller imported it
+            gcs.SSH_BIN, gcs.KEYGEN_BIN, gcs.KEY_PATH = cs.SSH_BIN, cs.KEYGEN_BIN, cs.KEY_PATH
+            self.assertEqual(gu.ssh("echo viaGolden", 30)[1].strip(), "viaGolden")
+
+            # 3. wrong root password: one clear message, one attempt
+            for sub in ("home_root_ssh", "root_ssh"):
+                os.remove(os.path.join(ctl, sub, "authorized_keys"))
+            os.environ["FAKE_PASSWORD"] = "not-the-default"
+            cs._state.update(tried=False, result=None)
+            before = prompts()
+            rc, out = cs.run("echo hello")
+            self.assertEqual((rc, out), (255, cs.NOT_AUTHORIZED))
+            cs.run("echo again")
+            self.assertEqual(prompts(), before + 1)
+            self.assertIn("isn't authorized on the Controller", cs.NOT_AUTHORIZED)
+            self.assertIn("Run the installer again with the controller on.", cs.NOT_AUTHORIZED)
+
+            # 4. Update Controller reports that message
+            gcs._state.update(tried=False, result=None)
+            lines = []
+            gu.run_controller("status", lines.append, 30)
+            self.assertEqual(lines[0], "[GOLDEN_FAILED] " + gcs.NOT_AUTHORIZED)
+            self.assertEqual(len(lines), 2)                      # then what ssh said, for the log
+            self.assertTrue(lines[1].startswith("[ssh detail] "))
+            self.assertIn("Permission denied", lines[1])
+
+            # 5. the controller log viewer installer restores the key, or reports the same message
+            sys.path.insert(0, os.path.join(root, "modules", "log_viewer"))
+            spec = _ilu.spec_from_file_location("lv_ctl_install_test56", os.path.join(root, "modules", "log_viewer", "controller_install.py"))
+            inst = _ilu.module_from_spec(spec)
+            spec.loader.exec_module(inst)
+            inst._authorize = lambda: (False, cs.NOT_AUTHORIZED)
+            res = inst.install(lambda a, dd=None, t=20: (255, "Permission denied (publickey)."),
+                               os.path.join(d, "s.json"), lambda: True, lambda s: None)
+            self.assertEqual(res, {"ok": False, "error": cs.NOT_AUTHORIZED})
+            seen = []
+
+            def runner(a, dd=None, t=20):
+                seen.append(1)
+                return (0, "ok") if len(seen) > 1 else (255, "Permission denied (publickey).")
+            inst._authorize = lambda: (True, "ok")
+            lvdir = os.path.join(root, "modules", "log_viewer")
+            inst.install(runner, os.path.join(d, "s.json"), lambda: True, lambda s: None,
+                         os.path.join(lvdir, "controller"), os.path.join(root, "static", "log-viewer"))
+            self.assertGreater(len(seen), 2)                     # carried on after the key was restored
+
+            # 6. flash_mgr (the controller step of a Full Install): same terminal handling, same key restore
+            for sub in ("home_root_ssh", "root_ssh"):
+                if os.path.exists(os.path.join(ctl, sub, "authorized_keys")):
+                    os.remove(os.path.join(ctl, sub, "authorized_keys"))
+            os.environ["FAKE_PASSWORD"] = "TjSDBkAu"
+            gcs._state.update(tried=False, result=None)
+            before = prompts()
+            rc, out = flash_mgr._run_with_ssh_auth("%s -o StrictHostKeyChecking=no root@10.1.1.1 'echo viaFlash'" % cs.SSH_BIN,
+                                                   host="10.1.1.1", timeout=30)
+            self.assertEqual(rc, 0)
+            self.assertIn("viaFlash", out)
+            self.assertGreater(prompts(), before)
+            self.assertIn("AAAAFAKEBLOB123", auth_text("home_root_ssh"))
+
+            # 7. a /root that can't be written must not stop the key from reaching /home/root
+            for sub in ("home_root_ssh", "root_ssh"):
+                if os.path.exists(os.path.join(ctl, sub, "authorized_keys")):
+                    os.remove(os.path.join(ctl, sub, "authorized_keys"))
+            shutil.rmtree(os.path.join(ctl, "root_ssh"))
+            with open(os.path.join(ctl, "root_ssh"), "w") as f:
+                f.write("a file, so mkdir and writes under it fail")
+            gcs._state.update(tried=False, result=None)
+            rc, out = gcs.run("echo noRoot")
+            self.assertEqual((rc, out.strip()), (0, "noRoot"))
+            self.assertIn("AAAAFAKEBLOB123", auth_text("home_root_ssh"))
+        finally:
+            for k, v in env_old.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+            sys.path[:] = path_old
+            shutil.rmtree(d, True)
+
+
+    def test_57_cube_sd_ftp_accepts_a_slow_cubes_late_reply(self):
+        """A slow Cube answers the first attempt while the second is already waiting: that reply
+        (sequence = an earlier attempt + 1) is accepted. Replies meant for someone else are not, and
+        the error names them."""
+        import importlib.util as _ilu
+        import struct as _st
+        root = os.path.dirname(os.path.abspath(__file__))
+        spec = _ilu.spec_from_file_location("cube_sd_t57", os.path.join(root, "modules", "log_viewer", "cube_sd.py"))
+        sd = _ilu.module_from_spec(spec)
+        spec.loader.exec_module(sd)
+
+        def reply(seq, req, offset=0):
+            h = _st.pack(sd.HDR_FMT, seq & 0xFFFF, 0, sd.OP_ACK, 0, req, 0, 0, offset)
+            return h + b"\0" * (251 - len(h))
+
+        class Slow(object):
+            def __init__(self, answer_after, wrong=False):
+                self.sent, self.q, self.n, self.after, self.wrong = [], [], 0, answer_after, wrong
+            def send(self, b):
+                self.sent.append(_st.unpack("<H", b[:2])[0])
+            def recv(self, t):
+                time.sleep(0.1)
+                self.n += 1
+                if self.n == self.after:
+                    if self.wrong:
+                        return reply(self.sent[0] - 3, sd.OP_LIST, 136)
+                    return reply(self.sent[0] + 1, sd.OP_LIST)          # to the FIRST attempt
+                return None
+
+        tr = Slow(answer_after=7)                                       # arrives during the second attempt
+        r = sd.FtpClient(tr, reply_timeout=0.5, retries=3).request(sd.OP_LIST, 0, 0, 0)
+        self.assertEqual(r["op"], sd.OP_ACK)
+        self.assertGreaterEqual(len(tr.sent), 2)
+        tr = Slow(answer_after=2, wrong=True)
+        with self.assertRaises(sd.CubeSDError) as cm:
+            sd.FtpClient(tr, reply_timeout=0.05, retries=2).request(sd.OP_LIST, 0, 0, 0)
+        msg = str(cm.exception)
+        self.assertIn("did not answer (MAVFTP 3)", msg)
+        self.assertIn("We sent seq", msg)
+        self.assertIn("offset 136", msg)
+
+
+    def test_58_cube_sd_lists_recent_logs_without_listing_the_directory(self):
+        """ArduPilot walks the whole directory for every list page, so a card with hundreds of logs gets
+        too slow to answer. recent_logs() reads LASTLOG.TXT and opens the newest logs by name instead (the
+        open reply carries the size). No List request is sent, gaps in the numbering are skipped, and a
+        card without LASTLOG.TXT falls back to list_dir."""
+        import importlib.util as _ilu
+        import struct as _st
+        root = os.path.dirname(os.path.abspath(__file__))
+        spec = _ilu.spec_from_file_location("cube_sd_t58", os.path.join(root, "modules", "log_viewer", "cube_sd.py"))
+        sd = _ilu.module_from_spec(spec)
+        spec.loader.exec_module(sd)
+
+        class Cube(object):
+            def __init__(self, files):
+                self.files, self.q, self.ops = files, [], []
+            def _reply(self, seq, req, op, data=b"", session=0, offset=0):
+                h = _st.pack(sd.HDR_FMT, (seq + 1) & 0xFFFF, session, op, len(data), req, 0, 0, offset)
+                self.q.append(h + data + b"\0" * (251 - len(h) - len(data)))
+            def send(self, raw):
+                seq, session, op, size, _req, _b, _p, offset = _st.unpack(sd.HDR_FMT, raw[:sd.HDR_LEN])
+                data = raw[sd.HDR_LEN:sd.HDR_LEN + size]
+                self.ops.append(op)
+                if op == sd.OP_OPEN_RO:
+                    content = self.files.get(data.decode("ascii"))
+                    if content is None:
+                        self._reply(seq, op, sd.OP_NAK, b"\x0a")
+                    else:
+                        size_of = len(content) if isinstance(content, bytes) else content
+                        self._reply(seq, op, sd.OP_ACK, _st.pack("<I", size_of), session=1)
+                elif op == sd.OP_READ:
+                    content = self.files.get("/APM/LOGS/LASTLOG.TXT", b"")
+                    if offset >= len(content):
+                        self._reply(seq, op, sd.OP_NAK, b"\x06")
+                    else:
+                        self._reply(seq, op, sd.OP_ACK, content[offset:offset + size], offset=offset)
+                elif op == sd.OP_LIST:
+                    self._reply(seq, op, sd.OP_NAK, b"\x06")
+            def recv(self, t):
+                return self.q.pop(0) if self.q else None
+            def summary(self):
+                return ""
+
+        d = "/APM/LOGS"
+        files = {d + "/LASTLOG.TXT": b"7\n", d + "/00000007.BIN": 7000, d + "/00000005.BIN": 5000,
+                 d + "/00000004.BIN": 4000, d + "/00000002.BIN": 2000, d + "/00000001.BIN": 1000}
+        cube = Cube(files)
+        got = sd.FtpClient(cube, reply_timeout=0.05, retries=2).recent_logs(d, count=4)
+        self.assertEqual(got, [("00000007.BIN", 7000), ("00000005.BIN", 5000), ("00000004.BIN", 4000),
+                               ("00000002.BIN", 2000)])             # newest first; 6 and 3 are gaps
+        self.assertNotIn(sd.OP_LIST, cube.ops)
+        cube = Cube({d + "/00000001.BIN": 10})                      # no LASTLOG.TXT
+        with self.assertRaises(sd.CubeSDError):
+            sd.FtpClient(cube, reply_timeout=0.05, retries=2).recent_logs(d)
+
+
+    def test_59_cube_sd_burst_keeps_packets_after_a_drop(self):
+        """A dropped packet in a burst costs one ReadFile for that hole, not a restart of the burst (the
+        old client threw away the rest of a burst, up to 500 packets, after every loss)."""
+        import importlib.util as _ilu
+        import struct as _st
+        root = os.path.dirname(os.path.abspath(__file__))
+        spec = _ilu.spec_from_file_location("cube_sd_t59", os.path.join(root, "modules", "log_viewer", "cube_sd.py"))
+        sd = _ilu.module_from_spec(spec)
+        spec.loader.exec_module(sd)
+        blob = bytes(bytearray((i * 7 + i // 251) & 0xFF for i in range(239 * 300 + 100)))
+
+        class Cube(object):
+            def __init__(self, drop_every):
+                self.q, self.bursts, self.reads, self.drop_every = [], 0, 0, drop_every
+            def _reply(self, seq, req, op, data=b"", session=0, offset=0, burst=0):
+                h = _st.pack(sd.HDR_FMT, (seq + 1) & 0xFFFF, session, op, len(data), req, burst, 0, offset)
+                self.q.append(h + data + b"\0" * (251 - len(h) - len(data)))
+            def send(self, raw):
+                seq, session, op, size, _r, _b, _p, offset = _st.unpack(sd.HDR_FMT, raw[:sd.HDR_LEN])
+                if op == sd.OP_OPEN_RO:
+                    self._reply(seq, op, sd.OP_ACK, _st.pack("<I", len(blob)), session=1)
+                elif op == sd.OP_READ:
+                    self.reads += 1
+                    self._reply(seq, op, sd.OP_ACK, blob[offset:offset + size], session=session, offset=offset)
+                elif op == sd.OP_BURST:
+                    self.bursts += 1
+                    pos, n = offset, 0
+                    while pos < len(blob) and n < 500:
+                        piece = blob[pos:pos + size]
+                        n += 1
+                        last = n == 500 or pos + len(piece) >= len(blob)
+                        if not (self.drop_every and n % self.drop_every == 0 and not last):
+                            self._reply(seq, op, sd.OP_ACK, piece, session=session, offset=pos, burst=1 if last else 0)
+                        pos += len(piece)
+            def recv(self, t):
+                return self.q.pop(0) if self.q else None
+
+        for drop_every in (0, 7, 3):
+            cube = Cube(drop_every)
+            out = []
+            total = sd.FtpClient(cube, reply_timeout=0.05, retries=2).download(
+                "/APM/LOGS/00000109.BIN", out.append, lambda got, tot: None)
+            self.assertEqual(b"".join(out), blob)
+            self.assertEqual(total, len(blob))
+            self.assertLessEqual(cube.bursts, 2)                          # one burst covers this file
+            self.assertLessEqual(cube.reads, 300 // max(drop_every, 1) + 2)  # one ReadFile per hole
 
 
 def _struct_float(b4):

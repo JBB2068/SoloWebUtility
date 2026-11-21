@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* Tests for the flight log viewer's .BIN parser (static/log-viewer/dataflash-worker.js).
+/* Tests for the flight log viewer's .BIN parser (static/log-viewer/dataflash.js) and the .tlog reader (tlog.js).
  * Builds a synthetic ArduCopter DataFlash log (about 3 minutes: arming, flight modes, GPS track,
  * battery drain, a warning, a battery failsafe error, parameters, a few bytes of garbage) and
  * checks the summary and the chart series.
@@ -10,7 +10,8 @@
 const path = require('path');
 const fs = require('fs');
 const assert = require('assert');
-const W = require(path.join(__dirname, '..', 'static', 'log-viewer', 'dataflash-worker.js'));
+const W = require(path.join(__dirname, '..', 'static', 'log-viewer', 'dataflash.js'));
+const T = require(path.join(__dirname, '..', 'static', 'log-viewer', 'tlog.js'));
 
 const SIZES = { b: 1, B: 1, M: 1, h: 2, H: 2, c: 2, C: 2, i: 4, I: 4, e: 4, E: 4, L: 4, f: 4, n: 4, N: 16, Z: 64, Q: 8, q: 8, d: 8 };
 const TYPES = {
@@ -105,6 +106,61 @@ function makeLog() {
     return Buffer.concat(parts);
 }
 
+
+/* ---- .tlog: 8-byte big-endian microsecond timestamp + MAVLink v1 frame ---- */
+function frame(tsUs, sys, comp, msgid, payload) {
+    const b = Buffer.alloc(8 + 6 + payload.length + 2);
+    b.writeUInt32BE(Math.floor(tsUs / 4294967296), 0); b.writeUInt32BE(tsUs % 4294967296, 4);
+    b[8] = 0xFE; b[9] = payload.length; b[10] = 0; b[11] = sys; b[12] = comp; b[13] = msgid;
+    payload.copy(b, 14);
+    return b;
+}
+function makeTlog() {
+    const parts = [], T0 = 1762527600 * 1e6;           // 2025-11-07
+    const hb = (t, armed) => { const p = Buffer.alloc(9); p[0] = 6; p.writeUInt32LE(5, 0); p[6] = armed ? 0x80 : 0; return frame(T0 + t * 1e6, 1, 1, 0, p); };
+    for (let t = 0; t <= 120; t += 1) {
+        const armed = (t >= 20 && t < 80) || (t >= 100 && t < 101);   // one flight, one 1 s blip
+        parts.push(hb(t, armed));
+        const att = Buffer.alloc(28); att.writeFloatLE(t / 100, 4);
+        parts.push(frame(T0 + t * 1e6 + 1000, 1, 1, 30, att));
+        const hud = Buffer.alloc(20); hud.writeFloatLE(t < 20 ? 0 : 5, 4); hud.writeFloatLE(t < 20 ? 0 : 12, 8);
+        parts.push(frame(T0 + t * 1e6 + 2000, 1, 1, 74, hud));
+        const gcs = Buffer.alloc(9); parts.push(frame(T0 + t * 1e6 + 3000, 255, 190, 0, gcs));   // other sender
+    }
+    const st = Buffer.alloc(51); st[0] = 4; st.write('Battery 1 is low', 1, 'latin1');
+    parts.push(frame(T0 + 50 * 1e6, 1, 1, 253, st));
+    const pv = Buffer.alloc(25); pv.writeFloatLE(7, 0); pv.write('FS_BATT_ENABLE', 8, 'latin1');
+    parts.push(frame(T0 + 5 * 1e6, 1, 1, 22, pv));
+    parts.push(Buffer.from([1, 2, 3, 4, 5]));                       // junk between records
+    return Buffer.concat(parts);
+}
+function summarizeChunks(buf, size) {
+    T.begin();
+    for (let o = 0; o < buf.length; o += size) T.feed(new Uint8Array(buf.subarray(o, Math.min(buf.length, o + size))));
+    return T.finish();
+}
+function runTlog() {
+    const buf = makeTlog();
+    assert.ok(T.looksLike(new Uint8Array(buf.subarray(0, 4096))), 'tlog is recognised');
+    assert.ok(!T.looksLike(new Uint8Array(4096).fill(7)), 'junk is not a tlog');
+    const a = summarizeChunks(buf, 1 << 20), b = summarizeChunks(buf, 97), c = summarizeChunks(buf, 1000);
+    const key = s => JSON.stringify([s.flights, s.armed, s.messages.length, s.params, s.frames, s.duration, s.date]);
+    assert.strictEqual(key(a), key(b), 'result does not depend on the chunk size');
+    assert.strictEqual(key(a), key(c));
+    assert.strictEqual(a.kind, 'tlog');
+    assert.strictEqual(a.flights.length, 1, 'the 1 s arm blip is not a flight');
+    assert.ok(Math.abs(a.flights[0][0] - 20) < 0.1 && Math.abs(a.flights[0][1] - 80) < 0.1, 'flight ' + a.flights[0]);
+    assert.ok(a.messages.some(m => /Battery 1 is low/.test(m.text)));
+    assert.strictEqual(a.params.filter(p => p.name === 'FS_BATT_ENABLE')[0].value, 7);
+    const ser = T.series('ATTITUDE', ['Roll'], 400);
+    assert.strictEqual(ser.length, 1);
+    assert.ok(ser[0].t.length > 100, 'attitude points ' + ser[0].t.length);
+    assert.throws(() => T.series('NOPE', ['X'], 10), /No NOPE messages/);
+    // the second parse() path (whole buffer) agrees
+    const whole = T.parse(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.length));
+    assert.strictEqual(key(whole), key(a));
+}
+
 function run() {
     const b = makeLog();
     const out = process.argv.indexOf('--write');
@@ -157,6 +213,7 @@ function run() {
     const junk = new Uint8Array(4096).fill(7).buffer;
     const jl = W.index(junk);
     assert.strictEqual(Object.keys(jl.byName).length, 0);
+    runTlog();
     console.log('LOGVIEWER OK');
 }
 

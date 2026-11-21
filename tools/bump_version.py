@@ -31,8 +31,10 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Files that carry the current version (paths relative to ROOT; {v} = the version)
 VERSION_FILES = [
     "static/index.html", "templates/index.html",
-    "static/manual.html", "static/solo_drone_manual.html",
-    "docs/index.html", "docs/manual.html", "docs/solo_drone_manual.html",
+    "static/manual.html",
+    "docs/index.html", "docs/manual.html",
+    # solo_drone_manual.html is NOT listed: its "1.2.x" are section numbers of the drone manual
+    # (1.2.10 Smart Battery ...), not the utility version, and a bump used to overwrite them.
     "deploy_to_drone.py", "install_to_solo.py", "version_info.txt", "README.md",
     "release/Solo Web Utility v{v}.spec", "release/version_info_{v}.txt",
     "release/build_exe.bat", "release/build_apk.bat", "release/build_mac.bat",
