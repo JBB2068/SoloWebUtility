@@ -1,17 +1,18 @@
 #!/bin/sh
 # golden_write.sh -- update the factory reset (recovery, GOLDEN) partition of a 3DR Solo or Solo Controller.
 # Runs ON the device (Open Solo, BusyBox/bash, POSIX sh only). Started by gimbal-style runner golden_update.py:
-#   sh golden_write.sh status     what GOLDEN holds (files + MD5, versions, free space, backup, unfinished run)
+#   sh golden_write.sh status     what GOLDEN holds (files + MD5, versions, free space, unfinished run)
 #   sh golden_write.sh write      copy the boot files of the RUNNING system (/mnt/boot) onto GOLDEN
-#   sh golden_write.sh restore    put the backed-up GOLDEN files back
 #
 # Unlike Open Solo's makeGolden.sh / sololink_config --make-golden (mkfs.vfat GOLDEN, then cp, no checks):
 #   * GOLDEN is never reformatted; files that are not boot files (e.g. the Wi-Fi region file .reg) are kept
-#   * the current GOLDEN files are backed up to /log/golden_backup first (MD5-checked)
-#   * the new files are staged in /log and MD5-checked before GOLDEN is touched
+#   * there is no backup and no staging copy: the files are read from the running system (/mnt/boot), whose
+#     MD5s are taken first, and written straight to GOLDEN
 #   * every file goes to GOLDEN as <name>.new, is synced and MD5-checked, then renamed into place; only when
-#     GOLDEN has no room for a second copy is the old file deleted first (the only unprotected moment)
-#   * a marker file in /log records an unfinished run, so it can be retried or the backup restored
+#     GOLDEN has no room for a second copy is the old file deleted first (the only unprotected moment; an
+#     interrupted run is simply run again from the running system)
+#   * a marker file in /log records an unfinished run, so it can be run again
+#   * old working files left by earlier versions (/log/golden_backup, /log/golden_stage) are removed first
 #   * everything is re-checked from a read-only mount at the end
 #   * no factory reset, no reboot, nothing else on the device is changed
 # Output: progress lines "[GOLDEN] ...", then "[GOLDEN_DONE] <action>" or "[GOLDEN_FAILED] <reason>".
@@ -27,8 +28,9 @@ LOG_DIR="${LOG_DIR:-/log}"
 SOLOLINK_CONFIG="${SOLOLINK_CONFIG:-sololink_config}"
 MNT="${GOLDEN_MNT:-/tmp/swu_golden}"
 SQMNT="${MNT}_sq"
-BACKUP="$LOG_DIR/golden_backup"
-STAGE="$LOG_DIR/golden_stage"
+OLD_BACKUP="$LOG_DIR/golden_backup"       # left by earlier versions of this tool: deleted, never created
+OLD_STAGE="$LOG_DIR/golden_stage"
+SUMS="$LOG_DIR/golden_update.sums"
 MARK="$LOG_DIR/golden_update.marker"
 MARGIN_KB=512
 
@@ -51,7 +53,7 @@ unmount_all() {
 fail() {
     echo "[GOLDEN_FAILED] $*"
     unmount_all
-    rm -rf "$STAGE" "$BACKUP.new" 2>/dev/null
+    rm -f "$SUMS" 2>/dev/null
     exit 1
 }
 
@@ -148,7 +150,6 @@ squashfs_versions() {   # squashfs_versions <file>: prints "os=<VERSION line 1> 
 do_status() {
     say "image $(running_image)"
     [ -f "$MARK" ] && say "marker $(cat "$MARK")"
-    [ -f "$BACKUP/MD5SUMS" ] && say "backup $(wc -l < "$BACKUP/MD5SUMS" | awk '{print $1}') files"
     for f in "$BOOT_DIR"/*; do
         [ -f "$f" ] || continue
         n=$(basename "$f")
@@ -198,9 +199,9 @@ put_file() {   # put_file <source path> <name> <md5>
     say "ok $name $want"
 }
 
-# write_set <dir with the files + MD5SUMS> <label>: puts every file of <dir>/MD5SUMS on GOLDEN
+# write_set <dir with the files> <list of "md5  name" lines>: puts every file of the list on GOLDEN
 write_set() {
-    dir="$1"; SET="$dir/MD5SUMS"
+    dir="$1"; SET="$2"
     [ -s "$SET" ] || fail "nothing to write ($SET missing)"
     mount_golden rw
     # capacity: the new set plus every file that stays must fit
@@ -245,21 +246,6 @@ write_set() {
     rm -f "$MARK"; sync
 }
 
-# copy_checked <src> <dst dir>: copy one file and check its MD5 against the source
-copy_checked() {
-    want=$(md5of "$1")
-    cp "$1" "$2/" || fail "copying $(basename "$1") to $2 failed"
-    sync
-    got=$(md5of "$2/$(basename "$1")")
-    [ "$got" = "$want" ] || fail "copy of $(basename "$1") in $2 has MD5 $got, expected $want"
-    echo "$want  $(basename "$1")"
-}
-
-need_log_space() {   # need_log_space <KB>
-    avail=$(df -k "$LOG_DIR" | tail -n 1 | awk '{print $4}')
-    [ "$avail" -ge "$1" ] || fail "not enough free space in $LOG_DIR (${avail}KB free, ${1}KB needed)"
-}
-
 do_write() {
     step 1 "Checks"
     [ "$(running_image)" = "latest" ] || fail "the device is not running its system partition (sololink_config --get-image: $(running_image))"
@@ -275,63 +261,29 @@ do_write() {
     [ -f "$BOOT_DIR/u-boot.imx" ] || fail "no u-boot.imx in $BOOT_DIR"
     say "running system: $n boot files, ${bootkb}KB"
 
-    step 2 "Backing up the factory reset partition"
-    if [ -f "$MARK" ] && [ -f "$BACKUP/MD5SUMS" ]; then
-        say "an earlier run did not finish ($(cat "$MARK")): keeping the existing backup"
-    else
-        mount_golden ro
-        usedkb=$(golden_used_kb)
-        need_log_space $(( usedkb + bootkb + 4096 ))
-        rm -rf "$BACKUP.new"; mkdir -p "$BACKUP.new" || fail "could not create $BACKUP.new"
-        for n in $(golden_files); do
-            say "backing up $n"
-            copy_checked "$MNT/$n" "$BACKUP.new" >> "$BACKUP.new/MD5SUMS"
-        done
-        umount_golden
-        rm -rf "$BACKUP"; mv "$BACKUP.new" "$BACKUP" || fail "could not keep the backup"
-        sync
-        say "backup in $BACKUP ($(wc -l < "$BACKUP/MD5SUMS" | awk '{print $1}') files)"
-    fi
+    step 2 "Freeing working space"
+    rm -rf "$OLD_BACKUP" "$OLD_STAGE" "$SUMS"
+    sync
 
-    step 3 "Staging the new files"
-    need_log_space $(( bootkb + 2048 ))
-    rm -rf "$STAGE"; mkdir -p "$STAGE" || fail "could not create $STAGE"
+    step 3 "Reading the running system"
+    : > "$SUMS"
     for f in "$BOOT_DIR"/*; do
         [ -f "$f" ] || continue
         is_boot_file "$(basename "$f")" || continue
-        say "staging $(basename "$f")"
-        copy_checked "$f" "$STAGE" >> "$STAGE/MD5SUMS"
+        say "reading $(basename "$f")"
+        echo "$(md5of "$f")  $(basename "$f")" >> "$SUMS"
     done
-    # the running files must still match what was staged
-    while read sum name; do
-        [ "$(md5of "$BOOT_DIR/$name")" = "$sum" ] || fail "$BOOT_DIR/$name changed while staging"
-    done < "$STAGE/MD5SUMS"
 
     step 4 "Writing the factory reset partition"
-    write_set "$STAGE"
-    rm -rf "$STAGE"
+    write_set "$BOOT_DIR" "$SUMS"
+    rm -f "$SUMS"
     step 5 "Checked"
     echo "[GOLDEN_DONE] write"
-}
-
-do_restore() {
-    step 1 "Checks"
-    [ -f "$BACKUP/MD5SUMS" ] || fail "there is no backup in $BACKUP"
-    while read sum name; do
-        [ -f "$BACKUP/$name" ] || fail "the backup is incomplete ($name missing)"
-        [ "$(md5of "$BACKUP/$name")" = "$sum" ] || fail "the backup of $name is damaged"
-    done < "$BACKUP/MD5SUMS"
-    say "backup checked ($(wc -l < "$BACKUP/MD5SUMS" | awk '{print $1}') files)"
-    step 4 "Restoring the factory reset partition from the backup"
-    write_set "$BACKUP"
-    step 5 "Checked"
-    echo "[GOLDEN_DONE] restore"
 }
 
 case "$ACTION" in
     status) do_status ;;
     write) do_write ;;
-    restore) do_restore ;;
-    *) echo "[GOLDEN_FAILED] usage: golden_write.sh status|write|restore"; exit 2 ;;
+    *) echo "[GOLDEN_FAILED] usage: golden_write.sh status|write"; exit 2 ;;
 esac
 exit 0

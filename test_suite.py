@@ -2688,10 +2688,11 @@ class TestSoloWebUtility(unittest.TestCase):
             _sh.rmtree(tmp, ignore_errors=True)
 
     def test_37_factory_reset_partition_tool(self):
-        """Update Factory Reset Partition (bin/golden_update): golden_write.sh backs GOLDEN up, stages and MD5-checks
-        the running boot files, never reformats GOLDEN (keeps .reg), writes each file as .new then renames, deletes
-        the old squashfs first only when there is no room, marks and resumes an unfinished run, restores the backup,
-        and refuses when the files do not fit or the device is not running its system partition. The runner reports
+        """Update Factory Reset Partition (bin/golden_update): golden_write.sh takes the MD5 of the running boot
+        files (no backup, no staging copy), never reformats GOLDEN (keeps .reg), writes each file as .new then
+        renames, deletes the old squashfs first only when there is no room, marks and re-runs an unfinished run,
+        removes the old backup/stage folders of earlier versions, and refuses when the files do not fit or the
+        device is not running its system partition. The runner reports
         what GOLDEN holds; the web server puts it behind login and interlocks."""
         import hashlib
         import re
@@ -2737,19 +2738,22 @@ class TestSoloWebUtility(unittest.TestCase):
                     return dict((n, hashlib.md5(open(os.path.join(d, n), "rb").read()).hexdigest())
                                 for n in os.listdir(d) if os.path.isfile(os.path.join(d, n)))
 
+                os.makedirs(os.path.join(log, "golden_backup"))             # left by an earlier version
+                with open(os.path.join(log, "golden_backup", "x"), "w") as f:
+                    f.write("x")
                 out = run("write")
                 self.assertIn("[GOLDEN_DONE] write", out, out)
+                self.assertFalse(os.path.exists(os.path.join(log, "golden_backup")))   # removed, not made
+                self.assertNotIn("backing up", out)
                 self.assertIn("removing the old one first", out)          # the only unprotected moment
                 g = md5s(gold)
                 for n, m in md5s(boot).items():
                     self.assertEqual(g[n], m, n)
                 self.assertEqual(g[".reg"], old[".reg"])                   # not a boot file: kept
                 self.assertFalse([n for n in g if n.endswith(".new")])
-                bk = md5s(os.path.join(log, "golden_backup"))
-                for n, m in old.items():
-                    self.assertEqual(bk[n], m, n)
                 self.assertFalse(os.path.exists(os.path.join(log, "golden_update.marker")))
                 self.assertFalse(os.path.exists(os.path.join(log, "golden_stage")))
+                self.assertFalse(os.path.exists(os.path.join(log, "golden_update.sums")))
                 # status
                 sys.path.insert(0, gdir)
                 try:
@@ -2758,8 +2762,7 @@ class TestSoloWebUtility(unittest.TestCase):
                     sys.path.remove(gdir)
                 st = gu.parse_status(run("status"))
                 self.assertTrue(st["ok"] and st["same_as_running"])
-                self.assertEqual(st["backup_files"], 5)
-                # an interrupted run (marker, squashfs gone): status says so; running again keeps the first backup
+                # an interrupted run (marker, squashfs gone): status says so; running again finishes it
                 with open(os.path.join(log, "golden_update.marker"), "w") as f:
                     f.write("write x\n")
                 os.remove(os.path.join(gold, "3dr-solo-imx6solo-3dr-1080p.squashfs"))
@@ -2767,17 +2770,21 @@ class TestSoloWebUtility(unittest.TestCase):
                 self.assertTrue(st["marker"])
                 self.assertIn("Unfinished", st["summary"])
                 out = run("write")
-                self.assertIn("keeping the existing backup", out)
                 self.assertIn("[GOLDEN_DONE] write", out)
-                self.assertEqual(md5s(os.path.join(log, "golden_backup")), bk)
-                # restore puts the old files back
-                out = run("restore")
-                self.assertIn("[GOLDEN_DONE] restore", out, out)
-                self.assertEqual(md5s(gold), old)
+                self.assertFalse(os.path.exists(os.path.join(log, "golden_update.marker")))
+                g = md5s(gold)
+                for n, m in md5s(boot).items():
+                    self.assertEqual(g[n], m, n)
+                # there is no restore any more
+                self.assertIn("[GOLDEN_FAILED] usage", run("restore"))
                 # does not fit: refused before GOLDEN is touched
+                before = md5s(gold)
+                os.remove(os.path.join(gold, "uImage"))
+                os.remove(os.path.join(gold, "3dr-solo-imx6solo-3dr-1080p.squashfs"))
+                before = md5s(gold)
                 out = run("write", GOLDEN_TEST_TOTAL_KB="2000")
                 self.assertIn("do not fit", out)
-                self.assertEqual(md5s(gold), old)
+                self.assertEqual(md5s(gold), before)
                 # not running the system partition
                 fake = os.path.join(tmp, "slc")
                 with open(fake, "w") as f:
@@ -2795,7 +2802,7 @@ class TestSoloWebUtility(unittest.TestCase):
             import golden_update as gu
         finally:
             sys.path.remove(gdir)
-        out = "\n".join(["[GOLDEN] image latest", "[GOLDEN] backup 5 files",
+        out = "\n".join(["[GOLDEN] image latest",
                          "[GOLDEN] boot uImage 10 aa", "[GOLDEN] boot x.squashfs 20 bb",
                          "[GOLDEN] boot_versions os=4.0.0 swu=1.2.4",
                          "[GOLDEN] space total=89918 used=75210 avail=14708",
@@ -2859,7 +2866,7 @@ class TestSoloWebUtility(unittest.TestCase):
         self.assertNotIn("battery", golden_post)                       # no battery limit (user's choice)
         for page in ("static/index.html", "templates/index.html"):
             html = open(os.path.join(root, page), encoding="utf-8").read()
-            for i in ("goldenCard", "btnGoldenSoloWrite", "btnGoldenControllerWrite", "btnGoldenSoloRestore",
+            for i in ("goldenCard", "btnGoldenSoloWrite", "btnGoldenControllerWrite",
                       "btnGoldenBothWrite", "btnGoldenBothCheck",
                       "btnGoldenControllerCheck", "goldenTerminal"):
                 self.assertIn('id="%s"' % i, html)
@@ -5325,6 +5332,151 @@ class TestSoloWebUtility(unittest.TestCase):
             self.assertEqual(total, len(blob))
             self.assertLessEqual(cube.bursts, 2)                          # one burst covers this file
             self.assertLessEqual(cube.reads, 300 // max(drop_every, 1) + 2)  # one ReadFile per hole
+
+    def test_60_cube_sd_queues_copies_and_estimates_the_time_left(self):
+        """Copies can be lined up while one runs; they run one after the other on one connection, a cancel or
+        an error drops the queue, and the estimate comes from the average speed of the run."""
+        import importlib.util as _ilu
+        import threading as _th
+        root = os.path.dirname(os.path.abspath(__file__))
+        spec = _ilu.spec_from_file_location("cube_sd_t60", os.path.join(root, "modules", "log_viewer", "cube_sd.py"))
+        sd = _ilu.module_from_spec(spec)
+        spec.loader.exec_module(sd)
+        sizes = {7: 5000, 8: 3000, 9: 1000}
+        listing = [{"n": n, "name": "%08d.BIN" % n, "size": sizes[n]} for n in (9, 8, 7)]
+
+        class Stub(object):
+            gate = _th.Event()
+            fail_first = False
+            connects = []
+            def __init__(self, transport, check=None, **kw):
+                self.check = check
+            def reset(self):
+                pass
+            def describe(self):
+                return ""
+            def download(self, path, write, progress):
+                n = int(path.split("/")[-1].split(".")[0])
+                started.append(n)
+                while not Stub.gate.is_set():
+                    self.check()
+                    time.sleep(0.01)
+                if Stub.fail_first and n == 7:
+                    raise sd.CubeSDError("The Cube did not answer.")
+                write(b"x" * sizes[n])
+                progress(sizes[n], sizes[n])
+                return sizes[n]
+
+        class Link(object):
+            closed = 0
+            def armed(self):
+                return False
+            def close(self):
+                Link.closed += 1
+
+        started = []
+        real = sd.FtpClient
+        sd.FtpClient = Stub
+        tmp = tempfile.mkdtemp()
+        try:
+            def make(sub):
+                mgr = sd.CubeSD(connect=lambda: Link(), dest=os.path.join(tmp, sub), free=lambda p: 10 ** 12)
+                mgr.listing = [dict(x) for x in listing]
+                return mgr
+
+            def wait_for(cond):
+                end = time.time() + 5
+                while time.time() < end and not cond():
+                    time.sleep(0.01)
+                self.assertTrue(cond())
+
+            # two queued behind the first: all three are copied, one connection
+            Stub.gate = _th.Event()
+            del started[:]
+            Link.closed = 0
+            mgr = make("a")
+            self.assertTrue(mgr.start_copy(7, lambda: False)[0])
+            wait_for(lambda: started == [7])
+            self.assertEqual(mgr.start_copy(8, lambda: False), (True, "Queued."))
+            self.assertEqual(mgr.start_copy(9, lambda: False), (True, "Queued."))
+            self.assertEqual(mgr.start_copy(8, lambda: False), (True, "Already queued."))
+            self.assertEqual(mgr.start_copy(7, lambda: False), (True, "Already queued."))
+            self.assertFalse(mgr.start_copy(99, lambda: False)[0])           # not in the list
+            self.assertFalse(mgr.start_copy(9, lambda: True)[0])             # armed
+            self.assertEqual(mgr.status()["queue"], [8, 9])
+            Stub.gate.set()
+            mgr.wait(10)
+            st = mgr.status()
+            self.assertEqual(st["job"]["state"], "done", st)
+            self.assertEqual(st["queue"], [])
+            self.assertEqual(started, [7, 8, 9])
+            self.assertEqual(st["job"]["message"], "3 logs copied to the Solo.")
+            self.assertEqual(Link.closed, 1)
+            for n in (7, 8, 9):
+                self.assertEqual(os.path.getsize(os.path.join(tmp, "a", "%d.BIN" % n)), sizes[n])
+
+            # cancelling drops the queue
+            Stub.gate = _th.Event()
+            del started[:]
+            mgr = make("b")
+            mgr.start_copy(7, lambda: False)
+            wait_for(lambda: started == [7])
+            mgr.start_copy(8, lambda: False)
+            mgr.cancel()
+            mgr.wait(10)
+            st = mgr.status()
+            self.assertEqual(st["job"]["state"], "cancelled", st)
+            self.assertEqual(st["queue"], [])
+            self.assertEqual(started, [7])
+            self.assertIn("1 log waiting", st["job"]["message"])
+
+            # an error drops the queue and says so
+            Stub.gate = _th.Event()
+            Stub.fail_first = True
+            del started[:]
+            mgr = make("c")
+            mgr.start_copy(7, lambda: False)
+            wait_for(lambda: started == [7])
+            mgr.start_copy(8, lambda: False)
+            mgr.start_copy(9, lambda: False)
+            Stub.gate.set()
+            mgr.wait(10)
+            st = mgr.status()
+            self.assertEqual(st["job"]["state"], "error", st)
+            self.assertIn("2 logs waiting", st["job"]["error"])
+            self.assertEqual(started, [7])
+            Stub.fail_first = False
+
+            # a new copy after the run is a new run (nothing left over)
+            Stub.gate.set()
+            mgr = make("d")
+            mgr.start_copy(9, lambda: False)
+            mgr.wait(10)
+            self.assertEqual(mgr.status()["job"]["message"], "Log 9 copied to the Solo.")
+
+            # the estimate: average speed since the run began
+            now = [100.0]
+            mgr = sd.CubeSD(connect=lambda: Link(), dest=tmp, clock=lambda: now[0])
+            mgr.listing = [dict(x) for x in listing]
+            job = {"state": "copying", "kind": "copy", "n": 7, "itemStart": 90.0, "got": 1000000, "total": 3000000}
+            est = mgr._estimate(job, [8], [{"n": 8, "size": 500000}], [0, 0.0])
+            self.assertEqual(est, {"eta": 20, "queueEta": 25})
+            now[0] = 92.0                                                   # too early to say
+            self.assertEqual(mgr._estimate(job, [], [], [0, 0.0]), {"eta": None, "queueEta": None})
+            now[0] = 100.0                                                  # finished items count towards the speed
+            est = mgr._estimate(dict(job, itemStart=99.0, got=0, total=1000000), [], [], [1000000, 9.0])
+            self.assertEqual(est["eta"], 10)
+        finally:
+            sd.FtpClient = real
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_61_flight_panel_queues_cube_copies(self):
+        """The Cube section shows Add to queue / Queued while a copy runs, and the time left."""
+        root = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(root, "static", "log-viewer", "flight-panel.js"), "r", encoding="utf-8") as f:
+            js = f.read()
+        for needle in ("Add to queue", "'Queued'", "more waiting", "st.queue", "job.eta", "left'"):
+            self.assertIn(needle, js)
 
 
 def _struct_float(b4):

@@ -56,6 +56,15 @@
         return m + ' min ' + (r < 10 ? '0' : '') + r + ' s';
     }
 
+    function eta(s) {                      // "about 4 min left" for the Cube copy; rounded so it does not flicker
+        if (s === null || s === undefined) return '';
+        if (s < 45) return 'less than a minute left';
+        var m = Math.round(s / 60);
+        if (m < 60) return 'about ' + m + ' min left';
+        var hh = Math.floor(m / 60), mm = m - hh * 60;
+        return 'about ' + hh + ' h ' + mm + ' min left';
+    }
+
     /* Fixed-height rows; only the rows in view are on the page, so 100,000 lines cost nothing. */
     function VirtualList(box, rowH, renderRow, guard) {
         var items = [], spacer = h('div', { cls: 'lv-vspacer' }), rows = h('div', { cls: 'lv-vrows' });
@@ -617,8 +626,12 @@
                 if (busy) {
                     var pct = job.total ? Math.min(100, Math.round(100 * job.got / job.total)) : 0;
                     cubeFill.style.width = (job.state === 'copying' ? pct : 5) + '%';
+                    var waiting = (st.queue || []).length;
                     cubeText.textContent = job.state === 'copying'
-                        ? 'Copying log ' + job.n + ' from the Cube: ' + mb(job.got || 0) + ' of ' + mb(job.total || 0) + ' (' + pct + '%)' + (job.speed ? ' · ' + Math.round(job.speed / 1024) + ' KB/s' : '') + '. Telemetry may be slower while this runs.' + (job.detail ? ' [' + job.detail + ']' : '')
+                        ? 'Copying log ' + job.n + ' from the Cube: ' + mb(job.got || 0) + ' of ' + mb(job.total || 0) + ' (' + pct + '%)' + (job.speed ? ' · ' + Math.round(job.speed / 1024) + ' KB/s' : '')
+                            + (job.eta !== null && job.eta !== undefined ? ' · ' + eta(job.eta) : '')
+                            + (waiting ? '. ' + waiting + ' more waiting' + (job.queueEta !== null && job.queueEta !== undefined ? ' (all done in ' + eta(job.queueEta).replace(' left', '') + ')' : '') : '')
+                            + '. Telemetry may be slower while this runs.' + (job.detail ? ' [' + job.detail + ']' : '')
                         : (job.message || 'Reading the Cube…');
                 } else if (job.state === 'error') {
                     cubeText.textContent = job.error || 'That did not work.';
@@ -634,8 +647,11 @@
                 if (state.armed) cubeText.textContent += ' (Disabled while the Solo is armed.)';
                 cubeList.textContent = '';
                 (st.list || []).forEach(function (it) {
-                    var b = h('button', { cls: 'lv-btn lv-btn-accent', type: 'button', text: it.copied ? 'Copied' : 'Copy' });
-                    b.disabled = it.copied || busy || state.armed;
+                    var queued = (st.queue || []).indexOf(it.n) >= 0, current = job.state === 'copying' && job.n === it.n;
+                    var canQueue = job.state === 'copying' && !it.copied && !queued && !current;
+                    var b = h('button', { cls: 'lv-btn lv-btn-accent', type: 'button',
+                        text: it.copied ? 'Copied' : current ? 'Copying…' : queued ? 'Queued' : (job.state === 'copying' ? 'Add to queue' : 'Copy') });
+                    b.disabled = it.copied || queued || current || state.armed || (busy && !canQueue);
                     b.addEventListener('click', guard(function () { cubeAction(function () { return api.cubeCopy(it.n); }); }));
                     cubeList.appendChild(h('div', { cls: 'lv-tr' }, [
                         h('span', { cls: 'lv-logname', text: 'Log ' + it.n }),

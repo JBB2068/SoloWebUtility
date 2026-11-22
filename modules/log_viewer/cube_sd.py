@@ -517,6 +517,8 @@ class CubeSD(object):
         self.listed_at = None
         self.cancel_flag = False
         self.thread = None
+        self.queue = []                      # log numbers waiting to be copied after the current one
+        self._rate = [0, 0.0]                # bytes and seconds of the items finished in this run (for the estimate)
 
     # -- what the page polls
     def status(self):
@@ -524,12 +526,35 @@ class CubeSD(object):
             job = dict(self.job)
             listing = None if self.listing is None else [dict(x) for x in self.listing]
             listed_at = self.listed_at
+            queue = list(self.queue)
+            rate = list(self._rate)
+        if job.get("state") == "copying":
+            job.update(self._estimate(job, queue, listing, rate))
         copies = dict((c["n"], c) for c in list_copies(self.dest))
         if listing is not None:
             for item in listing:
                 c = copies.get(item["n"])
                 item["copied"] = bool(c and c["size"] == item["size"])
-        return {"job": job, "list": listing, "listedAt": listed_at, "copies": len(copies), "dir": CUBE_LOG_DIR}
+        return {"job": job, "list": listing, "listedAt": listed_at, "copies": len(copies), "dir": CUBE_LOG_DIR,
+                "queue": queue}
+
+    def _estimate(self, job, queue, listing, rate):
+        """Seconds left for the log being copied (eta) and for it plus the queued ones (queueEta); None until
+        there is enough to go on. The speed is the average since this run began, so it does not jump about."""
+        out = {"eta": None, "queueEta": None}
+        started = job.get("itemStart")
+        if started is None:
+            return out
+        secs = rate[1] + max(self.clock() - started, 0.0)
+        got = rate[0] + (job.get("got") or 0)
+        if secs < 5 or got < 65536:
+            return out
+        speed = got / secs
+        left = max((job.get("total") or 0) - (job.get("got") or 0), 0)
+        out["eta"] = int(left / speed)
+        sizes = dict((x["n"], x["size"]) for x in (listing or []))
+        out["queueEta"] = int((left + sum(sizes.get(q, 0) for q in queue)) / speed)
+        return out
 
     def _set(self, **kw):
         with self.lock:
@@ -543,9 +568,11 @@ class CubeSD(object):
             return False, "Another Cube SD card job is running."
         with self.lock:
             self.cancel_flag = False
+            self.queue = []
+            self._rate = [0, 0.0]
             self.job = {"state": "listing" if kind == "list" else "copying", "kind": kind, "n": n, "got": 0,
                         "total": 0, "speed": 0, "detail": "", "message": "Connecting to the Cube…", "error": None,
-                        "startedAt": int(self.clock())}
+                        "startedAt": int(self.clock()), "copied": 0}
         self.thread = threading.Thread(target=self._run, args=(target, armed, n))
         self.thread.daemon = True
         self.thread.start()
@@ -555,11 +582,22 @@ class CubeSD(object):
         return self._start("list", self._do_list, armed)
 
     def start_copy(self, n, armed):
+        if armed():
+            return False, "Logs can be fetched from the Cube after landing, when it is disarmed."
+        with self.lock:
+            if self.job.get("state") == "copying" and self.job.get("kind") == "copy":
+                # a copy is running: line this one up behind it (it starts by itself, even with the page closed)
+                if self.listing is None or not [x for x in self.listing if x["n"] == n]:
+                    return False, "Check the Cube's SD card first, then pick a log."
+                if n == self.job.get("n") or n in self.queue:
+                    return True, "Already queued."
+                self.queue.append(n)
+                return True, "Queued."
         return self._start("copy", self._do_copy, armed, n)
 
     def cancel(self):
         with self.lock:
-            self.cancel_flag = True
+            self.cancel_flag = True               # the job thread drops the queue and says how many were left
 
     def wait(self, timeout=30):
         t = self.thread
@@ -581,18 +619,50 @@ class CubeSD(object):
             client = FtpClient(transport, check=check)
             check()
             client.reset()
-            target(client, n)
+            while True:
+                target(client, n)
+                if target != self._do_copy:
+                    break
+                n = self._next_in_queue()
+                if n is None:
+                    break
+                check()
         except Aborted as ex:
-            self._set(state="cancelled", message=str(ex), error=None, finishedAt=int(self.clock()))
+            self._set(state="cancelled", message=str(ex) + self._drop_queue(), error=None, finishedAt=int(self.clock()))
         except CubeSDError as ex:
-            self._set(state="error", error=str(ex), message=str(ex), finishedAt=int(self.clock()))
+            self._set(state="error", error=str(ex) + self._drop_queue(), message=str(ex), finishedAt=int(self.clock()))
         except Exception as ex:
-            self._set(state="error", error="Unexpected problem: %s" % ex, message="Unexpected problem: %s" % ex,
-                      finishedAt=int(self.clock()))
+            self._set(state="error", error="Unexpected problem: %s" % ex + self._drop_queue(),
+                      message="Unexpected problem: %s" % ex, finishedAt=int(self.clock()))
         finally:
             if transport is not None:
                 transport.close()
             self.job_lock.release()
+
+    def _drop_queue(self):
+        with self.lock:
+            left = len(self.queue)
+            self.queue = []
+        if not left:
+            return ""
+        return " The %d log%s waiting in the queue %s not copied." % (left, "" if left == 1 else "s", "was" if left == 1 else "were")
+
+    def _next_in_queue(self):
+        """After a copy: the next queued log number (the job is reset for it), or None, and the job is done."""
+        with self.lock:
+            if self.queue and not self.cancel_flag:
+                n = self.queue.pop(0)
+                copied = self.job.get("copied", 0)
+                self.job = {"state": "copying", "kind": "copy", "n": n, "got": 0, "total": 0, "speed": 0,
+                            "detail": "", "message": "Copying log %d from the Cube…" % n, "error": None,
+                            "startedAt": self.job.get("startedAt"), "copied": copied}
+                return n
+            copied = self.job.get("copied", 0)
+            msg = self.job.get("message", "")
+            if copied > 1:
+                msg = "%d logs copied to the Solo." % copied
+            self.job.update(state="done", speed=0, message=msg, finishedAt=int(self.clock()))
+            return None
 
     def _do_list(self, client, _n):
         self._set(message="Reading the Cube's log list…")
@@ -629,7 +699,8 @@ class CubeSD(object):
         final = os.path.join(self.dest, "%d.BIN" % n)
         part = final + ".part"
         stamp = [self.clock(), 0]
-        self._set(total=item["size"], got=0, message="Copying log %d from the Cube…" % n)
+        began = self.clock()
+        self._set(total=item["size"], got=0, itemStart=began, message="Copying log %d from the Cube…" % n)
 
         def progress(got, total):
             now = self.clock()
@@ -656,8 +727,11 @@ class CubeSD(object):
             raise CubeSDError("The copy is incomplete; it was discarded. Try again.")
         getattr(os, "replace", os.rename)(part, final)
         enforce_limits(self.dest, self.max_copies, self.max_bytes, keep=n)
-        self._set(state="done", got=item["size"], total=item["size"], speed=0, finishedAt=int(self.clock()),
-                  message="Log %d copied to the Solo." % n)
+        with self.lock:
+            self._rate[0] += item["size"]
+            self._rate[1] += max(self.clock() - began, 0.001)
+            self.job["copied"] = self.job.get("copied", 0) + 1
+        self._set(got=item["size"], total=item["size"], speed=0, message="Log %d copied to the Solo." % n)
 
 
 _MANAGER = []

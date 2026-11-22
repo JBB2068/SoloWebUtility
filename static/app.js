@@ -3645,17 +3645,15 @@ function setUploadProgressVisible(visible) {
                 var sp = info.space || {};
                 var when = info.checked ? new Date(info.checked * 1000).toLocaleString() : '';
                 detEl.textContent = 'Checked ' + when + (sp.total ? ' · ' + Math.round(sp.avail / 1024) + ' of ' +
-                    Math.round(sp.total / 1024) + ' MB free' : '') + (info.backup_files ? ' · backup kept' : '');
+                    Math.round(sp.total / 1024) + ' MB free' : '');
             }
             var bw = el('btnGolden' + k + 'Write');
             var bc = el('btnGolden' + k + 'Check');
-            var br = el('btnGolden' + k + 'Restore');
             if (bw) {
                 bw.disabled = running;
                 bw.textContent = (info && info.marker) ? 'Run update again' : ('Update ' + GOLDEN_NAMES[t]);
             }
             if (bc) { bc.disabled = running; }
-            if (br) { br.style.display = (info && info.backup_files) ? '' : 'none'; br.disabled = running; }
         });
         ['Check', 'Write'].forEach(function (a) {
             var b = el('btnGoldenBoth' + a);
@@ -3747,17 +3745,10 @@ function setUploadProgressVisible(visible) {
         if (bw) {
             bw.addEventListener('click', function () {
                 startGolden(t, 'write', 'Copy the system the ' + name + ' is running now onto its factory reset partition?\n\n' +
-                    '- The old recovery files are backed up first and can be put back.\n' +
+                    '- The old recovery files are replaced (no backup is kept).\n' +
                     '- Keep the ' + name + ' powered until it has finished (a few minutes).\n' +
                     '- Nothing is factory-reset or restarted.\n\n' +
                     'This tool has not yet been tested on a drone.');
-            });
-        }
-        var br = el('btnGolden' + k + 'Restore');
-        if (br) {
-            br.addEventListener('click', function () {
-                startGolden(t, 'restore', 'Put the backed-up recovery files back on the ' + name + "'s factory reset partition?\n\n" +
-                    'Keep the ' + name + ' powered until it has finished.');
             });
         }
     });

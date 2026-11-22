@@ -1,7 +1,7 @@
 {
-  "version": "1.2.11",
-  "iteration": 83,
-  "updated_at": 1794426313,
+  "version": "1.2.12",
+  "iteration": 84,
+  "updated_at": 1795368074,
   "changelog": [
     {
       "version": "1.0.67",
@@ -472,6 +472,12 @@
       "iteration": 83,
       "date": "2026-11-11 13:45:13",
       "description": "Flight log viewer: review the controller telemetry logs (.tlog) and the Cube SD card logs. Install a read-only viewer on the controller (http://10.1.1.1/) from the Parameters page, and copy logs from the Cube SD card to the Solo over MAVFTP (disarmed only)."
+    },
+    {
+      "version": "1.2.12",
+      "iteration": 84,
+      "date": "2026-11-21 00:00:30",
+      "description": "Flight Logs: copy several Cube logs one after another (queue), and a time-left estimate while copying. Update Factory Reset Partition: no backup and no staging copy any more (it writes straight from the running system), Restore backup removed."
     }
   ]
 }

@@ -7,9 +7,10 @@ A hardware factory reset boots GOLDEN (mmcblk0p1), erases the settings and /log,
 golden_to_system.sh then copies GOLDEN onto the system partition. So GOLDEN decides what a factory
 reset brings back. Open Solo 4's own "Update Factory Reset Partition" packages (Solex, SidePilot)
 and makeGolden.sh reformat GOLDEN and copy the running boot files onto it without checks. This tool
-does the same job with golden_write.sh, which never reformats GOLDEN, keeps a backup in /log,
-stages and MD5-checks every file, writes each one as <name>.new before renaming it into place,
-marks an unfinished run and re-checks everything at the end. No factory reset is triggered.
+does the same job with golden_write.sh, which never reformats GOLDEN, takes the MD5 of every file of
+the running system, writes each one as <name>.new before renaming it into place, marks an unfinished
+run and re-checks everything at the end. There is no backup (restoring the original 3DR system is a
+separate project). No factory reset is triggered.
 
   Solo:        golden_write.sh runs on the Solo itself.
   Controller:  the script is copied to the Controller over SSH and run there in the background;
@@ -58,8 +59,8 @@ REMOTE_RC = "/log/golden_update.rc"
 
 TARGETS = ("solo", "controller", "both")
 DEVICE_NAMES = {"solo": "Solo", "controller": "Controller"}
-ACTIONS = ("status", "write", "restore")
-WRITE_TIMEOUT = 1200            # write/restore: backup + staging + writing ~85 MB, with slow eMMC
+ACTIONS = ("status", "write")
+WRITE_TIMEOUT = 1200            # write: reading + writing ~85 MB, with slow eMMC
 STATUS_TIMEOUT = 240
 POLL_SECS = 3
 TESTED_ON_DRONE = False
@@ -267,7 +268,7 @@ def _is_boot_file(name):
 
 
 def parse_status(output):
-    info = {"image": None, "marker": None, "backup_files": 0, "boot": {}, "golden": {}, "space": {},
+    info = {"image": None, "marker": None, "boot": {}, "golden": {}, "space": {},
             "boot_os": None, "boot_swu": None, "golden_os": None, "golden_swu": None, "ok": False}
     for line in output.split("\n"):
         if line.startswith("[GOLDEN_DONE] status"):
@@ -281,11 +282,6 @@ def parse_status(output):
             info["image"] = val.strip()
         elif key == "marker":
             info["marker"] = val.strip()
-        elif key == "backup":
-            try:
-                info["backup_files"] = int(parts[0])
-            except (IndexError, ValueError):
-                pass
         elif key in ("boot", "golden") and len(parts) == 3:
             info[key][parts[0]] = {"size": int(parts[1]), "md5": parts[2]}
         elif key in ("boot_versions", "golden_versions"):
@@ -313,7 +309,7 @@ def describe(os_ver, swu_ver):
 
 def summarize(info):
     if info.get("marker"):
-        return "Unfinished update: run it again, or restore the backup"
+        return "Unfinished update: run it again"
     if not info.get("golden"):
         return "Empty or unreadable"
     if info.get("same_as_running"):
@@ -343,7 +339,7 @@ def _run_one(st, target, action, runner):
     who = DEVICE_NAMES[target]
     st.data["device"] = target
     st.log("%s: %s the factory reset partition (%s)" % (
-        who, {"status": "checking", "write": "updating", "restore": "restoring"}[action],
+        who, {"status": "checking", "write": "updating"}[action],
         time.strftime("%Y-%m-%d %H:%M:%S")))
     result, message = "failed", "stopped before finishing"
     try:
@@ -352,8 +348,7 @@ def _run_one(st, target, action, runner):
         failed = re.search(r"\[GOLDEN_FAILED\] ([^\n]*)", out)
         if "[GOLDEN_DONE] %s" % action in out:
             result = "done"
-            message = {"status": "checked", "write": "the factory reset partition now holds the running system",
-                       "restore": "the factory reset partition was put back from the backup"}[action]
+            message = {"status": "checked", "write": "the factory reset partition now holds the running system"}[action]
         else:
             message = failed.group(1) if failed else "no result"
         if action == "status":
@@ -436,7 +431,7 @@ def get_status():
         st["state"] = "failed"
         st["result"] = "interrupted"
         st["message"] = ("the run stopped unexpectedly (Solo restarted?). Check the factory reset partitions: "
-                         "an unfinished update can be run again or restored from the backup")
+                         "an unfinished update can be run again")
     st["running"] = st.get("state") == "running"
     st["partitions"] = _read_json(PATHS["info"]) or {}
     st["tested_on_drone"] = TESTED_ON_DRONE
@@ -459,11 +454,6 @@ def start(target, action):
         return False, "Unknown target or action."
     if running_pid() is not None:
         return False, "A factory reset partition job is already running."
-    if action == "restore":
-        for dev in (["solo", "controller"] if target == "both" else [target]):
-            info = (_read_json(PATHS["info"]) or {}).get(dev) or {}
-            if info and not info.get("backup_files"):
-                return False, "There is no backup to restore on the %s." % DEVICE_NAMES[dev]
     _write_json(PATHS["status"], {"state": "running", "target": target, "action": action, "step": 0, "steps": 5,
                                   "label": "Starting", "percent": 0, "message": "", "pid": None,
                                   "started": time.time(), "updated": time.time(), "lines": ["Starting..."]})
