@@ -289,7 +289,7 @@ def get_latest_apj(cube_type="solo", search_dirs=None, log_fn=None):
     for d in search_dirs:
         if not d or not os.path.isdir(d):
             continue
-        named = "arducopter_CubeGreen_4.7.2.apj" if is_green else "arducopter_CubeSolo_4.7.2.apj"
+        named = "arducopter_CubeGreen_4.7.3.apj" if is_green else "arducopter_CubeSolo_4.7.3.apj"
         p = os.path.join(d, named)
         if os.path.isfile(p) and os.path.getsize(p) > 100000:
             _log("[*] Fallback selected standard firmware: %s" % named, "INFO")
@@ -302,11 +302,12 @@ find_apj_file = get_latest_apj
 
 
 # ---------------------------------------------------------------------------
-# Firmware choices: latest (default), up to 3 previous versions, custom uploads
+# Firmware choices: the latest build (default) and custom uploads. Older builds are no longer offered:
+# ArduPilot's developers warned about the earlier 4.7.x releases, so 4.7.3 or newer is the only stock choice.
 # ---------------------------------------------------------------------------
-PREVIOUS_DIRNAME = "previous"   # written by arducopter_builder when a newer build is staged
+PREVIOUS_DIRNAME = "previous"   # no longer written; kept so old folders are recognised (and never offered)
 CUSTOM_DIRNAME = "custom"       # .apj files uploaded from the browser
-MAX_PREVIOUS_CHOICES = 3
+MAX_PREVIOUS_CHOICES = 0        # older versions are not offered for reverting
 MAX_CUSTOM_FILES = 5
 MAX_APJ_BYTES = 4 * 1024 * 1024
 
@@ -345,39 +346,14 @@ def _choice(kind, path, version=None, extra=None):
 def list_firmware_choices(cube_type="solo"):
     """What the flash page can offer for this Cube:
        latest   -> exactly what a normal install flashes (get_latest_apj)
-       previous -> up to 3 older versions of this Cube, newest first (for reverting)
+       previous -> always empty: older versions are not offered (the key stays for the page)
        custom   -> .apj files uploaded from the browser (any board; uploader.py checks the board)"""
     norm = normalize_cube_type(cube_type)
     is_green = (norm == "CubeGreen")
     latest_path = get_latest_apj(cube_type)
     latest_ver = parse_apj_version(os.path.basename(latest_path)) if latest_path else (0, 0, 0)
 
-    previous, seen_versions = [], set([latest_ver])
-    found = []
-    roots = _firmware_roots()
-    search = [os.path.join(r, PREVIOUS_DIRNAME) for r in roots] + roots
-    for d in search:
-        if not os.path.isdir(d):
-            continue
-        for fn in sorted(os.listdir(d)):
-            if not fn.lower().endswith(".apj") or fn.lower() in ("arducopter.apj", "arducopter_solo.apj", "arducopter_green.apj"):
-                continue
-            if not _apj_matches_cube(fn, is_green):
-                continue
-            fp = os.path.join(d, fn)
-            if not os.path.isfile(fp) or os.path.getsize(fp) <= 100000:
-                continue
-            ver = parse_apj_version(fn)
-            if ver < latest_ver:
-                found.append((ver, fp))
-    found.sort(key=lambda x: x[0], reverse=True)
-    for ver, fp in found:
-        if ver in seen_versions:
-            continue
-        seen_versions.add(ver)
-        previous.append(_choice("previous", fp, ver))
-        if len(previous) >= MAX_PREVIOUS_CHOICES:
-            break
+    previous = []
 
     custom = []
     cdir = _custom_dir()

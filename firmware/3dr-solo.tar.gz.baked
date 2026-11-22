@@ -1,7 +1,7 @@
-image 4502766a70f6a6df1a0ddc4389344385
+image fbf7f2c257c545217eedb88b885e7361
 ecbd052cf4cf20692fa8b09b3769b8ab  (recipe) tools/bake_squashfs.sh
 2baed77a8919d189bdc48c784f618dbf  app.py
-456e45a4a98a5d615a8e809228e2785d  arducopter_builder.py
+ecd398033d412a7d24881be00294e186  arducopter_builder.py
 ce84941928534e99bc32f866d3ded9c3  auth.py
 11663aeef440a45f46b2e50ecc2a5810  bin/apj_tool.py
 ec9fde42a18dff0f57c809263d4aeaf8  bin/cube_bootloader.py
@@ -25,12 +25,10 @@ f0e5f52ffc2e83218f5e2460ebfa48d0  compat.py
 05f7f0e5dfaff09161af85b769f34706  controller_mgr.py
 6b116278690caf341f8026d88e529b8e  firmware/Solo.param
 274980bd6536720389b80280164cd85e  firmware/SoloGreen.param
-82041446dee1e3a5d5351a689075b846  firmware/arducopter_CubeGreen_4.7.2.apj
-a34c0af87aded146acf6a867608b22ff  firmware/arducopter_CubeSolo_4.7.2.apj
-1873fa632b9e5fbc4e10f5fc7a88f322  firmware/previous/arducopter_CubeGreen_4.7.1.apj
-3da170d81845f20b7914787a75f2f80e  firmware/previous/arducopter_CubeSolo_4.7.1.apj
+43d7f94da6d7203c9c52497481792703  firmware/arducopter_CubeGreen_4.7.3.apj
+8331c212e00e14cba732b52b5cf61920  firmware/arducopter_CubeSolo_4.7.3.apj
 983faaec81bd094442d94ea19096fd98  firmware/solocustombuild.yaml
-dbb77403b2824b26166fa819e35ef5f1  flash_mgr.py
+e6d12ea9dbd434d880f428fff0d12630  flash_mgr.py
 a232e546eb38e1f8992c0e52c38f7c8d  modules/__init__.py
 e01e79ba02d94dd9a1aecef626ec21ce  modules/auth.py
 51c4382fd8aaf270b64438dd72c6656e  modules/calib_mgr.py
@@ -65,10 +63,10 @@ d7f76dd75c19ffd78619845a103d376a  static/3DR_Solo_User_Manual_Updated_2026.pdf
 8cce400c95b5762203e3a0283714bae3  static/BMSOne-User-Manual.pdf
 234ad01a624d0ef4adca3f1d014951a5  static/Solo_Battery_Mod_for_Dummies.pdf
 d885525923669a1bc521355fc44f248f  static/Solo_Web_Utility_Owners_Manual.pdf
-b1862ffccfe203a5b18dc4ba617b99d4  static/app.js
+6dd796bf86c107e35ae27be0601b240b  static/app.js
 4e1890ca0719bc1c982e6974a23ccfff  static/cockpit.css
 f80ca6a3b54e28380e6c844789e36c55  static/cockpit.js
-d2a4d13d7aa7b93a27ae46d132dd1b9b  static/index.html
+d45d85257f9e20fa720c900803d76d3b  static/index.html
 075c6c464b218fa88d56eb974bdd98e6  static/jmuxer.min.js
 1202946825a3d95924b77c5ae9e01b3b  static/landing_pad.html
 77b5e040b3d61b5fa237821fa306bf0b  static/log-viewer/api.js
@@ -79,7 +77,7 @@ a881728bfc21df921c9e5d73ebc0cda0  static/log-viewer/flight-panel.js
 4dac3400f6fb791bf765236bfe1b2677  static/log-viewer/log-viewer.js
 690300913e7c27db898a00ef89f0ded9  static/log-viewer/log-worker.js
 83ecb3b518d1ee91e6edb91372a814ee  static/log-viewer/tlog.js
-588a83b718fd61d92706868951ddb0f9  static/manual.html
+a6b158ca8afcc43c111e78b13d2f5c8c  static/manual.html
 9023bd57f2757cf82a06849c72bc9db1  static/padfinder.js
 7e104e1aed570193e5e18b677133dd3a  static/solo_drone_manual.html
 d022df64c87d6939a0203ab09a50b4ba  static/solo_icon.png
@@ -87,9 +85,9 @@ d4c5749deda789b47c7e72a46bfd0e61  static/solo_icon_512.png
 fa7c6f4b930e109381e41c10845f2c67  static/sololink_viewer.apk.bin
 e11b1295b9d40d3cd182992526d40a7a  static/spotfinder.js
 437a2bf0ac2f53db77069b8d6bea9372  static/style.css
-d2a4d13d7aa7b93a27ae46d132dd1b9b  templates/index.html
+31ad4c44fa78f2050c27d66f51c1368d  templates/index.html
 9ba0e69ed82438d5b621c2d6f7de2149  templates/updates.html
-256be22c225aa56a0bdb1b484a6941b9  version.json
+9b72edaeb1ea3d866f425a00d26f64d0  version.json
 ba65e63da86b93d1ed42e0132ae649d5  version_mgr.py
 213496a3823c54db7a5b656776f66c5a  webcore.py
 a85f2d4f485912b64751985af54d76df  wifi_mgr.py

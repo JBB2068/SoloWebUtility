@@ -512,9 +512,7 @@ function setUploadProgressVisible(visible) {
                 fwVersionSelect.value = keep || '';
                 if (fwVersionSelect.selectedIndex < 0) { fwVersionSelect.value = ''; }
                 if (fwVersionInfo) {
-                    var n = (d.previous || []).length;
-                    fwVersionInfo.textContent = (n ? n + ' previous version' + (n > 1 ? 's' : '') + ' kept for reverting. '
-                        : 'No previous versions saved yet (they are kept automatically when a newer build is downloaded). ')
+                    fwVersionInfo.textContent = 'Older ArduCopter versions are not offered. '
                         + 'You can also upload your own .apj file.';
                 }
             })
@@ -1094,8 +1092,8 @@ function setUploadProgressVisible(visible) {
                     return;
                 }
 
-                var localVer = data.local_version || '4.7.2';
-                var onlineVer = data.online_version || '4.7.2';
+                var localVer = data.local_version || '4.7.3';
+                var onlineVer = data.online_version || '4.7.3';
                 fwModalCurrentVer.textContent = 'ArduCopter ' + localVer;
                 fwModalOnlineVer.textContent = 'ArduCopter ' + onlineVer;
                 // The header shows what the Cube runs (from /api/status), not the stored files.

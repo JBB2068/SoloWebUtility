@@ -10,7 +10,7 @@ firmware/solocustombuild.yaml (a CustomBuild "Download config" file), validated
 against the live feature list of each board.
 Applies the corresponding Cube parameter defaults via apj_tool, stages each build
 into storage as arducopter_CubeSolo_<version>.apj and arducopter_CubeGreen_<version>.apj,
-replaces previous versioned files, and informs the user that an update is ready.
+deletes older versioned files (no older version is kept or offered), and informs the user that an update is ready.
 
 Compatible with Python 2.7 and Python 3.x standard library.
 """
@@ -589,7 +589,7 @@ def get_local_firmware_version():
     """
     Inspect the Firmware folder to determine the active/stored ArduCopter version.
     Checks custom_build_info.json and versioned filenames (arducoptercubesolo-<version>.apj).
-    Defaults to 4.7.2 if no newer version tag is found.
+    Defaults to 4.7.3 if no newer version tag is found.
     """
     candidates = []
 
@@ -615,7 +615,7 @@ def get_local_firmware_version():
         candidates.sort()
         return candidates[-1][1]
 
-    return "4.7.2"
+    return "4.7.3"
 
 
 # ---------------------------------------------------------------------------
@@ -859,8 +859,8 @@ def apply_param_defaults_to_apj(apj_path, param_file=None, cube_type="solo", log
         return False, str(e)
 
 
-PREVIOUS_DIRNAME = "previous"     # <firmware dir>/previous: older builds kept for reverting
-MAX_PREVIOUS_VERSIONS = 3
+PREVIOUS_DIRNAME = "previous"     # <firmware dir>/previous: no longer used; anything in it is deleted
+MAX_PREVIOUS_VERSIONS = 0         # older builds are not kept (ArduPilot warned about the earlier 4.7.x releases)
 
 
 def _apj_version_key(fn):
@@ -891,11 +891,10 @@ def prune_previous_firmware(board_id, keep=MAX_PREVIOUS_VERSIONS, firmware_dir=N
 
 def clean_old_firmware_files(board_id, new_version):
     """
-    Move previous versioned APJ files of this board into <firmware>/previous (kept for
-    reverting; the 3 newest per board are retained) and delete legacy unversioned
-    duplicates. Example: arducopter_CubeSolo_4.7.2.apj -> previous/ when 4.7.3 is staged.
-    flash_mgr.get_latest_apj() never scans previous/, so "latest" stays the new build.
-    Returns the names moved out of the firmware folder (archived or deleted).
+    Delete older versioned APJ files of this board (nothing is kept for reverting) and the
+    legacy unversioned duplicates, and empty <firmware>/previous left by earlier versions.
+    Example: arducopter_CubeSolo_4.7.2.apj is deleted when 4.7.3 is staged.
+    Returns the names deleted.
     """
     prefixes = ["arducopter_CubeGreen_", "arducoptercubegreen-solo-"] if board_id == "CubeGreen-solo" else ["arducopter_CubeSolo_", "arducoptercubesolo-"]
     kept_fn = ("arducopter_CubeGreen_%s.apj" if board_id == "CubeGreen-solo" else "arducopter_CubeSolo_%s.apj") % new_version
@@ -925,12 +924,7 @@ def clean_old_firmware_files(board_id, new_version):
             if any(fn.startswith(p) for p in prefixes):
                 old_path = os.path.join(d, fn)
                 try:
-                    if not os.path.isdir(prev_dir):
-                        os.makedirs(prev_dir)
-                    dst = os.path.join(prev_dir, fn)
-                    if os.path.exists(dst):
-                        os.remove(dst)
-                    os.rename(old_path, dst)
+                    os.remove(old_path)
                     removed.append(fn)
                 except Exception:
                     pass
@@ -1027,8 +1021,7 @@ def build_and_stage_cube(board_id, ver_info, progress_callback=None, log_fn=None
 
     removed = clean_old_firmware_files(board_id, version_name)
     if removed:
-        _log("[*] Archived previous version files for reverting (%s/%s, newest %d kept): %s" % (
-            FIRMWARE_DIR, PREVIOUS_DIRNAME, MAX_PREVIOUS_VERSIONS, ", ".join(removed)), "INFO")
+        _log("[*] Removed older firmware files (none are kept): %s" % ", ".join(removed), "INFO")
 
     return {
         "board": board_id,
@@ -1136,8 +1129,8 @@ class FirmwareUpdateEngine(object):
         self.progress = 0     # 0 to 100
         self.message = ""
         self.stage = ""
-        self.local_version = "4.7.2"
-        self.online_version = "4.7.2"
+        self.local_version = "4.7.3"
+        self.online_version = "4.7.3"
         self.update_available = False
         self.logs = []
         self._refresh_local_version()
@@ -1146,7 +1139,7 @@ class FirmwareUpdateEngine(object):
         try:
             self.local_version = get_local_firmware_version()
         except Exception:
-            self.local_version = "4.7.2"
+            self.local_version = "4.7.3"
 
     def log(self, msg, level="INFO"):
         ts = time.strftime("%H:%M:%S")

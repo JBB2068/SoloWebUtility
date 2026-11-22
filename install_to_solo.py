@@ -512,8 +512,8 @@ def main():
                 firmware_files.append(("firmware/%s" % fn, "%s/%s" % (LOG_FW_DIR, fn)))
     if not firmware_files:
         firmware_files = [
-            ("firmware/arducopter_CubeSolo_4.7.2.apj",  "%s/arducopter_CubeSolo_4.7.2.apj" % LOG_FW_DIR),
-            ("firmware/arducopter_CubeGreen_4.7.2.apj", "%s/arducopter_CubeGreen_4.7.2.apj" % LOG_FW_DIR),
+            ("firmware/arducopter_CubeSolo_4.7.3.apj",  "%s/arducopter_CubeSolo_4.7.3.apj" % LOG_FW_DIR),
+            ("firmware/arducopter_CubeGreen_4.7.3.apj", "%s/arducopter_CubeGreen_4.7.3.apj" % LOG_FW_DIR),
             ("firmware/3dr-solo.tar.gz",               "%s/3dr-solo.tar.gz" % LOG_FW_DIR),
             ("firmware/3dr-solo.tar.gz.md5",           "%s/3dr-solo.tar.gz.md5" % LOG_FW_DIR),
             ("firmware/3dr-controller.tar.gz",         "%s/3dr-controller.tar.gz" % LOG_FW_DIR),

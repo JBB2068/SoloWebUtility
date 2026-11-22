@@ -12,7 +12,7 @@ A concise, self-contained on-board web server and management portal for the **3D
 - **Cube Selector:** Stock Solo Cube (Black) or Green Cube.
 - **ArduCopter Version Control:** Revert to any of the last 3 ArduCopter builds or flash a custom `.apj` uploaded directly from the browser (older builds are archived to `firmware/previous` instead of deleted).
 - **Scope Selector:** Full Install (Cube + Copter i.MX6 + Controller i.MX6) or Cube Only. Cube-only installs no longer require the extended reboot countdown.
-- **Golden Image:** Ships ArduCopter 4.7.2 (4.7.1 preserved for instant rollback).
+- **Golden Image:** Ships ArduCopter 4.7.3 (older versions are not kept).
 - **Official 3DR sequence** (mirrors `postinstall.sh` from the firmware ZIPs):
   1. `pixhawk.py --load /firmware/arducopter.apj` — Flash Cube → auto-reboot Cube.
   2. `sololink_config --update-prepare sololink` + copy tarball to `/log/updates` + `touch UPDATE RESETSETTINGS` → Reboot Copter i.MX6.

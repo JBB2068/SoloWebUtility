@@ -358,16 +358,16 @@ ps | grep solo_web_app.py
         <!-- SECTION 3: FIRMWARE UPDATE -->
         <section id="section-3" class="doc-section">
             <h2 class="section-heading"><span>3.</span> Automated Firmware Update Engine</h2>
-            <p>The Web Utility ships with ArduCopter 4.7.2 for both the stock Black Cube and the Green Cube, with the Solo's parameter defaults built into the firmware. <strong>Check for Updates</strong> builds a newer stable ArduCopter on ArduPilot's custom build server when one is available, adds the Solo defaults, and keeps the older versions so you can go back. You can also upload your own <code>.apj</code> file.</p>
+            <p>The Web Utility ships with ArduCopter 4.7.3 for both the stock Black Cube and the Green Cube, with the Solo's parameter defaults built into the firmware. <strong>Check for Updates</strong> builds a newer stable ArduCopter on ArduPilot's custom build server when one is available, adds the Solo defaults, and keeps the older versions so you can go back. You can also upload your own <code>.apj</code> file.</p>
 
             <div class="card-grid">
                 <div class="feature-box">
                     <h4>⬛ Stock Solo Cube (Black)</h4>
-                    <p>Flashes <code>arducopter_CubeSolo_4.7.2.apj</code>, built for the original Stock Black Cube autopilot.</p>
+                    <p>Flashes <code>arducopter_CubeSolo_4.7.3.apj</code>, built for the original Stock Black Cube autopilot.</p>
                 </div>
                 <div class="feature-box">
                     <h4>🟩 Green Cube</h4>
-                    <p>Flashes <code>arducopter_CubeGreen_4.7.2.apj</code>, built for the upgraded Green Cube.</p>
+                    <p>Flashes <code>arducopter_CubeGreen_4.7.3.apj</code>, built for the upgraded Green Cube.</p>
                 </div>
             </div>
 
@@ -511,7 +511,7 @@ ps | grep solo_web_app.py
                 <li><strong>Download</strong> saves the .BIN file to your phone or computer, for Mission Planner, MAVExplorer or the UAV Log Viewer at plot.ardupilot.org.</li>
                 <li><strong>View</strong> opens it right here, without internet: a summary (flight time, max height, distance from home, top speed, battery voltage and mAh used, GPS satellites, vibration, errors and warnings), a bar of the flight modes and armed time, and three tabs: <strong>Charts</strong> (altitude, roll, pitch, yaw, battery, throttle, vibration, GPS and any other logged value; drag across a chart to zoom in, tap for values), <strong>Messages</strong> (the Cube's messages, errors, events and mode changes, filtered by severity or by text) and <strong>Parameters</strong> (the values recorded in that log).</li>
                 <li><strong>Open a .BIN or .tlog file&hellip;</strong> views a log you saved earlier, for example at home after the flight.</li>
-                <li><strong>On the Cube&rsquo;s SD card</strong> (under the list): the 4.7.2 Cube also keeps every flight log on its own SD card. Press <strong>Check the Cube&rsquo;s SD card</strong> after landing to see them, then <strong>Copy</strong> one to the Solo. A progress bar shows the copy, <strong>Cancel</strong> stops it, and the log then appears in the list above as &ldquo;Cube SD log&rdquo; with View and Download. A copy is made only while the Solo is disarmed, stops at once if it is armed, and the Solo keeps the newest 20 copies. The Cube sends about 10 KB/s over its serial link, so a 3 MB log takes 5 to 6 minutes. Telemetry can be slower while a copy runs.</li>
+                <li><strong>On the Cube&rsquo;s SD card</strong> (under the list): the 4.7.3 Cube also keeps every flight log on its own SD card. Press <strong>Check the Cube&rsquo;s SD card</strong> after landing to see them, then <strong>Copy</strong> one to the Solo. A progress bar shows the copy, <strong>Cancel</strong> stops it, and the log then appears in the list above as &ldquo;Cube SD log&rdquo; with View and Download. A copy is made only while the Solo is disarmed, stops at once if it is armed, and the Solo keeps the newest 20 copies. The Cube sends about 10 KB/s over its serial link, so a 3 MB log takes 5 to 6 minutes. Telemetry can be slower while a copy runs.</li>
                 <li><strong>On the controller</strong>: press <strong>Install on the controller</strong> to put a small read-only viewer on the Controller, so after landing you can review a flight with only the Controller: connect a phone or computer to the SoloLink Wi-Fi and open <code>http://10.1.1.1/</code>. It shows the telemetry the Controller recorded from the Solo (summary, flight modes, messages, charts; one button per flight zooms the charts to it). A telemetry log has less detail than a Cube .BIN log. The viewer starts with the Controller, runs at the lowest priority, never changes anything, and is repaired from the Solo&rsquo;s page if a Controller update or reset removes it. <strong>Remove</strong> takes it off again.</li>
             </ul>
         </section>

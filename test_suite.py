@@ -135,8 +135,8 @@ class TestSoloWebUtility(unittest.TestCase):
     def test_03_firmware_deduplication_and_files(self):
         """Verify firmware files exist and APJs are distinct while tar.gz is shared."""
         firmware_dir = os.path.join(BASE_DIR, "firmware")
-        solo_apj = os.path.join(firmware_dir, "arducopter_CubeSolo_4.7.2.apj")
-        green_apj = os.path.join(firmware_dir, "arducopter_CubeGreen_4.7.2.apj")
+        solo_apj = os.path.join(firmware_dir, "arducopter_CubeSolo_4.7.3.apj")
+        green_apj = os.path.join(firmware_dir, "arducopter_CubeGreen_4.7.3.apj")
         legacy_solo = os.path.join(firmware_dir, "arducopter_solo.apj")
         legacy_green = os.path.join(firmware_dir, "arducopter_green.apj")
         tar_gz = os.path.join(firmware_dir, "3dr-solo.tar.gz")
@@ -144,8 +144,13 @@ class TestSoloWebUtility(unittest.TestCase):
         ctrl_tar_gz = os.path.join(firmware_dir, "3dr-controller.tar.gz")
         ctrl_tar_md5 = os.path.join(firmware_dir, "3dr-controller.tar.gz.md5")
 
-        self.assertTrue(os.path.exists(solo_apj), "arducopter_CubeSolo_4.7.2.apj missing")
-        self.assertTrue(os.path.exists(green_apj), "arducopter_CubeGreen_4.7.2.apj missing")
+        self.assertTrue(os.path.exists(solo_apj), "arducopter_CubeSolo_4.7.3.apj missing")
+        self.assertTrue(os.path.exists(green_apj), "arducopter_CubeGreen_4.7.3.apj missing")
+        # 4.7.3 is the only stock build: no older version is baked in or kept for reverting
+        stock = sorted(f for f in os.listdir(firmware_dir) if f.lower().endswith(".apj"))
+        self.assertEqual(stock, ["arducopter_CubeGreen_4.7.3.apj", "arducopter_CubeSolo_4.7.3.apj"])
+        prev_dir = os.path.join(firmware_dir, "previous")
+        self.assertFalse(os.path.isdir(prev_dir) and os.listdir(prev_dir), "firmware/previous must be empty")
         self.assertFalse(os.path.exists(legacy_solo), "legacy arducopter_solo.apj must not exist")
         self.assertFalse(os.path.exists(legacy_green), "legacy arducopter_green.apj must not exist")
         self.assertTrue(os.path.exists(tar_gz), "3dr-solo.tar.gz missing")
@@ -526,12 +531,12 @@ class TestSoloWebUtility(unittest.TestCase):
 
         # Verify local firmware version detection
         ver = arducopter_builder.get_local_firmware_version()
-        self.assertEqual(ver, "4.7.2")
+        self.assertEqual(ver, "4.7.3")
 
         # Verify quick check against custom build API
         chk = arducopter_builder.update_engine.check_version_quick()
         self.assertTrue(chk.get("success"))
-        self.assertEqual(chk.get("local_version"), "4.7.2")
+        self.assertEqual(chk.get("local_version"), "4.7.3")
         self.assertTrue(bool(chk.get("online_version")))
 
         # Verify versioned APJ resolution
@@ -539,13 +544,13 @@ class TestSoloWebUtility(unittest.TestCase):
         self.assertIsNotNone(apj_solo)
         self.assertTrue(os.path.exists(apj_solo))
         self.assertIn("CubeSolo", apj_solo)
-        self.assertIn("4.7.2", apj_solo)
+        self.assertIn("4.7.3", apj_solo)
 
         apj_green = flash_mgr.get_latest_apj("green")
         self.assertIsNotNone(apj_green)
         self.assertTrue(os.path.exists(apj_green))
         self.assertIn("CubeGreen", apj_green)
-        self.assertIn("4.7.2", apj_green)
+        self.assertIn("4.7.3", apj_green)
 
     def test_08_flask_modular_architecture(self):
         """Test modern modular Flask application and isolated background TCP server."""
@@ -793,11 +798,11 @@ class TestSoloWebUtility(unittest.TestCase):
 
         solo_apj_found = flash_mgr.get_latest_apj("solo")
         self.assertIsNotNone(solo_apj_found)
-        self.assertTrue(solo_apj_found.endswith("arducopter_CubeSolo_4.7.2.apj"))
+        self.assertTrue(solo_apj_found.endswith("arducopter_CubeSolo_4.7.3.apj"))
 
         green_apj_found = flash_mgr.get_latest_apj("green")
         self.assertIsNotNone(green_apj_found)
-        self.assertTrue(green_apj_found.endswith("arducopter_CubeGreen_4.7.2.apj"))
+        self.assertTrue(green_apj_found.endswith("arducopter_CubeGreen_4.7.3.apj"))
 
         # 2. Test bake_into_firmware module
         import bake_into_firmware
@@ -926,6 +931,8 @@ class TestSoloWebUtility(unittest.TestCase):
                 self.assertFalse(os.path.exists(os.path.join(tmp_dir, "arducopter_CubeSolo_4.7.1.apj")))
                 self.assertFalse(os.path.exists(os.path.join(tmp_dir, "arducopter_solo.apj")))
                 self.assertTrue(os.path.exists(os.path.join(tmp_dir, "arducopter_CubeSolo_4.7.2.apj")))
+                # older builds are deleted, never archived in previous/
+                self.assertFalse(os.path.isdir(os.path.join(tmp_dir, "previous")))
             finally:
                 arducopter_builder.FIRMWARE_DIR = orig_fw_dir
         finally:
@@ -1085,7 +1092,7 @@ class TestSoloWebUtility(unittest.TestCase):
         self.assertEqual(rep["added_required"], ["APJ_TOOL_PARAMETERS"])
 
         # 4. Artifact archive -> arducopter.apj, and FAILURE state is reported with log lines
-        apj_src = os.path.join(BASE_DIR, "firmware", "arducopter_CubeSolo_4.7.2.apj")
+        apj_src = os.path.join(BASE_DIR, "firmware", "arducopter_CubeSolo_4.7.3.apj")
         buf = io.BytesIO()
         with tarfile.open(fileobj=buf, mode="w:gz") as tar:
             for name, data in (("copter-CubeSolo-abc/arducopter_with_bl.hex", b":00"),
@@ -1434,8 +1441,8 @@ class TestSoloWebUtility(unittest.TestCase):
         self.assertFalse(wifi_mgr._has_line("sh: syntax error near ';': ...; echo LAUNCHED", "LAUNCHED"))
         self.assertTrue(wifi_mgr._has_line("root@10.1.1.1's password: \nLAUNCHED\n", "LAUNCHED"))
 
-    def test_20_previous_versions_and_custom_firmware(self):
-        """Older builds are archived (3 kept) and offered for revert; custom .apj uploads are validated."""
+    def test_20_no_previous_versions_but_custom_firmware(self):
+        """Older builds are deleted when a newer one is staged and never offered for revert; custom .apj uploads are validated."""
         import json as _json
         import arducopter_builder
         import flash_mgr
@@ -1459,21 +1466,28 @@ class TestSoloWebUtility(unittest.TestCase):
             flash_mgr.get_latest_apj = lambda cube_type, search_dirs=None, log_fn=None: orig_latest(cube_type, search_dirs=[tmp])
             flash_mgr._firmware_roots = lambda: [tmp]
 
-            # Five successive builds: each archive step keeps the 3 newest older versions
+            # Successive builds: each staging step deletes the older ones; nothing goes to previous/
+            os.makedirs(os.path.join(tmp, "previous"))                     # left by an earlier version of the utility
+            put_prev = os.path.join(tmp, "previous", "arducopter_CubeSolo_4.7.1.apj")
+            with open(put_prev, "w") as f:
+                f.write(apj(9))
             for v in ["4.5.7", "4.6.0", "4.6.3", "4.7.1", "4.7.2"]:
                 put("arducopter_CubeSolo_%s.apj" % v)
                 arducopter_builder.clean_old_firmware_files("CubeSolo", v)
             put("arducopter_CubeGreen_4.7.2.apj", 140)
             top = sorted(f for f in os.listdir(tmp) if f.endswith(".apj"))
             self.assertEqual(top, ["arducopter_CubeGreen_4.7.2.apj", "arducopter_CubeSolo_4.7.2.apj"])
-            prev = sorted(os.listdir(os.path.join(tmp, "previous")))
-            self.assertEqual(prev, ["arducopter_CubeSolo_4.6.0.apj", "arducopter_CubeSolo_4.6.3.apj",
-                                    "arducopter_CubeSolo_4.7.1.apj"])
+            self.assertEqual(os.listdir(os.path.join(tmp, "previous")), [])   # emptied, not filled
 
+            # a stray older file in previous/ is never offered
+            with open(put_prev, "w") as f:
+                f.write(apj(9))
             ch = flash_mgr.list_firmware_choices("solo")
             self.assertEqual(ch["latest"]["version"], "4.7.2")
-            self.assertEqual([c["version"] for c in ch["previous"]], ["4.7.1", "4.6.3", "4.6.0"])
+            self.assertEqual(ch["previous"], [])
             self.assertEqual(flash_mgr.list_firmware_choices("green")["previous"], [])
+            with self.assertRaises(ValueError):
+                flash_mgr.resolve_firmware_choice("solo", put_prev)
 
             # Custom upload: validated, sanitised, stored in <firmware>/custom
             with self.assertRaises(ValueError):
@@ -1490,8 +1504,8 @@ class TestSoloWebUtility(unittest.TestCase):
 
             # Only offered files may be flashed
             self.assertIsNone(flash_mgr.resolve_firmware_choice("solo", None))
-            p = ch["previous"][0]["path"]
-            self.assertEqual(flash_mgr.resolve_firmware_choice("solo", p), p)
+            latest_p = ch["latest"]["path"]
+            self.assertEqual(flash_mgr.resolve_firmware_choice("solo", latest_p), latest_p)
             self.assertEqual(flash_mgr.resolve_firmware_choice("solo", c["path"]), c["path"])
             with self.assertRaises(ValueError):
                 flash_mgr.resolve_firmware_choice("solo", "/etc/passwd")

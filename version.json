@@ -477,7 +477,7 @@
       "version": "1.2.12",
       "iteration": 84,
       "date": "2026-11-21 00:00:30",
-      "description": "Flight Logs: copy several Cube logs one after another (queue), and a time-left estimate while copying. Update Factory Reset Partition: no backup and no staging copy any more (it writes straight from the running system), Restore backup removed."
+      "description": "Flight Logs: copy several Cube logs one after another (queue), and a time-left estimate while copying. Update Factory Reset Partition: no backup and no staging copy any more (it writes straight from the running system), Restore backup removed. ArduCopter 4.7.3 is the built-in Cube firmware for both Cubes; older 4.7.x builds are no longer kept or offered (custom .apj uploads still work)."
     }
   ]
 }
