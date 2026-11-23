@@ -20,6 +20,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Installs Solo Web Utility on a 3DR Solo over SoloLink Wi-Fi.
@@ -266,6 +268,7 @@ public class SoloInstaller {
                 return false;
             }
             out.log("[OK] All " + fwFiles.size() + " firmware files on the Solo verified.");
+            cleanupOldFirmware(fwFiles);
 
             exec("mkdir -p /usr/bin/SoloWebUtility2 /log/SoloWebUtility2 /home/root/SoloWebUtility2 2>/dev/null || true", 0);
             exec("ln -sfn /log/firmware /usr/bin/SoloWebUtility2/firmware 2>/dev/null || true", 0);
@@ -409,6 +412,69 @@ public class SoloInstaller {
         } catch (Exception e) {
             out.log("Could not set up Controller access (" + e.getMessage() + "); the Solo will use its password fallback.");
         }
+    }
+
+    private static final Pattern APJ_VERSION =
+            Pattern.compile("^arducopter_(CubeSolo|CubeGreen)_(\\d+)\\.(\\d+)\\.(\\d+)\\.apj$");
+
+    /** Clean up after earlier installs: older Cube builds of the same board, the previous/ folder (older
+     *  builds are no longer kept) and the builder's leftover .staging folder. Newer builds (made on the Solo
+     *  by the Firmware tab), browser uploads in custom/ and every other file stay. Same rule as
+     *  deploy_to_drone.py's obsolete_firmware(). */
+    private void cleanupOldFirmware(List<Entry> fwFiles) throws Exception {
+        Set<String> keep = new LinkedHashSet<String>();
+        java.util.Map<String, long[]> newest = new java.util.HashMap<String, long[]>();
+        for (Entry e : fwFiles) {
+            String name = e.rel.substring(e.rel.lastIndexOf('/') + 1);
+            if (!e.rel.equals("firmware/" + name)) {
+                continue;
+            }
+            keep.add(name);
+            Matcher m = APJ_VERSION.matcher(name);
+            if (m.matches()) {
+                long[] v = version(m);
+                long[] had = newest.get(m.group(1));
+                if (had == null || compare(v, had) > 0) {
+                    newest.put(m.group(1), v);
+                }
+            }
+        }
+        Result ls = exec("cd " + LOG_FW_DIR + " 2>/dev/null && ls -a 2>/dev/null || true", 0);
+        List<String> gone = new ArrayList<String>();
+        for (String line : ls.out.split("\n")) {
+            String n = line.trim();
+            if (n.equals("previous") || n.equals(".staging")) {
+                gone.add(n);
+                continue;
+            }
+            Matcher m = APJ_VERSION.matcher(n);
+            if (m.matches() && !keep.contains(n) && newest.containsKey(m.group(1))
+                    && compare(version(m), newest.get(m.group(1))) < 0) {
+                gone.add(n);
+            }
+        }
+        if (gone.isEmpty()) {
+            return;
+        }
+        StringBuilder args = new StringBuilder();
+        for (String g : gone) {
+            args.append(' ').append(q(g));
+        }
+        exec("cd " + LOG_FW_DIR + " && rm -rf" + args + " 2>/dev/null; true", 0);
+        out.log("Removed old firmware files from " + LOG_FW_DIR + ":" + args.toString().replace("'", ""));
+    }
+
+    private static long[] version(Matcher m) {
+        return new long[]{Long.parseLong(m.group(2)), Long.parseLong(m.group(3)), Long.parseLong(m.group(4))};
+    }
+
+    private static int compare(long[] a, long[] b) {
+        for (int i = 0; i < 3; i++) {
+            if (a[i] != b[i]) {
+                return a[i] < b[i] ? -1 : 1;
+            }
+        }
+        return 0;
     }
 
     private boolean remoteMatches(ChannelSftp sftp, String remote, Entry e) {

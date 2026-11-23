@@ -2475,6 +2475,10 @@ class TestSoloWebUtility(unittest.TestCase):
                            "product/bmsone-v2-plug-and-play", "applyPreset('lipo_default')",
                            "applyPreset('liion_default')", "applyPreset('liion_5s')"):
                 self.assertIn(needle, tab)
+            import re as _re
+            self.assertIsNone(_re.search(r"\$\s?\d", tab), "no prices on the Battery Solutions tab")
+            self.assertLess(tab.index("1. Do-it-yourself"), tab.index("2. Ready-built"))
+            self.assertLess(tab.index("2. Ready-built"), tab.index("3. BMSOne"))
         pdf = os.path.join(root, "static", "Solo_Battery_Mod_for_Dummies.pdf")
         self.assertTrue(os.path.isfile(pdf))
         data = open(pdf, "rb").read()
@@ -5492,6 +5496,293 @@ class TestSoloWebUtility(unittest.TestCase):
         for needle in ("Add to queue", "'Queued'", "more waiting", "st.queue", "job.eta", "left'"):
             self.assertIn(needle, js)
 
+
+    def test_62_cube_sd_open_waits_out_an_old_transfer(self):
+        """The Cube ignores an open while it still streams an earlier burst read (MAVFTP 4 did not answer):
+        the client sends a Reset, waits until the stream stops, and asks again. A Cube that never answers
+        still ends in a clear error."""
+        import importlib.util as _ilu
+        import struct as _struct
+        root = os.path.dirname(os.path.abspath(__file__))
+        spec = _ilu.spec_from_file_location("cube_sd_t62", os.path.join(root, "modules", "log_viewer", "cube_sd.py"))
+        sd = _ilu.module_from_spec(spec)
+        spec.loader.exec_module(sd)
+
+        class BusyCube(object):
+            """Streams a stray burst (not ours) until it gets a Reset; answers opens only once it is quiet."""
+            def __init__(self, stray=30, never=False):
+                self.stray, self.never = stray, never
+                self.ops, self.queue, self.busy = [], [], True
+
+            def send(self, raw):
+                seq, session, op, size, _r, _b, _p, offset = _struct.unpack(sd.HDR_FMT, raw[:12])
+                self.ops.append(op)
+                if op == sd.OP_RESET:
+                    self.busy = False
+                elif op == sd.OP_OPEN_RO and not self.busy and not self.never:
+                    hdr = _struct.pack(sd.HDR_FMT, (seq + 1) & 0xFFFF, 3, sd.OP_ACK, 4, op, 0, 0, 0)
+                    self.queue.append(hdr + _struct.pack("<I", 1234))
+
+            def recv(self, timeout):
+                if self.queue:
+                    return self.queue.pop(0)
+                if self.stray > 0:                       # the old burst keeps coming for a while after the Reset
+                    self.stray -= 1
+                    return _struct.pack(sd.HDR_FMT, 6525, 9, sd.OP_ACK, 4, sd.OP_BURST, 0, 0, 0) + b"abcd"
+                time.sleep(0.001)
+                return None
+
+        cube = BusyCube()
+        client = sd.FtpClient(cube, reply_timeout=0.05, retries=2)
+        r = client.open_ro("/APM/LOGS/00000007.BIN")
+        self.assertEqual(r["op"], sd.OP_ACK)
+        self.assertEqual(_struct.unpack("<I", r["data"][:4])[0], 1234)
+        self.assertIn(sd.OP_RESET, cube.ops)
+        self.assertEqual(cube.stray, 0)                  # it waited for the stray stream to stop
+        first_reset = cube.ops.index(sd.OP_RESET)
+        self.assertEqual(cube.ops[:first_reset], [sd.OP_OPEN_RO] * 2)
+
+        cube = BusyCube(stray=0, never=True)
+        client = sd.FtpClient(cube, reply_timeout=0.05, retries=2)
+        with self.assertRaises(sd.CubeSDError) as ctx:
+            client.open_ro("/APM/LOGS/00000007.BIN")
+        self.assertIn("did not answer after 3 tries", str(ctx.exception))
+        self.assertEqual(cube.ops.count(sd.OP_OPEN_RO), 6)
+        self.assertEqual(set(cube.ops) - set(sd.ALLOWED_OPS), set())
+
+        # a cancel during the wait stops at once
+        cube = BusyCube(stray=10 ** 6)
+        def stop():
+            if cube.ops.count(sd.OP_RESET):
+                raise sd.Aborted("Cancelled.")
+        client = sd.FtpClient(cube, check=stop, reply_timeout=0.05, retries=1)
+        with self.assertRaises(sd.Aborted):
+            client.open_ro("/APM/LOGS/00000007.BIN")
+
+    def test_63_cube_sd_writes_its_jobs_to_the_log(self):
+        """Every Cube SD job leaves lines in /log/solowebutility.log (start, retries, done or the error), so a
+        failed copy can be traced from the Download logs bundle."""
+        import importlib.util as _ilu
+        import threading as _th
+        root = os.path.dirname(os.path.abspath(__file__))
+        spec = _ilu.spec_from_file_location("cube_sd_t63", os.path.join(root, "modules", "log_viewer", "cube_sd.py"))
+        sd = _ilu.module_from_spec(spec)
+        spec.loader.exec_module(sd)
+        lines = []
+        sd._log = lines.append
+
+        class Stub(object):
+            def __init__(self, transport, check=None, **kw):
+                pass
+            def reset(self):
+                pass
+            def describe(self):
+                return "stub"
+            def recent_logs(self, path):
+                raise sd.CubeSDError("The Cube did not answer (MAVFTP 4). test")
+            def list_dir(self, path):
+                raise sd.CubeSDError("The Cube did not answer (MAVFTP 3). test")
+
+        class T(object):
+            def armed(self):
+                return False
+            def close(self):
+                pass
+        sd.FtpClient = Stub
+        mgr = sd.CubeSD(connect=T, dest=tempfile.mkdtemp(), free=lambda p: 10 ** 12)
+        self.assertTrue(mgr.start_list(lambda: False)[0])
+        mgr.wait(10)
+        self.assertEqual(mgr.status()["job"]["state"], "error")
+        self.assertTrue(any(l.startswith("Started: list") for l in lines), lines)
+        self.assertTrue(any(l.startswith("Failed: The Cube did not answer (MAVFTP 3)") for l in lines), lines)
+
+        def boom(self, path):
+            raise KeyError("x")
+        Stub.recent_logs = boom
+        del lines[:]
+        mgr.start_list(lambda: False)
+        mgr.wait(10)
+        self.assertTrue(any(l.startswith("Unexpected problem") and "Traceback" in l for l in lines), lines)
+
+        with open(os.path.join(root, "modules", "log_viewer", "cube_sd.py"), "r", encoding="utf-8") as f:
+            src = f.read()
+        self.assertIn("[cubesd]", src)
+        self.assertIn("sys.stdout.flush()", src)
+
+    def test_64_installers_clean_up_old_firmware(self):
+        """Each installer leaves /log/firmware tidy: older Cube builds of the same board, previous/ and
+        .staging/ go; newer builds made on the Solo, custom/ uploads and other files stay."""
+        import deploy_to_drone
+        names = [".", "..", "arducopter_CubeSolo_4.7.2.apj", "arducopter_CubeSolo_4.7.3.apj",
+                 "arducopter_CubeSolo_4.7.10.apj", "arducopter_CubeGreen_4.7.2.apj", "arducopter_CubeGreen_4.7.3.apj",
+                 "arducopter_CubeGreen_4.6.9.apj", "custom", "previous", ".staging", "Solo.param", "arducopter_x.apj"]
+        keep = ["arducopter_CubeSolo_4.7.3.apj", "arducopter_CubeGreen_4.7.3.apj"]
+        self.assertEqual(deploy_to_drone.obsolete_firmware(names, keep),
+                         ["arducopter_CubeGreen_4.6.9.apj", "arducopter_CubeGreen_4.7.2.apj", "arducopter_CubeSolo_4.7.2.apj"])
+
+        class Client(object):
+            def __init__(self):
+                self.cmds = []
+        calls = []
+
+        def fake_exec(client, cmd, timeout=None):
+            calls.append(cmd)
+            return 0, "\n".join(names) + "\n" if "ls -a" in cmd else ""
+        real = deploy_to_drone.ssh_exec
+        deploy_to_drone.ssh_exec = fake_exec
+        try:
+            gone = deploy_to_drone.cleanup_firmware(Client(), keep)
+        finally:
+            deploy_to_drone.ssh_exec = real
+        self.assertEqual(gone[-2:], ["previous/", ".staging/"])
+        self.assertIn("rm -rf", calls[-1])
+        self.assertNotIn("custom", calls[-1])
+        self.assertNotIn("4.7.10", calls[-1])
+        self.assertNotIn("4.7.3", calls[-1])
+
+        with open(os.path.join(BASE_DIR, "deploy_to_drone.py"), "r", encoding="utf-8") as f:
+            dsrc = f.read()
+        self.assertNotIn("%s/previous /log/updates", dsrc)              # previous/ is no longer created
+        self.assertIn("cleanup_firmware(client, keep)", dsrc)
+        java = os.path.join(BASE_DIR, "android_installer", "src", "com", "sololink", "webutility", "SoloInstaller.java")
+        mac = os.path.join(BASE_DIR, "mac_installer", "install_solo_web_utility.command")
+        with open(java, "r", encoding="utf-8") as f:
+            self.assertIn("cleanupOldFirmware(fwFiles);", f.read())
+        with open(mac, "r", encoding="utf-8") as f:
+            self.assertIn("Removed old firmware files from", f.read())
+
+    def test_65_rtk_base_corrections(self):
+        """RTK base on the phone: the SoloLink Viewer app reads RTCM3 from a u-blox base on the phone's USB
+        port and hands whole frames to the page (window.soloViewerRtcm); the Cockpit posts them to
+        /api/rtk/rtcm and the server sends each one to the Cube as GPS_RTCM_DATA (233, MAVLink 1, packed by
+        hand), split into 180-byte fragments the way ArduPilot puts them back together."""
+        import base64 as _b64
+        import cockpit_mgr as cm
+        root = os.path.dirname(os.path.abspath(__file__))
+        # the RTCM 1005 example of the RTCM 10403 standard (station 2003, near Washington DC)
+        f1005 = bytearray.fromhex("D300133ED7D30202980EDEEF34B4BD62AC0941986F33360B98")
+        self.assertEqual(cm.rtcm_crc24q(f1005[:-3]), 0x360B98)
+        self.assertEqual(cm.rtcm_check_frame(f1005), (1005, None))
+        broken = bytearray(f1005)
+        broken[8] ^= 0x10
+        self.assertEqual(cm.rtcm_check_frame(broken)[1], "bad checksum")
+        self.assertEqual(cm.rtcm_check_frame(f1005[:-1])[1], "wrong length")
+        self.assertEqual(cm.rtcm_check_frame(bytearray(b"$GPGGA,1*00"))[1], "not an RTCM3 frame")
+        pos = cm.rtcm_base_position(f1005)
+        self.assertAlmostEqual(pos["lat"], 38.8047594, places=6)
+        self.assertAlmostEqual(pos["lon"], -77.0647736, places=6)
+        self.assertAlmostEqual(pos["alt"], 114.56, delta=0.05)
+
+        def frame(n, mtype=1077):
+            body = bytearray(n)
+            body[0], body[1] = mtype >> 4, (mtype & 0x0F) << 4
+            fr = bytearray([0xD3, (n >> 8) & 0x03, n & 0xFF]) + body
+            c = cm.rtcm_crc24q(fr)
+            return fr + bytearray([c >> 16, (c >> 8) & 0xFF, c & 0xFF])
+
+        # fragments: flags bit 0 fragmented, bits 1-2 fragment number, bits 3-7 sequence
+        p = cm.rtcm_to_payloads(frame(100), 3)
+        self.assertEqual(len(p), 1)
+        self.assertEqual(len(p[0]), 182)
+        self.assertEqual(bytearray(p[0][:2]), bytearray([3 << 3, 106]))
+        self.assertEqual(len(cm.rtcm_to_payloads(frame(174), 0)), 1)            # exactly 180: not fragmented
+        p = cm.rtcm_to_payloads(frame(300), 1)
+        self.assertEqual([bytearray(x[:2]) for x in p], [bytearray([0x09, 180]), bytearray([0x0B, 126])])
+        p = cm.rtcm_to_payloads(frame(354), 0)                                  # 360 = 2 full: empty last one
+        self.assertEqual([bytearray(x[:2])[1] for x in p], [180, 180, 0])
+        self.assertEqual(bytearray(p[2][:1])[0], 0x01 | (2 << 1))
+        self.assertEqual(len(cm.rtcm_to_payloads(frame(714), 0)), 4)            # 720 = 4 full: no fifth
+        self.assertEqual(cm.rtcm_to_payloads(frame(800), 0), [])
+        data = b"".join(bytes(bytearray(x[2:2 + bytearray(x[:2])[1]])) for x in cm.rtcm_to_payloads(frame(500), 7))
+        self.assertEqual(bytearray(data), frame(500))
+
+        # the MAVLink 1 frame the Cube gets
+        pkt = bytearray(cm.mav_client.build_mavlink_v1_packet(cm.GPS_RTCM_DATA_MSGID, cm.rtcm_to_payloads(f1005, 0)[0],
+                                                               cm.GPS_RTCM_DATA_CRC_EXTRA))
+        self.assertEqual((pkt[0], pkt[1], pkt[3], pkt[5]), (0xFE, 182, 254, 233))
+        self.assertTrue(cm._frame_crc_ok(pkt, 1, 6 + 182, 35))
+
+        # posts from the Cockpit
+        sent = []
+        rtk = cm.RtkCorrections(send_payload=lambda pl: sent.append(pl))
+        self.assertFalse(rtk.status()["active"])
+        self.assertIsNone(rtk.status()["age_s"])
+        b64 = lambda fr: _b64.b64encode(bytes(fr)).decode("ascii")
+        ok, msg = rtk.report({"frames": [b64(f1005), b64(frame(300)), b64(broken), b64(frame(800))],
+                              "app": {"state": "connected", "device": "u-blox GNSS receiver", "x": 1}}, now=1000.0)
+        self.assertTrue(ok, msg)
+        self.assertIn("2 RTCM frames", msg)
+        self.assertEqual(len(sent), 3)                                          # 1 + 2 fragments
+        self.assertEqual(bytearray(sent[1][:1])[0] >> 3, 1)                     # next frame, next sequence
+        st = rtk.status(now=1001.0)
+        self.assertTrue(st["active"])
+        self.assertEqual(st["frames"], 2)
+        self.assertEqual(st["rejected"], 2)
+        self.assertEqual(st["types"], [1005, 1077])
+        self.assertAlmostEqual(st["base"]["lat"], 38.8047594, places=6)
+        self.assertEqual(st["app"], {"state": "connected", "device": "u-blox GNSS receiver"})
+        self.assertIn("too long", st["last_error"])
+        self.assertFalse(rtk.status(now=1000.0 + cm.RTK_STALE_SECS + 1)["active"])
+        self.assertEqual(rtk.status(now=1100.0)["types"], [])
+        for bad in (None, [1], {"frames": "x"}, {"frames": ["AA=="] * (cm.RTK_MAX_FRAMES_PER_POST + 1)}):
+            self.assertFalse(rtk.report(bad)[0], bad)
+        self.assertTrue(rtk.report({"app": {"state": "none"}})[0])               # status only
+        # the Cube link held by flashing or calibration: nothing goes out
+        held = cm.RtkCorrections(send_payload=lambda pl: False)
+        ok, msg = held.report({"frames": [b64(f1005)]})
+        self.assertFalse(ok)
+        self.assertIn("busy", msg)
+        paused = getattr(cm.mav_client, "paused", False)
+        cm.mav_client.paused = True
+        try:
+            self.assertFalse(cm._send_rtcm_payload(cm.rtcm_to_payloads(f1005, 0)[0]))
+        finally:
+            cm.mav_client.paused = paused
+
+        # server route, telemetry, Cockpit page, Viewer app
+        self.assertIn("rtk", cm.get_telemetry_dict(msgs_since='none'))
+        swa = open(os.path.join(root, "solo_web_app.py")).read()
+        self.assertIn("'/api/rtk/rtcm'", swa)
+        self.assertIn("cockpit_mgr.rtk_corrections.report(body)", swa)
+        for page in ("static/index.html", "templates/index.html"):
+            html = open(os.path.join(root, page), encoding="utf-8").read()
+            self.assertIn('id="rowRtk"', html, page)
+            self.assertIn('id="rtkBaseVal"', html, page)
+            self.assertIn('id="btnRtkSetup"', html, page)
+        css = open(os.path.join(root, "static", "cockpit.css"), encoding="utf-8").read()
+        rule = css[css.index(".hud-card #btnRtkSetup"):]
+        self.assertIn("pointer-events: auto !important;", rule[:rule.index("}")])   # the HUD panels ignore taps
+        self.assertIn(".hud-card #rtkSetupNote", css)
+        js = open(os.path.join(root, "static", "cockpit.js"), encoding="utf-8").read()
+        for s in ("window.soloViewerRtcm", "window.soloViewerRtkStatus", "'/api/rtk/rtcm'", "updateRtk(telem);",
+                  "'RTK FIX'", "window.SoloViewerRtk.setupBase(rtkSurvey().secs, rtkSurvey().acc)", "RTK_SURVEY_PRESETS", "'SURVEY '"):
+            self.assertIn(s, js)
+        app_dir = os.path.join(root, "android_app")
+        src = os.path.join(app_dir, "src", "com", "sololink", "viewer")
+        java = open(os.path.join(src, "MainActivity.java")).read()
+        for s in ("window.soloViewerRtcm", "window.soloViewerRtkStatus", "new RtkBaseReader(", "rtkBaseReader.stop()"):
+            self.assertIn(s, java)
+        reader = open(os.path.join(src, "RtkBaseReader.java")).read()
+        self.assertIn("PendingIntent.FLAG_MUTABLE", reader)
+        self.assertIn("intent.setPackage(context.getPackageName())", reader)
+        self.assertIn("Context.RECEIVER_NOT_EXPORTED", reader)
+        self.assertIn("0x1864CFB", open(os.path.join(src, "RtcmFramer.java")).read())
+        # base setup like Mission Planner: RTCM3 on USB, 1005 + MSM7 + 1230, NAV-SVIN, survey-in (CFG-TMODE3)
+        ubx = open(os.path.join(src, "UbxScanner.java")).read()
+        for s in ("msgRate(0xF5, 0x05, 1)", "msgRate(0xF5, 0x4D, 1)", "msgRate(0xF5, 0x57, 1)", "msgRate(0xF5, 0xE6, 1)",
+                  "msgRate(0x01, 0x3B, 1)", "tmode3(1, minDurationS, accuracyLimitM)", "message(0x06, 0x71, p)"):
+            self.assertIn(s, ubx)
+        self.assertIn('"SoloViewerRtk"', java)
+        self.assertIn("@JavascriptInterface", java)
+        self.assertIn("public String setupBase(long minDurationS, double accuracyLimitM)", reader)
+        manifest = open(os.path.join(app_dir, "AndroidManifest.xml")).read()
+        self.assertIn('android.hardware.usb.host" android:required="false"', manifest)
+        self.assertIn("@xml/usb_device_filter", manifest)
+        self.assertIn('android:launchMode="singleTop"', manifest)
+        self.assertIn('vendor-id="5446"', open(os.path.join(app_dir, "res", "xml", "usb_device_filter.xml")).read())
+        ps = open(os.path.join(app_dir, "build_viewer.ps1")).read()
+        self.assertIn("static\\sololink_viewer.apk.bin", ps)
+        self.assertNotIn("-A $AssetsDir", ps)
 
 def _struct_float(b4):
     """Pack 4 signed bytes into the float the gimbal sends as GMB_SWVER."""

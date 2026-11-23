@@ -8,6 +8,7 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
+import android.hardware.usb.UsbManager;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
@@ -29,11 +30,13 @@ import android.os.Looper;
 import android.os.PatternMatcher;
 import android.os.SystemClock;
 import android.provider.Settings;
+import android.util.Base64;
 import android.util.Log;
 import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
@@ -49,6 +52,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+
+import org.json.JSONObject;
 
 public class MainActivity extends Activity {
 
@@ -88,6 +93,12 @@ public class MainActivity extends Activity {
     private LocationManager locationManager;
     private boolean isPilotGpsOn = false;
     private boolean hasPilotFix = false;
+    // RTK base: a GNSS receiver on the phone's USB port; its RTCM goes to window.soloViewerRtcm(...)
+    private volatile RtkBaseReader rtkBaseReader;
+    private String rtkState = "none";
+    private String rtkDevice = "";
+    private String rtkMessage = "";
+    private String rtkInfo = "{}";
 
     // The phone's GPS fixes -> window.soloViewerPilotFix(...) in the page (Cockpit Follow).
     // All four methods are implemented: before Android 11 they are abstract.
@@ -138,6 +149,7 @@ public class MainActivity extends Activity {
         wifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
         connectivityManager = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
         locationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
+        startRtkBase();
 
         // Check if device is already connected to SoloLink Wi-Fi
         if (checkIfAlreadyConnectedToSoloLink()) {
@@ -334,6 +346,19 @@ public class MainActivity extends Activity {
         settings.setDisplayZoomControls(false);
         settings.setMediaPlaybackRequiresUserGesture(false);
 
+        // The Cockpit's "Set up base" button: window.SoloViewerRtk.setupBase(seconds, metres)
+        webView.addJavascriptInterface(new Object() {
+            @JavascriptInterface
+            public String setupBase(int minDurationS, double accuracyLimitM) {
+                RtkBaseReader r = rtkBaseReader;
+                if (r == null) return "The base reader is not running.";
+                long dur = Math.max(10, Math.min(3600, minDurationS));
+                double acc = Math.max(0.1, Math.min(50.0, accuracyLimitM));
+                String err = r.setupBase(dur, acc);
+                return err == null ? "ok" : err;
+            }
+        }, "SoloViewerRtk");
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         }
@@ -372,6 +397,7 @@ public class MainActivity extends Activity {
                 Log.d(TAG, "onPageFinished: " + url);
                 isPageLoaded = true;
                 sendPilotGpsStatusToPage();
+                sendRtkStatusToPage();
                 // Once page has finished loading, reveal full screen WebView and discreet controls
                 statusOverlay.setVisibility(View.GONE);
                 webView.setVisibility(View.VISIBLE);
@@ -762,10 +788,83 @@ public class MainActivity extends Activity {
         }
     }
 
+    // Plugging the base in while the app runs (the manifest's USB_DEVICE_ATTACHED filter, singleTop)
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        if (intent != null && UsbManager.ACTION_USB_DEVICE_ATTACHED.equals(intent.getAction()) && rtkBaseReader != null) {
+            rtkBaseReader.scan();
+        }
+    }
+
+    private void startRtkBase() {
+        rtkBaseReader = new RtkBaseReader(this, new RtkBaseReader.Listener() {
+            @Override
+            public void onRtcmFrames(final List<byte[]> frames) {
+                mainHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        sendRtcmToPage(frames);
+                    }
+                });
+            }
+
+            @Override
+            public void onRtkInfo(final String json) {
+                mainHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        rtkInfo = json != null ? json : "{}";
+                        sendRtkStatusToPage();
+                    }
+                });
+            }
+
+            @Override
+            public void onRtkState(final String state, final String device, final String message) {
+                mainHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        rtkState = state;
+                        rtkDevice = device != null ? device : "";
+                        rtkMessage = message != null ? message : "";
+                        if ("none".equals(state)) rtkInfo = "{}";
+                        sendRtkStatusToPage();
+                    }
+                });
+            }
+        });
+        rtkBaseReader.start();
+    }
+
+    // Whole RTCM frames, base64, about once a second. Without a loaded page they are dropped:
+    // corrections are only useful while fresh.
+    private void sendRtcmToPage(List<byte[]> frames) {
+        if (!isPageLoaded || webView == null || frames == null || frames.isEmpty()) return;
+        StringBuilder js = new StringBuilder("window.soloViewerRtcm&&window.soloViewerRtcm({frames:[");
+        for (int i = 0; i < frames.size(); i++) {
+            if (i > 0) js.append(',');
+            js.append('\'').append(Base64.encodeToString(frames.get(i), Base64.NO_WRAP)).append('\'');
+        }
+        js.append("]})");
+        webView.evaluateJavascript(js.toString(), null);
+    }
+
+    private void sendRtkStatusToPage() {
+        if (!isPageLoaded || webView == null) return;
+        webView.evaluateJavascript("window.soloViewerRtkStatus&&window.soloViewerRtkStatus({state:"
+                + JSONObject.quote(rtkState) + ",device:" + JSONObject.quote(rtkDevice)
+                + ",message:" + JSONObject.quote(rtkMessage) + ",info:" + rtkInfo + "})", null);
+    }
+
     @Override
     protected void onDestroy() {
         super.onDestroy();
         stopPilotGps();
+        if (rtkBaseReader != null) {
+            rtkBaseReader.stop();
+            rtkBaseReader = null;
+        }
         if (isRegisteredReceiver) {
             try {
                 unregisterReceiver(wifiScanReceiver);

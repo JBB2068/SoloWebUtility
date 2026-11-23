@@ -25,8 +25,10 @@ import os
 import random
 import re
 import struct
+import sys
 import threading
 import time
+import traceback
 
 CUBE_LOG_DIR = "/APM/LOGS"
 COPY_DIR = "/log/cubesd"
@@ -58,6 +60,15 @@ ENDPOINTS = ["udpout:10.1.1.10:14560", "udpin:0.0.0.0:14560", "udpin:127.0.0.1:1
 SOURCE_SYSTEM = 254                          # same id the Parameters page uses for its own MAVFTP reads
 _LOG_NAME = re.compile(r"^0*(\d{1,8})\.BIN$", re.IGNORECASE)
 _COPY_NAME = re.compile(r"^(\d{1,8})\.BIN$")
+
+
+def _log(msg):
+    """One line in /log/solowebutility.log (this process's stdout), so a failed copy can be traced later."""
+    try:
+        sys.stdout.write("[%s] [cubesd] %s\n" % (time.strftime("%H:%M:%S"), msg))
+        sys.stdout.flush()
+    except Exception:
+        pass
 
 
 class CubeSDError(Exception):
@@ -244,6 +255,36 @@ class FtpClient(object):
         except Exception as ex:
             raise CubeSDError("Cannot send to the Cube: %s" % ex)
 
+    def open_ro(self, path, tries=3):
+        """OpenFileRO, also when the Cube is still busy with an earlier transfer. If the Cube stays silent
+        (it may still be streaming a burst read left over from an earlier or cancelled copy, or another
+        program is using its file transfer), send a Reset, wait until no file-transfer packets have arrived
+        for a while (at most a few times the reply timeout), and ask again."""
+        data = path.encode("ascii")
+        last = None
+        for attempt in range(1, tries + 1):
+            try:
+                r = self.request(OP_OPEN_RO, 0, 0, len(data), data)
+                if attempt > 1:
+                    _log("Opened %s on try %d." % (path, attempt))
+                return r
+            except Aborted:
+                raise
+            except CubeSDError as ex:
+                last = ex
+            _log("No answer to opening %s (try %d of %d); resetting the Cube's file transfer." % (path, attempt, tries))
+            self.reset()
+            now = self.clock()
+            quiet_until = now + self.reply_timeout * 1.2
+            give_up = now + self.reply_timeout * 4
+            while self.clock() < min(quiet_until, give_up):
+                self.check()
+                if self._parse(self.t.recv(0.25)) is not None:
+                    quiet_until = self.clock() + self.reply_timeout * 0.6   # still streaming: wait for it to stop
+        raise CubeSDError("The Cube did not answer after %d tries. Something else may be using its file "
+                          "transfer (an earlier copy, or another program). Wait a minute and try again. (%s)"
+                          % (tries, last))
+
     def list_dir(self, path):
         """[(name, size or None, is_dir)] of a directory on the Cube's SD card."""
         out, offset = [], 0
@@ -292,8 +333,7 @@ class FtpClient(object):
         while n >= 1 and len(out) < count and misses < 12:
             self.check()
             name = "%08d.BIN" % n
-            data = ("%s/%s" % (path, name)).encode("ascii")
-            r = self.request(OP_OPEN_RO, 0, 0, len(data), data)
+            r = self.open_ro("%s/%s" % (path, name))
             if r["op"] == OP_ACK and len(r["data"]) >= 4:
                 out.append((name, struct.unpack("<I", r["data"][:4])[0]))
                 misses = 0
@@ -305,8 +345,7 @@ class FtpClient(object):
 
     def download(self, path, write, progress, burst=True):
         """Read a whole file: write(bytes) gets the data in order, progress(got, total) is called often."""
-        data = path.encode("ascii")
-        r = self.request(OP_OPEN_RO, 0, 0, len(data), data)
+        r = self.open_ro(path)
         if r["op"] != OP_ACK:
             code = bytearray(r["data"][:1])[0] if r["data"] else -1
             raise CubeSDError("The Cube cannot open %s (error %d)." % (path, code))
@@ -592,6 +631,7 @@ class CubeSD(object):
                 if n == self.job.get("n") or n in self.queue:
                     return True, "Already queued."
                 self.queue.append(n)
+                _log("Queued: log %s (%d waiting)." % (n, len(self.queue)))
                 return True, "Queued."
         return self._start("copy", self._do_copy, armed, n)
 
@@ -607,6 +647,8 @@ class CubeSD(object):
     # -- the job thread
     def _run(self, target, armed, n):
         transport = None
+        what = "list" if target == self._do_list else "copy of log %s" % n
+        _log("Started: %s." % what)
         try:
             transport = self.connect()
 
@@ -626,12 +668,16 @@ class CubeSD(object):
                 n = self._next_in_queue()
                 if n is None:
                     break
+                _log("Started: copy of log %s (from the queue)." % n)
                 check()
         except Aborted as ex:
+            _log("Stopped: %s" % ex)
             self._set(state="cancelled", message=str(ex) + self._drop_queue(), error=None, finishedAt=int(self.clock()))
         except CubeSDError as ex:
+            _log("Failed: %s" % ex)
             self._set(state="error", error=str(ex) + self._drop_queue(), message=str(ex), finishedAt=int(self.clock()))
         except Exception as ex:
+            _log("Unexpected problem: %s\n%s" % (ex, traceback.format_exc().rstrip()))
             self._set(state="error", error="Unexpected problem: %s" % ex + self._drop_queue(),
                       message="Unexpected problem: %s" % ex, finishedAt=int(self.clock()))
         finally:
@@ -681,6 +727,7 @@ class CubeSD(object):
             self.listing = items
             self.listed_at = int(self.clock())
         self._set(state="done", message="%d logs on the Cube's SD card." % len(items), finishedAt=int(self.clock()))
+        _log("Done: %d logs on the Cube's SD card." % len(items))
 
     def _do_copy(self, client, n):
         with self.lock:
@@ -732,6 +779,9 @@ class CubeSD(object):
             self._rate[1] += max(self.clock() - began, 0.001)
             self.job["copied"] = self.job.get("copied", 0) + 1
         self._set(got=item["size"], total=item["size"], speed=0, message="Log %d copied to the Solo." % n)
+        secs = max(self.clock() - began, 0.001)
+        _log("Done: log %d copied, %d bytes in %d s (%.1f KB/s); %s." % (
+            n, item["size"], secs, item["size"] / secs / 1024.0, client.describe()))
 
 
 _MANAGER = []

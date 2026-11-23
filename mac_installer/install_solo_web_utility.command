@@ -1,5 +1,5 @@
 #!/bin/bash
-# Solo Web Utility v1.2.12 -- Mac installer.
+# Solo Web Utility v1.2.13 -- Mac installer.
 #
 # Installs Solo Web Utility on a 3DR Solo over SoloLink Wi-Fi with the ssh that ships
 # with macOS: same files, target folders, /etc/inittab respawn entry and firmware
@@ -151,7 +151,7 @@ bad_md5s() {
 # ------------------------------------------------------------------ install
 
 say "=========================================================="
-say "  Solo Web Utility v1.2.12 -- Mac installer"
+say "  Solo Web Utility v1.2.13 -- Mac installer"
 say "=========================================================="
 say "1. Turn on the Solo and the Controller."
 say "2. Join the SoloLink_... Wi-Fi on this Mac (it has no internet; that is normal)."
@@ -304,6 +304,32 @@ if [ -s "$WORK/fw.bad" ]; then
     fail "$(wc -l < "$WORK/fw.bad" | tr -d ' ') firmware file(s) on the Solo are damaged."
 fi
 ok "All $FW_COUNT firmware files on the Solo verified."
+
+# Clean up after earlier installs: older Cube builds of the same board, previous/ and .staging/ (same rule
+# as deploy_to_drone.py's obsolete_firmware). Newer builds, custom/ uploads and other files stay.
+KEEP=$(awk -F'\t' '$1 == "fw" && $4 ~ /^firmware\/[^\/]*\.apj$/ { print substr($4, 10) }' "$MANIFEST" | tr '\n' ' ')
+GONE=$(rsh "cd $LOG_FW_DIR 2>/dev/null && ls -a 2>/dev/null || true" </dev/null | awk -v keep="$KEEP" '
+    function parse(n,   s, P, V) {
+        if (n !~ /^arducopter_(CubeSolo|CubeGreen)_[0-9]+\.[0-9]+\.[0-9]+\.apj$/) return 0
+        s = n; sub(/^arducopter_/, "", s); sub(/\.apj$/, "", s)
+        split(s, P, "_"); split(P[2], V, ".")
+        board = P[1]; ver = V[1] * 1000000 + V[2] * 1000 + V[3]
+        return 1
+    }
+    BEGIN { nk = split(keep, K, " ")
+            for (i = 1; i <= nk; i++) { kept[K[i]] = 1
+                if (parse(K[i]) && (!(board in best) || ver > best[board])) best[board] = ver } }
+    { n = $0; sub(/\r$/, "", n)
+      if (n == "previous" || n == ".staging") { print n; next }
+      if (parse(n) && !(n in kept) && (board in best) && ver < best[board]) print n }')
+if [ -n "$GONE" ]; then
+    args=""
+    while IFS= read -r g; do args="$args $(q "$g")"; done <<EOF
+$GONE
+EOF
+    rsh "cd $LOG_FW_DIR && rm -rf $args 2>/dev/null; true" </dev/null
+    say "Removed old firmware files from $LOG_FW_DIR: $(printf '%s' "$GONE" | tr '\n' ' ')"
+fi
 
 rsh "mkdir -p /usr/bin/SoloWebUtility2 /log/SoloWebUtility2 /home/root/SoloWebUtility2 2>/dev/null || true
      ln -sfn /log/firmware /usr/bin/SoloWebUtility2/firmware 2>/dev/null || true

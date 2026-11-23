@@ -861,6 +861,14 @@ class SoloApiHandler(BaseHTTPRequestHandler):
             self._send_json({"ok": ok, "message": msg})
             return
 
+        # RTK corrections: RTCM from a USB base receiver on the phone (SoloLink Viewer app, through
+        # the Cockpit page), sent on to the Cube as GPS_RTCM_DATA
+        if path == '/api/rtk/rtcm':
+            cockpit_mgr.note_demand()
+            ok, msg = cockpit_mgr.rtk_corrections.report(body)
+            self._send_json({"ok": ok, "message": msg, "rtk": cockpit_mgr.rtk_corrections.status()})
+            return
+
 
         # 2. Auth Endpoints
         if path == '/api/auth/logout':

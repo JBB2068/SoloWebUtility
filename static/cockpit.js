@@ -96,6 +96,11 @@
     const gpsLonVal = document.getElementById('gpsLonVal');
     const altMslVal = document.getElementById('altMslVal');
     const gpsHdopVal = document.getElementById('gpsHdopVal');
+    const rtkRow = document.getElementById('rowRtk');
+    const rtkBaseVal = document.getElementById('rtkBaseVal');
+    const rtkSetupRow = document.getElementById('rowRtkSetup');
+    const rtkSetupNote = document.getElementById('rtkSetupNote');
+    const btnRtkSetup = document.getElementById('btnRtkSetup');
     const mavlinkMsgBox = document.getElementById('mavlinkMsgBox');
     const msgCountBadge = document.getElementById('msgCountBadge');
     const btnScrollBottom = document.getElementById('btnScrollBottom');
@@ -435,6 +440,183 @@
     window.soloViewerPilotFix = function(fix) {
         if (fix && typeof fix.lat === 'number' && typeof fix.lon === 'number') sendPilotFix(fix);
     };
+
+    // RTK base: the SoloLink Viewer app reads RTCM corrections from a GNSS base receiver on the phone's
+    // USB port and hands whole RTCM frames to the page (window.soloViewerRtcm, base64, about once a second).
+    // They are posted to /api/rtk/rtcm and the server sends them to the Cube as GPS_RTCM_DATA.
+    // Corrections are only useful while fresh: on a backlog the oldest are dropped, a failed post is not retried.
+    const RTK_QUEUE_MAX = 400;               // frames waiting (a base sends a few a second)
+    const RTK_POST_MAX = 200;                // frames per post (the server takes at most 200)
+    let rtkQueue = [];
+    let rtkBusy = false;
+    let rtkApp = null;                       // {state, device, message} from the Viewer app (null outside it)
+    let rtkSendProblem = '';
+    let rtkSetupResult = '';
+    window.soloViewerRtkStatus = function(st) {
+        rtkApp = (st && typeof st === 'object') ? st : { state: String(st || '') };
+    };
+    function sendRtk() {
+        if (rtkBusy || !rtkQueue.length) return;
+        rtkBusy = true;
+        const frames = rtkQueue.splice(0, RTK_POST_MAX);
+        fetch('/api/rtk/rtcm', {
+            method: 'POST',
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ frames: frames, app: rtkApp || {} })
+        }).then(function(r) {
+            if (r.status === 401) {
+                authRequired();
+                rtkSendProblem = 'log in to the utility first';
+                return null;
+            }
+            return r.json();
+        }).then(function(data) {
+            if (data) rtkSendProblem = data.ok ? '' : String(data.message || 'refused');
+        }).catch(function(err) {
+            rtkSendProblem = 'could not reach the Solo (' + err.message + ')';
+        }).then(function() {
+            rtkBusy = false;
+            if (rtkQueue.length) setTimeout(sendRtk, 0);
+        });
+    }
+    window.soloViewerRtcm = function(batch) {
+        const frames = (batch && Array.isArray(batch.frames)) ? batch.frames : [];
+        for (let i = 0; i < frames.length; i++) {
+            if (typeof frames[i] === 'string' && frames[i]) rtkQueue.push(frames[i]);
+        }
+        if (rtkQueue.length > RTK_QUEUE_MAX) rtkQueue.splice(0, rtkQueue.length - RTK_QUEUE_MAX);
+        sendRtk();
+    };
+
+    // RTK row of the GPS card: what the base and the corrections are doing
+    const RTK_APP_TEXT = {
+        none: ['PLUG IN BASE', 'No GNSS base receiver on the phone\'s USB port.'],
+        permission: ['ALLOW USB', 'Allow the SoloLink Viewer app to use the base receiver (Android asks once).'],
+        denied: ['USB NOT ALLOWED', 'Android did not allow the app to use the base. Unplug it and plug it in again, then tap OK.'],
+        error: ['BASE ERROR', 'The app could not read the base receiver.'],
+        waiting: ['NO RTCM YET', 'The base is connected but sends no RTCM corrections. Press SET UP BASE (Mission Planner does the same ' +
+            'when it connects), or turn on RTCM3 output on USB in u-center and save it in the receiver.']
+    };
+    // Survey-in choices: at least this long AND until the base knows its own position this well.
+    // The first is Mission Planner's default. Tapping the note picks the next one (remembered on this device).
+    const RTK_SURVEY_PRESETS = [
+        { secs: 60, acc: 2.0, label: '1 MIN · 2 M' },
+        { secs: 300, acc: 1.0, label: '5 MIN · 1 M' },
+        { secs: 600, acc: 0.5, label: '10 MIN · 0.5 M' },
+        { secs: 1800, acc: 0.3, label: '30 MIN · 0.3 M' }
+    ];
+    let rtkSurveyIdx = 0;
+    try {
+        const saved = parseInt(localStorage.getItem('rtkSurveyPreset'), 10);
+        if (saved >= 0 && saved < RTK_SURVEY_PRESETS.length) rtkSurveyIdx = saved;
+    } catch (e) { /* no storage: use the default */ }
+    let rtkNoteTimer = null;
+    function rtkSurvey() { return RTK_SURVEY_PRESETS[rtkSurveyIdx]; }
+    function showRtkNote(text) {
+        if (!rtkSetupNote) return;
+        if (rtkNoteTimer) clearTimeout(rtkNoteTimer);
+        rtkNoteTimer = null;
+        if (text) {
+            rtkSetupNote.textContent = text;
+            rtkNoteTimer = setTimeout(function() { showRtkNote(''); }, 5000);
+        } else {
+            rtkSetupNote.textContent = rtkSurvey().label;
+        }
+    }
+    showRtkNote('');
+    if (rtkSetupNote) {
+        rtkSetupNote.addEventListener('click', function(e) {
+            e.stopPropagation();
+            rtkSurveyIdx = (rtkSurveyIdx + 1) % RTK_SURVEY_PRESETS.length;
+            try { localStorage.setItem('rtkSurveyPreset', String(rtkSurveyIdx)); } catch (err) { /* not remembered */ }
+            showRtkNote('');
+        });
+    }
+    if (btnRtkSetup) {
+        btnRtkSetup.addEventListener('click', function(e) {
+            e.stopPropagation();
+            if (!window.SoloViewerRtk || typeof window.SoloViewerRtk.setupBase !== 'function') {
+                rtkSetupResult = 'Needs SoloLink Viewer 1.6 or newer (http://10.1.1.10/sololink_viewer.apk).';
+            } else {
+                let res = '';
+                try {
+                    res = String(window.SoloViewerRtk.setupBase(rtkSurvey().secs, rtkSurvey().acc));
+                } catch (err) {
+                    res = err.message;
+                }
+                rtkSetupResult = res === 'ok' ? 'Settings sent: survey-in started.' : res;
+            }
+            showRtkNote(rtkSetupResult === 'Settings sent: survey-in started.' ? 'SURVEY STARTED' : rtkSetupResult);
+        });
+    }
+    function updateRtk(telem) {
+        if (!rtkRow) return;
+        const rtk = telem.rtk || {};
+        const app = (rtkApp && rtkApp.state) ? rtkApp : (rtk.app || {});
+        const info = app.info || {};
+        const svin = info.svin || null;
+        const used = rtk.frames > 0 || !!app.state;
+        rtkRow.style.display = used ? '' : 'none';
+        if (rtkSetupRow) {
+            const canSetup = !!window.SoloViewerRtk && (app.state === 'connected' || app.state === 'waiting');
+            rtkSetupRow.style.display = canSetup ? '' : 'none';
+            if (btnRtkSetup) btnRtkSetup.textContent = (svin && svin.active) ? 'RESTART SURVEY' : 'SET UP BASE';
+        }
+        if (!used) return;
+        let text, color, title;
+        if (!rtk.active && svin && svin.active) {
+            text = 'SURVEY ' + svin.dur + ' s · ' + Number(svin.acc).toFixed(1) + ' m';
+            color = 'var(--accent-amber)';
+            title = 'The base is measuring its own position (survey-in): it needs at least ' + rtkSurvey().secs +
+                ' s and ' + rtkSurvey().acc + ' m. Corrections start when it is done. Keep the base still with a clear view of the sky.';
+        } else if (rtk.active) {
+            // The GPS pill is hidden in the full-screen HUD, so the fix type goes on this line:
+            // what the Solo's GPS makes of the corrections (6 RTK fixed, 5 RTK float, 4 DGPS).
+            const gps = telem.gps || {};
+            const fixType = (typeof gps.fix_type === 'number') ? gps.fix_type :
+                ((typeof telem.gps_fix_type === 'number') ? telem.gps_fix_type : 0);
+            const kbs = (rtk.rate_bps / 1024).toFixed(1);
+            const fixWord = fixType === 6 ? 'FIX' : fixType === 5 ? 'FLOAT' : fixType === 4 ? 'DGPS' :
+                (fixType >= 3 ? '3D' : 'NO FIX');
+            text = fixWord + ' · ' + kbs + ' KB/s';
+            color = fixType === 6 ? 'var(--accent-emerald)' : (fixType >= 4 ? 'var(--accent-amber)' : '#e2e8f0');
+            title = (fixType === 6 ? 'RTK fixed: about 1-2 cm against the base. ' :
+                fixType === 5 ? 'RTK float: about 0.2-1 m; it turns into FIX when the GPS solves the carrier phase. ' :
+                fixType === 4 ? 'DGPS: the GPS uses the corrections, but not RTK yet. ' :
+                'The GPS has corrections but no RTK solution yet (needs an RTK-capable GPS, about 12+ satellites and open sky). ') +
+                'Last correction ' + (rtk.age_s || 0).toFixed(1) + ' s ago. ' +
+                'RTCM corrections reach the Cube (' + (rtk.types || []).join(', ') + ').';
+            if (rtk.base) title += ' Base at ' + rtk.base.lat.toFixed(7) + ', ' + rtk.base.lon.toFixed(7) +
+                ', ' + rtk.base.alt.toFixed(1) + ' m.';
+            else title += ' The base has not sent its position (1005) yet.';
+        } else if (RTK_APP_TEXT[app.state]) {
+            text = RTK_APP_TEXT[app.state][0];
+            title = app.message || RTK_APP_TEXT[app.state][1];
+            if (app.state === 'waiting') {
+                // what the base does send: nothing at all, or GPS text / UBX without corrections
+                const kinds = [];
+                if (info.nmea) kinds.push('NMEA');
+                if (info.ubx) kinds.push('UBX');
+                title += ' The base sent ' + (info.bytes || 0) + ' bytes' + (kinds.length ? ' (' + kinds.join(', ') + ')' : '') + '.';
+                if (svin && svin.valid && !svin.active) title += ' Survey-in is done but RTCM output is off.';
+                if (info.setup_sent && info.naks) title += ' The base refused ' + info.naks + ' setting(s) it does not have.';
+            }
+            color = app.state === 'none' ? 'var(--text-secondary)' : 'var(--accent-amber)';
+        } else if (typeof rtk.age_s === 'number') {
+            text = 'NO DATA ' + Math.round(rtk.age_s) + ' s';
+            title = 'No corrections for ' + Math.round(rtk.age_s) + ' s. The Solo falls back from RTK to a normal GPS fix.';
+            color = 'var(--accent-red)';
+        } else {
+            text = 'WAITING';
+            title = 'Waiting for corrections from the base.';
+            color = 'var(--accent-amber)';
+        }
+        const problem = rtkSendProblem || rtk.last_error || '';
+        if (problem && !rtk.active) title += ' (' + problem + ')';
+        rtkBaseVal.textContent = text;
+        rtkBaseVal.style.color = color;
+        rtkRow.title = title;
+    }
 
     function setFollowStyleLabel(style) {
         if (!btnFollowStyle || !FOLLOW_STYLE_LABELS[style]) return;
@@ -1881,7 +2063,7 @@
     const osdAge = document.getElementById('osdMsgAge');
     const osdHistory = document.getElementById('osdMsgHistory');
     const osdViewport = document.getElementById('pfdViewport');
-    const OSD_DEFAULT_TOP = 32;   // px below the top of the video: just under the heading tape
+    const OSD_BOTTOM = 50;        // px above the bottom of the video: one line above the flight mode text
     const OSD_SEV_LABELS = ['EMERG', 'ALERT', 'CRIT', 'ERROR', 'WARN', 'NOTICE', 'INFO', 'DEBUG'];
 
     function osdSevClass(sev) {
@@ -1908,33 +2090,14 @@
             left = 8;
             right = 8;
         }
-        // Default spot is just under the heading tape. If the cockpit's own control buttons
-        // (they wrap onto extra lines on narrow screens) would cover it, go below them.
-        let top = OSD_DEFAULT_TOP;
-        const vp = osdViewport.getBoundingClientRect();
-        const barRect = osdMain ? osdMain.getBoundingClientRect() : null;
-        const barH = barRect && barRect.height ? barRect.height : 28;
-        const barL = vp.left + left, barR = vp.right - right;
-        // (repeated: below one line of buttons there may be another, e.g. the Smart Shots row)
-        const btns = document.querySelectorAll('#tab-cockpit .top-bar .btn-ctrl, #tab-cockpit .top-bar .smart-shot-msg, #tab-cockpit .top-bar .pad-settings');
-        for (let pass = 0; pass < 5; pass++) {
-            let below = 0;
-            for (let i = 0; i < btns.length; i++) {
-                const r = btns[i].getBoundingClientRect();
-                if (!r.width || !r.height) continue;
-                const overlapX = r.left < barR && r.right > barL;
-                const overlapY = r.top < vp.top + top + barH && r.bottom > vp.top + top;
-                if (overlapX && overlapY) below = Math.max(below, r.bottom - vp.top + 4);
-            }
-            if (!below) break;
-            top = Math.round(below);
-        }
-        const key = left + '_' + right + '_' + top;
+        // Bottom of the video, one line above the flight mode; the history opens upwards (CSS).
+        const key = left + '_' + right;
         if (key !== osdLayoutKey) {
             osdLayoutKey = key;
             osdBar.style.left = left + 'px';
             osdBar.style.right = right + 'px';
-            osdBar.style.top = top + 'px';
+            osdBar.style.top = 'auto';
+            osdBar.style.bottom = OSD_BOTTOM + 'px';
         }
     }
 
@@ -2075,7 +2238,8 @@
             const sats = (typeof gps.satellites === 'number') ? gps.satellites : ((typeof telem.satellites === 'number') ? telem.satellites : 0);
             const fixType = (typeof gps.fix_type === 'number') ? gps.fix_type : ((typeof telem.gps_fix_type === 'number') ? telem.gps_fix_type : 0);
             const fixLabel = gps.fix_label || telem.gps_fix_label || (fixType >= 2 ? '3D FIX' : 'NO FIX');
-            gpsPill.textContent = '🛰️ ' + sats + ' ' + (fixType >= 2 ? '3D' : 'NO FIX');
+            const pillFix = fixType === 6 ? 'RTK FIX' : fixType === 5 ? 'RTK FLOAT' : fixType === 4 ? 'DGPS' : (fixType >= 2 ? '3D' : 'NO FIX');
+            gpsPill.textContent = '🛰️ ' + sats + ' ' + pillFix;
 
             // MAVLink Connection Badge
             const isOnline = telem.mavlink_online ?? telem.connected ?? telem.mavlink_connected ?? false;
@@ -2121,6 +2285,7 @@
 
             const hdopVal = (typeof gps.hdop === 'number') ? gps.hdop : ((typeof telem.hdop === 'number') ? telem.hdop : 0);
             gpsHdopVal.textContent = hdopVal.toFixed(2);
+            try { updateRtk(telem); } catch (e) { console.warn('RTK row', e); }   // never stop the HUD
 
             // MAVLink Messages Box
             const msgs = msgLog;

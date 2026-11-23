@@ -19,6 +19,7 @@ dist/
 distribution/
 android_app/dist/
 android_app/build_temp/
+android_app/build_viewer_temp/
 res_compiled/
 build_temp/
 *.spec

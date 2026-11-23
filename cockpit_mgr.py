@@ -16,6 +16,7 @@ import re
 import time
 import socket
 import select
+import base64
 import struct
 import threading
 
@@ -2356,11 +2357,254 @@ class PrecisionLanding(object):
                       if on else "Precision Loiter off.")
 
 
+# ---------- RTK base corrections ----------
+# The SoloLink Viewer app reads RTCM3 from a GNSS base receiver on the phone's USB port (u-blox,
+# set up beforehand in u-center: survey-in or a fixed position) and hands whole RTCM frames to the
+# page (window.soloViewerRtcm). The Cockpit posts them to /api/rtk/rtcm about once a second, and
+# every frame goes to the Cube as GPS_RTCM_DATA (233) through telem_forwarder (127.0.0.1:14560) --
+# the same thing Mission Planner's RTK inject does. ArduPilot hands it to its GPS (GPS_INJECT_TO).
+# Packed by hand, MAVLink 1: the Solo's pymavlink may be too old to know GPS_RTCM_DATA.
+GPS_RTCM_DATA_MSGID = 233
+GPS_RTCM_DATA_CRC_EXTRA = 35
+RTCM_FRAGMENT_LEN = 180             # GPS_RTCM_DATA data field
+RTCM_MAX_FRAGMENTS = 4              # ArduPilot puts a frame back together from at most 4 fragments
+RTCM_MAX_FRAME = RTCM_FRAGMENT_LEN * RTCM_MAX_FRAGMENTS
+RTK_MAX_FRAMES_PER_POST = 200
+RTK_MAX_POST_BYTES = 65536          # decoded RTCM per post (a base sends about 1-2 KB a second)
+RTK_STALE_SECS = 5.0                # no corrections for this long: the Cockpit warns
+RTK_RATE_WINDOW = 10.0              # bytes per second over this many seconds
+RTK_TYPES_WINDOW = 30.0             # message types seen in the last 30 s
+WGS84_A = 6378137.0
+WGS84_F = 1.0 / 298.257223563
+WGS84_E2 = WGS84_F * (2.0 - WGS84_F)
+
+
+def rtcm_crc24q(data):
+    """CRC-24Q of RTCM3 (polynomial 0x1864CFB) over bytes/bytearray."""
+    crc = 0
+    for b in bytearray(data):
+        crc ^= b << 16
+        for _ in range(8):
+            crc <<= 1
+            if crc & 0x1000000:
+                crc ^= 0x1864CFB
+    return crc & 0xFFFFFF
+
+
+def rtcm_check_frame(frame):
+    """One whole RTCM3 frame (0xD3, 10-bit length, payload, CRC-24Q) -> (message type, None)
+    or (None, reason)."""
+    frame = bytearray(frame)
+    if len(frame) < 6 or frame[0] != 0xD3:
+        return None, "not an RTCM3 frame"
+    length = ((frame[1] & 0x03) << 8) | frame[2]
+    if len(frame) != length + 6:
+        return None, "wrong length"
+    crc = (frame[-3] << 16) | (frame[-2] << 8) | frame[-1]
+    if rtcm_crc24q(frame[:-3]) != crc:
+        return None, "bad checksum"
+    if length < 2:
+        return None, "empty message"
+    return (frame[3] << 4) | (frame[4] >> 4), None
+
+
+def pack_gps_rtcm_data(flags, data):
+    """GPS_RTCM_DATA payload: flags, len, data[180] (zero-padded)."""
+    data = bytes(bytearray(data))
+    return struct.pack('<BB', flags & 0xFF, len(data)) + data + b'\x00' * (RTCM_FRAGMENT_LEN - len(data))
+
+
+def rtcm_to_payloads(frame, seq):
+    """GPS_RTCM_DATA payloads for one RTCM frame, the way ArduPilot puts them back together
+    (AP_GPS::handle_gps_rtcm_fragment). flags bit 0 = fragmented, bits 1-2 = fragment number,
+    bits 3-7 = sequence number of the frame. A fragment shorter than 180 bytes is the last one,
+    so a fragmented frame that is an exact multiple of 180 gets an empty last fragment."""
+    frame = bytearray(frame)
+    seq = (seq & 0x1F) << 3
+    if len(frame) <= RTCM_FRAGMENT_LEN:
+        return [pack_gps_rtcm_data(seq, frame)]
+    if len(frame) > RTCM_MAX_FRAME:
+        return []
+    chunks = [frame[i:i + RTCM_FRAGMENT_LEN] for i in range(0, len(frame), RTCM_FRAGMENT_LEN)]
+    if len(chunks[-1]) == RTCM_FRAGMENT_LEN and len(chunks) < RTCM_MAX_FRAGMENTS:
+        chunks.append(bytearray())
+    return [pack_gps_rtcm_data(0x01 | (i << 1) | seq, c) for i, c in enumerate(chunks)]
+
+
+def _rtcm_bits(payload, start, count, signed=False):
+    """count bits from bit start (big-endian, as RTCM packs them)."""
+    v = 0
+    for i in range(start, start + count):
+        v = (v << 1) | ((payload[i >> 3] >> (7 - (i & 7))) & 1)
+    if signed and v & (1 << (count - 1)):
+        v -= 1 << count
+    return v
+
+
+def ecef_to_lla(x, y, z):
+    """WGS84 ECEF (m) -> (lat deg, lon deg, height m)."""
+    lon = math.atan2(y, x)
+    p = math.sqrt(x * x + y * y)
+    if p < 1e-6:
+        return (90.0 if z >= 0 else -90.0), 0.0, abs(z) - WGS84_A * (1.0 - WGS84_F)
+    lat = math.atan2(z, p * (1.0 - WGS84_E2))
+    h = 0.0
+    for _ in range(8):
+        n = WGS84_A / math.sqrt(1.0 - WGS84_E2 * math.sin(lat) ** 2)
+        h = p / math.cos(lat) - n
+        lat = math.atan2(z, p * (1.0 - WGS84_E2 * n / (n + h)))
+    return math.degrees(lat), math.degrees(lon), h
+
+
+def rtcm_base_position(frame):
+    """Base antenna position from an RTCM 1005/1006 frame -> {lat, lon, alt} or None."""
+    frame = bytearray(frame)
+    mtype, err = rtcm_check_frame(frame)
+    if err or mtype not in (1005, 1006):
+        return None
+    payload = frame[3:-3]
+    if len(payload) < 19:
+        return None
+    x = _rtcm_bits(payload, 34, 38, True) * 0.0001
+    y = _rtcm_bits(payload, 74, 38, True) * 0.0001
+    z = _rtcm_bits(payload, 114, 38, True) * 0.0001
+    if abs(x) + abs(y) + abs(z) < 1000.0:
+        return None                     # survey-in not finished: the base sends zeros
+    lat, lon, h = ecef_to_lla(x, y, z)
+    return {"lat": round(lat, 8), "lon": round(lon, 8), "alt": round(h, 2)}
+
+
+class RtkCorrections(object):
+    """RTCM corrections from the phone's USB base, sent on to the Cube as GPS_RTCM_DATA."""
+    def __init__(self, send_payload=None):
+        self.lock = threading.Lock()
+        self.send_payload = send_payload    # payload bytes -> None; raises/returns False when not sent
+        self.seq = 0
+        self.frames = 0                     # frames sent to the Cube
+        self.bytes = 0
+        self.rejected = 0                   # frames refused (bad checksum, too long, link paused)
+        self.last_error = ""
+        self.last_time = 0.0                # time.time() of the last frame sent
+        self.recent = []                    # (time, bytes) for the rate
+        self.types = {}                     # message type -> time last seen
+        self.base = None                    # {lat, lon, alt} from 1005/1006
+        self.app = {}                       # what the Viewer app says about the base (state, device)
+        self.app_time = 0.0
+
+    def report(self, data, now=None):
+        """One post from the Cockpit: {"frames": [base64 RTCM frame, ...], "app": {...}} -> (ok, message)."""
+        now = time.time() if now is None else now
+        if not isinstance(data, dict):
+            return False, "Bad RTCM post."
+        app = data.get("app")
+        if isinstance(app, dict):
+            clean = {}
+            for k in ("state", "device", "message"):
+                v = app.get(k)
+                if isinstance(v, (str, type(u""))):
+                    clean[k] = v[:120]
+            with self.lock:
+                self.app = clean
+                self.app_time = now
+        frames = data.get("frames", [])
+        if not isinstance(frames, list) or len(frames) > RTK_MAX_FRAMES_PER_POST:
+            return False, "Bad RTCM post."
+        decoded = []
+        total = 0
+        for f in frames:
+            try:
+                raw = bytearray(base64.b64decode(f))
+            except Exception:
+                raw = None
+            if raw is None:
+                self._reject("a frame was not base64")
+                continue
+            total += len(raw)
+            if total > RTK_MAX_POST_BYTES:
+                return False, "Too much RTCM in one post."
+            decoded.append(raw)
+        sent = 0
+        for raw in decoded:
+            if self._send_frame(raw, now):
+                sent += 1
+        if decoded and not sent:
+            return False, self.last_error or "No RTCM frame could be sent."
+        return True, "%d RTCM frame%s sent to the Cube." % (sent, "" if sent == 1 else "s")
+
+    def _reject(self, why):
+        with self.lock:
+            self.rejected += 1
+            self.last_error = why
+
+    def _send_frame(self, raw, now):
+        mtype, err = rtcm_check_frame(raw)
+        if err:
+            self._reject("RTCM frame refused: %s" % err)
+            return False
+        if len(raw) > RTCM_MAX_FRAME:
+            self._reject("RTCM %d message too long for GPS_RTCM_DATA (%d bytes)" % (mtype, len(raw)))
+            return False
+        with self.lock:
+            seq = self.seq
+            self.seq = (self.seq + 1) & 0x1F
+        try:
+            for payload in rtcm_to_payloads(raw, seq):
+                if self.send_payload is None or self.send_payload(payload) is False:
+                    self._reject("The Cube link is busy (firmware or calibration); corrections paused")
+                    return False
+        except Exception as e:
+            self._reject("Could not send to the Cube: %s" % e)
+            return False
+        pos = rtcm_base_position(raw) if mtype in (1005, 1006) else None
+        with self.lock:
+            self.frames += 1
+            self.bytes += len(raw)
+            self.last_time = now
+            self.recent.append((now, len(raw)))
+            cut = now - RTK_RATE_WINDOW
+            while self.recent and self.recent[0][0] < cut:
+                self.recent.pop(0)
+            self.types[mtype] = now
+            if pos is not None:
+                self.base = pos
+        return True
+
+    def status(self, now=None):
+        now = time.time() if now is None else now
+        with self.lock:
+            age = (now - self.last_time) if self.last_time else None
+            cut = now - RTK_RATE_WINDOW
+            recent = sum(n for t, n in self.recent if t >= cut)
+            types = sorted(t for t, seen in self.types.items() if now - seen <= RTK_TYPES_WINDOW)
+            app = dict(self.app) if now - self.app_time <= RTK_STALE_SECS * 2 else {}
+            return {
+                "active": age is not None and age <= RTK_STALE_SECS,
+                "age_s": round(age, 1) if age is not None else None,
+                "frames": self.frames,
+                "bytes": self.bytes,
+                "rate_bps": int(round(recent / RTK_RATE_WINDOW)),
+                "types": types,
+                "rejected": self.rejected,
+                "last_error": self.last_error,
+                "base": dict(self.base) if self.base else None,
+                "app": app,
+            }
+
+
+def _send_rtcm_payload(payload):
+    """One GPS_RTCM_DATA to the Cube. False while flash_mgr or calibration holds the link."""
+    if getattr(mav_client, 'paused', False) or _flash_running():
+        return False
+    mav_client.send_packet(mav_client.build_mavlink_v1_packet(GPS_RTCM_DATA_MSGID, payload, GPS_RTCM_DATA_CRC_EXTRA))
+    return True
+
+
 # Global singletons
 telemetry = TelemetryState()
 mav_client = LiveMAVLinkClient(telemetry)
 video_manager = SoloVideoManager()
 pilot_location = PilotLocation()
+rtk_corrections = RtkCorrections(send_payload=_send_rtcm_payload)
 smart_shots = SmartShotClient(state=telemetry, pilot=pilot_location, position_fn=vehicle_position)
 precland = PrecisionLanding(mav_client, state=telemetry)
 _started = False
@@ -2419,6 +2663,7 @@ def get_telemetry_dict(msgs_since=None):
     d["smart_shot"] = smart_shots.status()
     d["pilot"] = pilot_location.status()
     d["precland"] = precland.status()
+    d["rtk"] = rtk_corrections.status()
     if msgs_since is not None:
         log = d.pop("mavlink_messages", None)
         d.pop("messages", None)

@@ -300,12 +300,12 @@
 /* MAVLink OSD Messages Bar (vehicle STATUSTEXT over the video) */
 .osd-msg-bar {
     position: absolute;
-    top: 32px;                 /* just under the heading tape; left/right set by cockpit.js */
+    bottom: 50px;              /* one line above the flight mode text; left/right set by cockpit.js */
     left: 280px;
     right: 288px;
     z-index: 150;              /* above the canvas and HUD text (100), below the cockpit buttons (500) */
     display: flex;
-    flex-direction: column;
+    flex-direction: column-reverse;   /* the history opens upwards, above the bar */
     align-items: center;
     pointer-events: none;      /* only the bar and its history take clicks */
 }
@@ -366,10 +366,11 @@
     font-size: 0.7rem;
     color: var(--text-secondary);
     transition: transform 0.2s ease;
+    transform: rotate(180deg);   /* points up: the history opens upwards */
 }
 
 .osd-msg-bar.osd-open .osd-msg-caret {
-    transform: rotate(180deg);
+    transform: none;
 }
 
 /* Severity colours (MAV_SEVERITY) */
@@ -427,7 +428,7 @@
 /* Recent messages dropdown */
 .osd-msg-history {
     pointer-events: auto;
-    margin-top: 4px;
+    margin-bottom: 4px;
     width: 100%;
     max-width: 520px;
     max-height: min(260px, 45vh);
@@ -1186,4 +1187,23 @@
 
 .bottom-bar {
     display: none !important;
+}
+
+/* RTK base: the HUD panels ignore taps (pointer-events: none above), so the SET UP BASE
+   button and the survey choice turn them back on for themselves and get a visible button look. */
+.hud-card #btnRtkSetup,
+.hud-card #rtkSetupNote {
+    pointer-events: auto !important;
+    cursor: pointer !important;
+    background: rgba(0, 0, 0, 0.5) !important;
+    border: 1px solid rgba(16, 185, 129, 0.8) !important;
+    border-radius: 4px !important;
+    padding: 4px 10px !important;
+    height: auto !important;
+    font-size: 12px !important;
+    touch-action: manipulation;
+}
+.hud-card #btnRtkSetup:active,
+.hud-card #rtkSetupNote:active {
+    background: rgba(16, 185, 129, 0.45) !important;
 }

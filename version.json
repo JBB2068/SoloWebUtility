@@ -1,7 +1,7 @@
 {
-  "version": "1.2.12",
-  "iteration": 84,
-  "updated_at": 1795368074,
+  "version": "1.2.13",
+  "iteration": 85,
+  "updated_at": 1795467581,
   "changelog": [
     {
       "version": "1.0.67",
@@ -478,6 +478,12 @@
       "iteration": 84,
       "date": "2026-11-21 00:00:30",
       "description": "Flight Logs: copy several Cube logs one after another (queue), and a time-left estimate while copying. Update Factory Reset Partition: no backup and no staging copy any more (it writes straight from the running system), Restore backup removed. ArduCopter 4.7.3 is the built-in Cube firmware for both Cubes; older 4.7.x builds are no longer kept or offered (custom .apj uploads still work)."
+    },
+    {
+      "version": "1.2.13",
+      "iteration": 85,
+      "date": "2026-11-23 14:59:41",
+      "description": "Battery Solutions tab: the do-it-yourself battery mod is listed first and all prices are removed. Cube SD log copy: the Cube's file transfer is reset and the open retried, and every copy is logged on the Solo. RTK base on the phone: plug a u-blox RTK base receiver into the phone running the SoloLink Viewer app (1.6) and its RTCM corrections go to the Solo's RTK GPS (GPS_RTCM_DATA, like Mission Planner's RTK inject); SET UP BASE in the Cockpit starts survey-in and RTCM output on the base, with a choice of survey time and accuracy (1 min / 2 m up to 30 min / 0.3 m); the Cockpit shows the survey-in, the corrections and RTK Float/Fixed. The vehicle message box now sits at the bottom of the video above the flight mode and opens upwards. PUSH_TO_SOLO.bat copies changed files to a Solo for testing."
     }
   ]
 }

@@ -19,6 +19,7 @@ Key Design Points for 3DR Solo:
 """
 
 import os
+import re
 import sys
 import time
 import socket
@@ -60,10 +61,10 @@ def get_installer_version():
         vpath = get_local_path("version.json")
         if os.path.exists(vpath):
             with open(vpath, "r") as f:
-                return json.load(f).get("version", "1.2.12")
+                return json.load(f).get("version", "1.2.13")
     except Exception:
         pass
-    return "1.2.12"
+    return "1.2.13"
 
 
 def format_size(n):
@@ -429,6 +430,39 @@ def ensure_writable_target(client):
     return target_dir
 
 
+_APJ_VERSION = re.compile(r"^arducopter_(CubeSolo|CubeGreen)_(\d+)\.(\d+)\.(\d+)\.apj$")
+
+
+def obsolete_firmware(names, keep):
+    """The Cube builds in `names` (files in /log/firmware) that a build in `keep` replaces: the same board,
+    an older version. Newer builds (made on the Solo by the Firmware tab) and any other file stay."""
+    newest = {}
+    for k in keep:
+        m = _APJ_VERSION.match(k)
+        if m:
+            v = tuple(int(x) for x in m.groups()[1:])
+            newest[m.group(1)] = max(newest.get(m.group(1), v), v)
+    out = []
+    for n in names:
+        m = _APJ_VERSION.match(n)
+        if m and n not in keep and m.group(1) in newest and tuple(int(x) for x in m.groups()[1:]) < newest[m.group(1)]:
+            out.append(n)
+    return sorted(out)
+
+
+def cleanup_firmware(client, keep):
+    """Clean up after earlier installs: older Cube builds, the previous/ folder (older builds are no
+    longer kept) and the builder's leftover .staging folder. Browser uploads in custom/ are kept.
+    Returns the names removed."""
+    _rc, out = ssh_exec(client, "cd %s 2>/dev/null && ls -a 2>/dev/null || true" % LOG_FW_DIR)
+    names = [l.strip() for l in (out or "").splitlines() if l.strip()]
+    gone = obsolete_firmware(names, keep) + [d + "/" for d in ("previous", ".staging") if d in names]
+    if gone:
+        ssh_exec(client, "cd %s && rm -rf %s 2>/dev/null; true" % (
+            LOG_FW_DIR, " ".join("'%s'" % g.rstrip("/") for g in gone)))
+    return gone
+
+
 def firmware_archive_ready(log_func=print):
     """True when firmware/3dr-solo.tar.gz may be uploaded.
 
@@ -659,7 +693,7 @@ def main():
             ("firmware/solocustombuild.yaml",          "%s/solocustombuild.yaml" % LOG_FW_DIR),
         ]
 
-    ssh_exec(client, "mkdir -p %s %s/previous /log/updates /tmp/updates 2>/dev/null || true" % (LOG_FW_DIR, LOG_FW_DIR))
+    ssh_exec(client, "mkdir -p %s /log/updates /tmp/updates 2>/dev/null || true" % LOG_FW_DIR)
     print("\n[*] Uploading Firmware Files to %s..." % LOG_FW_DIR)
     for idx, (loc_rel, rem_path) in enumerate(firmware_files, 1):
         loc = get_local_path(loc_rel)
@@ -669,6 +703,12 @@ def main():
         size = os.path.getsize(loc)
         print("  [%d/%d] %-44s %s" % (idx, len(firmware_files), loc_rel, format_size(size)))
         safe_sftp_put(sftp, loc, rem_path, client=client)
+
+    # Clean up after earlier installs (older Cube builds, previous/, .staging/)
+    keep = [os.path.basename(rem) for _loc, rem in firmware_files if rem.endswith(".apj")]
+    removed = cleanup_firmware(client, keep)
+    if removed:
+        print("\n[*] Removed old firmware files from %s: %s" % (LOG_FW_DIR, ", ".join(removed)))
 
     # Post-upload verification of 3dr-solo.tar.gz
     if os.path.exists(local_solo_tar):
