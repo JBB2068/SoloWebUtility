@@ -6052,6 +6052,38 @@ class TestSoloWebUtility(unittest.TestCase):
         self.assertIn("const A8_LENS = { fov: 81, lens: 'rectilinear' }", js)
         self.assertEqual(js.count("zoomWideForFinder();"), 2)      # pad finder and takeoff spot on
 
+        # 4b. zoom reports the Cube's COMMAND_ACK: refused -> error; accepted -> the A8 4K hint
+        class _AckClient(_Client):
+            result = 3
+
+            def wait_command_ack(self, command, since, timeout=1.0):
+                self.asked = command
+                return self.result
+        ack_client = _AckClient()
+        ack_cam = cm.GimbalCamera(ack_client)
+        ack_cam.check_report({"MNT1_TYPE": 8.0, "CAM1_TYPE": 4.0})
+        ok, msg = ack_cam.zoom("in")
+        self.assertFalse(ok)
+        self.assertIn("CAM1_TYPE", msg)
+        self.assertEqual(ack_client.asked, 531)
+        self.assertFalse(ack_cam.zoom("wide")[0])
+        ack_client.result = 0
+        ok, msg = ack_cam.zoom("in")
+        self.assertTrue(ok)
+        self.assertIn("4K", msg)
+        self.assertTrue(ack_cam.zoom("stop")[0])
+
+        # 4c. the telemetry link keeps COMMAND_ACKs from the Cube, also MAVLink 2's truncated "accepted"
+        import struct as _st
+        link = cm.LiveMAVLinkClient(cm.TelemetryState())
+        t0 = time.time()
+        link.decode_payload(77, _st.pack('<HB', 531, 3), sysid=1, compid=1)
+        self.assertEqual(link.wait_command_ack(531, t0, 0.1), 3)
+        link.decode_payload(77, _st.pack('<H', 2000), sysid=1, compid=1)
+        self.assertEqual(link.wait_command_ack(2000, t0, 0.1), 0)
+        link.decode_payload(77, _st.pack('<HB', 2500, 4), sysid=1, compid=154)    # not the autopilot
+        self.assertIsNone(link.wait_command_ack(2500, t0, 0.1))
+
         # 5. CAMERA DOWN also takes a SIYI A8 Mini back to 1x (and sends nothing extra otherwise)
         old_cam = cm.gimbal_camera
         try:

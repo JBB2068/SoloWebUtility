@@ -1747,20 +1747,35 @@
         });
     }
 
-    // Hold to zoom: zoom starts on press and stops on release (or when the finger slides off)
+    // Hold to zoom: zoom starts on press and stops on release (or when the finger slides off).
+    // The stop is only sent once the start has been answered (so it can never overtake it and
+    // leave the A8 zooming), and a quick tap still zooms for ZOOM_MIN_MS.
+    const ZOOM_MIN_MS = 400;
+    let zoomStart = null;              // promise of the running zoom's start request
+    let zoomStartTime = 0;
     function bindZoom(btn, how) {
         if (!btn) return;
         function start(e) {
             e.preventDefault();
             e.stopPropagation();
+            if (cameraZooming) return;
             cameraZooming = true;
-            cameraAction({ action: 'gimbal_zoom', mode: how }, how === 'in' ? 'Zooming in.' : 'Zooming out.');
+            zoomStartTime = Date.now();
+            zoomStart = cameraAction({ action: 'gimbal_zoom', mode: how }, how === 'in' ? 'Zooming in.' : 'Zooming out.');
         }
         function stop(e) {
             if (!cameraZooming) return;
             if (e) e.stopPropagation();
             cameraZooming = false;
-            cameraAction({ action: 'gimbal_zoom', mode: 'stop' }, 'Zoom stopped.');
+            const started = zoomStart || Promise.resolve(null);
+            const wait = Math.max(0, ZOOM_MIN_MS - (Date.now() - zoomStartTime));
+            started.then(function(res) {
+                setTimeout(function() {
+                    // keep the start's message (a refusal or the 4K hint) on screen
+                    postAction({ action: 'gimbal_zoom', mode: 'stop' }).catch(function() {});
+                }, wait);
+                return res;
+            });
         }
         btn.addEventListener('pointerdown', start);
         ['pointerup', 'pointerleave', 'pointercancel'].forEach(function(ev) { btn.addEventListener(ev, stop); });

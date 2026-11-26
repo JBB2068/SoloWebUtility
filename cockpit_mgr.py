@@ -128,6 +128,8 @@ PARAM_REQUEST_READ_MSGID = 20
 PARAM_REQUEST_READ_CRC_EXTRA = 214
 PARAM_VALUE_MSGID = 22
 PARAM_VALUE_CRC_EXTRA = 220
+COMMAND_ACK_MSGID = 77
+COMMAND_ACK_CRC_EXTRA = 143
 MAV_FRAME_LOCAL_FRD = 20          # level, heading-aligned (ArduPilot 4.7 AC_PrecLand_MAVLink)
 MAV_CMD_DO_MOUNT_CONTROL = 205
 MAV_CMD_DO_AUX_FUNCTION = 218
@@ -137,7 +139,8 @@ AUX_FUNC_PRECISION_LOITER = 39
 # Messages whose content we act on are only accepted with a valid CRC
 # (STATUSTEXT too: a random 0xFE/0xFD byte must never put garbage text on the OSD bar)
 CHECKED_CRC_EXTRA = {0: HEARTBEAT_CRC_EXTRA, AUTOPILOT_VERSION_MSGID: AUTOPILOT_VERSION_CRC_EXTRA,
-                     STATUSTEXT_MSGID: STATUSTEXT_CRC_EXTRA, PARAM_VALUE_MSGID: PARAM_VALUE_CRC_EXTRA}
+                     STATUSTEXT_MSGID: STATUSTEXT_CRC_EXTRA, PARAM_VALUE_MSGID: PARAM_VALUE_CRC_EXTRA,
+                     COMMAND_ACK_MSGID: COMMAND_ACK_CRC_EXTRA}
 
 # OSD messages bar: only real vehicle STATUSTEXT messages (never the utility's own notes)
 OSD_HISTORY_MAX = 20      # kept on the server
@@ -483,6 +486,7 @@ class LiveMAVLinkClient(threading.Thread):
         self.last_stream_req_sent = 0.0
         self.last_version_req_sent = 0.0
         self.param_values = {}            # PARAM_VALUE seen on the link: name -> (value, time), under state.lock
+        self.command_acks = {}            # COMMAND_ACK seen on the link: command -> (result, time), under state.lock
         self.last_rate_time = time.time()
         self.pkt_counter = 0
 
@@ -555,6 +559,19 @@ class LiveMAVLinkClient(threading.Thread):
         p = [float(x) for x in params] + [0.0] * (7 - len(params))
         payload = struct.pack('<fffffffHBBB', p[0], p[1], p[2], p[3], p[4], p[5], p[6], int(command), 1, 1, 0)
         self.send_packet(self.build_mavlink_v1_packet(76, payload, 152))
+
+    def wait_command_ack(self, command, since, timeout=1.0):
+        """The Cube's COMMAND_ACK result for command, if one came after since (time.time()) within
+        timeout seconds. -> MAV_RESULT (0 accepted, 3 unsupported, 4 failed, ...) or None."""
+        deadline = time.time() + timeout
+        while True:
+            with self.state.lock:
+                got = self.command_acks.get(int(command))
+            if got is not None and got[1] >= since:
+                return got[0]
+            if time.time() >= deadline:
+                return None
+            time.sleep(0.05)
 
     def read_params(self, names, timeout=3.0, max_age=0.0, resend=0.7):
         """Read a few parameters over this (already running) telemetry link: PARAM_REQUEST_READ
@@ -865,6 +882,12 @@ class LiveMAVLinkClient(threading.Thread):
                     name = pid.split(b'\x00')[0].decode('ascii', 'replace').upper()
                     if name:
                         self.param_values[name] = (float(value), now)
+
+                # COMMAND_ACK (77): kept for wait_command_ack()
+                elif msgid == COMMAND_ACK_MSGID and len(payload) >= 2 and compid == 1:
+                    # MAVLink 2 drops trailing zero bytes: result 0 (accepted) can arrive as 2 bytes
+                    command, result = struct.unpack('<HB', (payload[:3] + b'\x00\x00\x00')[:3])
+                    self.command_acks[command] = (result, now)
 
                 # BATTERY_STATUS (147)
                 elif msgid == 147 and len(payload) >= 35:
@@ -2495,6 +2518,17 @@ MAV_CMD_VIDEO_STOP_CAPTURE = 2501
 ZOOM_TYPE_CONTINUOUS = 1          # -1 zoom out, 0 stop, 1 zoom in
 ZOOM_TYPE_RANGE = 2               # 0..100 % of the zoom range
 GIMBAL_ZOOM_STEPS = {"in": 1.0, "out": -1.0, "stop": 0.0}
+GIMBAL_ACK_TIMEOUT = 0.8          # s to wait for the Cube's COMMAND_ACK
+MAV_RESULT_ACCEPTED = 0
+GIMBAL_ZOOM_REFUSED = {
+    3: "The Cube says it has no zoom camera (unsupported). Check CAM1_TYPE is 4 (Mount) and that the Cube "
+       "has found the A8 (reboot the Cube with the A8 powered).",
+    4: "The Cube could not send the zoom to the A8 (failed). Check the A8's UART wiring on SERIAL4.",
+    2: "The Cube is busy and refused the zoom (denied). Try again."}
+# The A8 Mini's digital zoom does nothing while it records in 4K (ArduPilot developer rmackay9 on
+# discuss.ardupilot.org); in 1080p or 2K it works.
+GIMBAL_ZOOM_HINT = " If the picture doesn't change, set the A8's recording to 1080p or 2K in SIYI's app: " \
+                   "its zoom is off in 4K."
 
 
 def gimbal_param_report(values):
@@ -2560,12 +2594,33 @@ class GimbalCamera(object):
             return False, err
         how = str(how).strip().lower()
         if how == "wide":
+            sent = time.time()
             self.client.send_command_long(MAV_CMD_SET_CAMERA_ZOOM, [ZOOM_TYPE_RANGE, 0.0, 0.0])
+            result = self._ack(MAV_CMD_SET_CAMERA_ZOOM, sent)
+            if result is not None and result != MAV_RESULT_ACCEPTED:
+                return False, ("The Cube refused 1x (result %d): hold ZOOM out instead. " % result) + \
+                    GIMBAL_ZOOM_REFUSED.get(result, "")
             return True, "Zoom: all the way out."
         if how not in GIMBAL_ZOOM_STEPS:
             return False, "Zoom: say in, out, stop or wide."
+        sent = time.time()
         self.client.send_command_long(MAV_CMD_SET_CAMERA_ZOOM, [ZOOM_TYPE_CONTINUOUS, GIMBAL_ZOOM_STEPS[how], 0.0])
-        return True, {"in": "Zooming in.", "out": "Zooming out.", "stop": "Zoom stopped."}[how]
+        done = {"in": "Zooming in.", "out": "Zooming out.", "stop": "Zoom stopped."}[how]
+        if how == "stop":
+            return True, done
+        result = self._ack(MAV_CMD_SET_CAMERA_ZOOM, sent)
+        if result is not None and result != MAV_RESULT_ACCEPTED:
+            msg = GIMBAL_ZOOM_REFUSED.get(result, "The Cube refused the zoom (result %d)." % result)
+            self._log("Camera: zoom refused by the Cube (result %d)" % result, 4)
+            return False, msg
+        return True, done + GIMBAL_ZOOM_HINT
+
+    def _ack(self, command, since):
+        """The Cube's COMMAND_ACK result, or None (no answer, or a client that can't tell)."""
+        wait = getattr(self.client, "wait_command_ack", None)
+        if wait is None:
+            return None
+        return wait(command, since, GIMBAL_ACK_TIMEOUT)
 
     def zoom_wide_if_siyi(self):
         """For the pad and spot finders (CAMERA DOWN): 1x on a SIYI A8 Mini, nothing otherwise."""
