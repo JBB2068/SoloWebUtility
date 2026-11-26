@@ -6084,6 +6084,19 @@ class TestSoloWebUtility(unittest.TestCase):
         link.decode_payload(77, _st.pack('<HB', 2500, 4), sysid=1, compid=154)    # not the autopilot
         self.assertIsNone(link.wait_command_ack(2500, t0, 0.1))
 
+        # 4d. recording resolution (test Cube firmware: MAV_CMD_USER_1 = change camera setting 3)
+        ack_client.result = 0
+        del ack_client.sent[:]
+        ok, msg = ack_cam.set_resolution("1080")
+        self.assertTrue(ok, msg)
+        self.assertEqual(ack_client.sent, [(31010, [3, 1080.0, 0.0])])
+        self.assertFalse(ack_cam.set_resolution(900)[0])
+        ack_client.result = 3                      # stock ArduPilot: unsupported
+        ok, msg = ack_cam.set_resolution(1080)
+        self.assertFalse(ok)
+        self.assertIn("test firmware", msg)
+        self.assertFalse(cm.GimbalCamera(ack_client).set_resolution(1080)[0])   # no SIYI reported yet
+
         # 5. CAMERA DOWN also takes a SIYI A8 Mini back to 1x (and sends nothing extra otherwise)
         old_cam = cm.gimbal_camera
         try:

@@ -1812,6 +1812,18 @@
                 });
         });
     }
+    const cameraResIn = document.getElementById('cameraResIn');
+    if (cameraResIn) {
+        cameraResIn.addEventListener('click', function(e) { e.stopPropagation(); });
+        cameraResIn.addEventListener('change', function(e) {
+            e.stopPropagation();
+            const height = cameraResIn.value;
+            if (!height) return;
+            cameraAction({ action: 'gimbal_resolution', mode: height }, 'Resolution sent.')
+                .then(function() { cameraResIn.value = ''; });
+        });
+    }
+
     if (btnCenter) {
         btnCenter.addEventListener('click', function(e) {
             e.stopPropagation();

@@ -2515,6 +2515,11 @@ MAV_CMD_SET_CAMERA_ZOOM = 531
 MAV_CMD_IMAGE_START_CAPTURE = 2000
 MAV_CMD_VIDEO_START_CAPTURE = 2500
 MAV_CMD_VIDEO_STOP_CAPTURE = 2501
+# Recording resolution: only with the test Cube firmware that adds it to ArduPilot's SIYI driver
+# (MAV_CMD_USER_1 as "change camera setting": param1 setting, param2 value, param3 camera 0 = primary)
+MAV_CMD_CAMERA_CHANGE_SETTING = 31010
+CAMERA_SETTING_RECORDING_RESOLUTION = 3
+GIMBAL_RESOLUTIONS = (720, 1080, 1440, 2160)
 ZOOM_TYPE_CONTINUOUS = 1          # -1 zoom out, 0 stop, 1 zoom in
 ZOOM_TYPE_RANGE = 2               # 0..100 % of the zoom range
 GIMBAL_ZOOM_STEPS = {"in": 1.0, "out": -1.0, "stop": 0.0}
@@ -2629,6 +2634,32 @@ class GimbalCamera(object):
         if siyi:
             self.client.send_command_long(MAV_CMD_SET_CAMERA_ZOOM, [ZOOM_TYPE_RANGE, 0.0, 0.0])
         return siyi
+
+    def set_resolution(self, height):
+        """Recording resolution by its height (720, 1080, 1440, 2160). Needs the test Cube firmware;
+        stock ArduPilot answers "unsupported". The Cube confirms on the message bar."""
+        err = self._require_siyi()
+        if err:
+            return False, err
+        try:
+            height = int(height)
+        except (TypeError, ValueError):
+            height = 0
+        if height not in GIMBAL_RESOLUTIONS:
+            return False, "Resolution: pick 720, 1080, 1440 or 2160."
+        sent = time.time()
+        self.client.send_command_long(MAV_CMD_CAMERA_CHANGE_SETTING,
+                                      [CAMERA_SETTING_RECORDING_RESOLUTION, float(height), 0.0])
+        result = self._ack(MAV_CMD_CAMERA_CHANGE_SETTING, sent)
+        name = "4K" if height == 2160 else ("2K" if height == 1440 else "%dp" % height)
+        if result == 3:
+            return False, ("This Cube firmware can't change the A8's resolution: it needs the test firmware with "
+                           "SIYI resolution support. Set it in SIYI's app instead.")
+        if result is not None and result != MAV_RESULT_ACCEPTED:
+            return False, "The Cube could not ask the A8 for %s (result %d)." % (name, result)
+        self._log("Camera: recording resolution %s requested" % name, 6)
+        return True, ("Asked the A8 to record in %s. The Cube confirms it on the message bar (\"Siyi: recording %dp\")."
+                      % (name, height)) + (" Zoom does not work in 4K." if height == 2160 else "")
 
     def photo(self):
         err = self._require_siyi()
@@ -2974,7 +3005,7 @@ def handle_action(action, custom_mode=None):
     follow_style: hold / leash / freelook; selfie_settings: {distance, rise, speed}) and the
     precision landing commands (camera_down, camera_paddle, prec_loiter: custom_mode = on/off) and,
     with a SIYI A8 Mini set up, its camera (gimbal_zoom: in/out/stop/wide, gimbal_photo,
-    gimbal_record: on/off, gimbal_center).
+    gimbal_record: on/off, gimbal_center, gimbal_resolution: 720/1080/1440/2160 with the test firmware).
     CRITICAL SAFETY: Arm command execution is strictly controlled and reserved for the user.
     """
     if action == "set_mode":
@@ -3059,6 +3090,10 @@ def handle_action(action, custom_mode=None):
             return {"status": "error", "message": "Record: say on or off."}
         ok, msg = gimbal_camera.record(on == "on")
         return {"status": "ok" if ok else "error", "message": msg, "recording": gimbal_camera.recording}
+
+    elif action == "gimbal_resolution":
+        ok, msg = gimbal_camera.set_resolution(custom_mode)
+        return {"status": "ok" if ok else "error", "message": msg}
 
     elif action == "gimbal_center":
         ok, msg = gimbal_camera.center()

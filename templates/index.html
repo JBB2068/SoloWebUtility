@@ -1277,6 +1277,14 @@
                     <button id="btnPhoto" class="btn-ctrl" type="button" title="Take a photo">📸 PHOTO</button>
                     <button id="btnRecord" class="btn-ctrl" type="button" aria-pressed="false" title="Start or stop recording on the A8's card">⏺ RECORD</button>
                     <button id="btnCenter" class="btn-ctrl" type="button" title="Level and straight ahead. Moving the gimbal paddle takes it back.">⊙ CENTER</button>
+                    <label class="btn-ctrl camera-res" title="Recording resolution (needs the Cube firmware with SIYI resolution support). Zoom only works below 4K.">RES
+                        <select id="cameraResIn">
+                            <option value="" selected>—</option>
+                            <option value="720">720p</option>
+                            <option value="1080">1080p</option>
+                            <option value="1440">2K</option>
+                            <option value="2160">4K</option>
+                        </select></label>
                     <span id="cameraMsg" class="smart-shot-msg" role="status" aria-live="polite">SIYI A8 Mini. Hold ZOOM to zoom; the paddle still tilts the camera.</span>
                 </div>
             </div>

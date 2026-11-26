@@ -1146,6 +1146,13 @@
     user-select: none;
     -webkit-touch-callout: none;
 }
+.camera-row .camera-res select {
+    margin-left: 4px;
+    background: transparent;
+    color: inherit;
+    border: none;
+    font: inherit;
+}
 .camera-row #btnRecord.recording {
     border-color: #ef4444 !important;
     color: #fee2e2 !important;
