@@ -161,6 +161,21 @@ def clean_statustext(raw):
     text = raw.split('\x00', 1)[0]               # text ends at the first NUL
     return ' '.join(text.split())                 # trim and collapse whitespace
 _ARDUCOPTER_BANNER = re.compile(r"ArduCopter V(\d+\.\d+(?:\.\d+)?)")
+# the test Cube firmware's A8 resolution lines: "Siyi: recording 1920x1080" (at boot) and
+# "Siyi: recording 1080p" (after a change)
+_SIYI_RESOLUTION = re.compile(r"^Siyi: recording (?:\d+x(\d+)|(\d+)p)$")
+
+
+def siyi_resolution_from_text(text):
+    """STATUSTEXT -> the A8's recording height (720, 1080, 1440, 2160) or None."""
+    m = _SIYI_RESOLUTION.match(text or "")
+    if not m:
+        return None
+    try:
+        height = int(m.group(1) or m.group(2))
+    except (TypeError, ValueError):
+        return None
+    return height if height > 0 else None
 
 
 def _frame_crc_ok(data, start, end, crc_extra):
@@ -921,6 +936,9 @@ class LiveMAVLinkClient(threading.Thread):
                             self.state.cube_version = m.group(1)
                             self.state.cube_version_time = now
                             _remember_cube_version(m.group(1))
+                        height = siyi_resolution_from_text(raw_text) if compid == 1 else None
+                        if height:
+                            self.state.camera_resolution = height
 
                 # AUTOPILOT_VERSION (148): flight_sw_version = major<<24 | minor<<16 | patch<<8 | type
                 elif msgid == AUTOPILOT_VERSION_MSGID and compid == 1:
@@ -2584,6 +2602,8 @@ class GimbalCamera(object):
                 report = dict(self._last_check[1])
                 report["stale_secs"] = int(now - self._last_check[0])
             report["recording"] = self.recording
+        # only the test Cube firmware reports it; None (the Cockpit shows a dash) until it does
+        report["resolution"] = getattr(self.state, "camera_resolution", None) if self.state is not None else None
         return report
 
     def _require_siyi(self):

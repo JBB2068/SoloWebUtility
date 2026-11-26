@@ -1710,11 +1710,24 @@
                     setRecordButton();
                 }
                 if (res.siyi && !res.ready) setCameraMsg(res.message, true);
+                showCameraResolution(res.resolution);
                 layoutShotRow();
                 return res.mnt1_type === undefined ? CAMERA_RECHECK_MS : CAMERA_CHECK_EVERY_MS;
             })
             .catch(function() { return CAMERA_RECHECK_MS; })
             .then(function(wait) { setTimeout(checkCamera, wait || CAMERA_RECHECK_MS); });
+    }
+
+    // RES shows what the Cube last reported (test firmware only); a dash while it's unknown
+    function showCameraResolution(height) {
+        const sel = document.getElementById('cameraResIn');
+        if (!sel || document.activeElement === sel) return;
+        const value = height ? String(height) : '';
+        let known = false;
+        for (let i = 0; i < sel.options.length; i++) {
+            if (sel.options[i].value === value) known = true;
+        }
+        if (known) sel.value = value;
     }
 
     function cameraAction(body, doneText) {
@@ -1819,8 +1832,9 @@
             e.stopPropagation();
             const height = cameraResIn.value;
             if (!height) return;
+            // keep the pick showing; the next camera check shows what the Cube reports
             cameraAction({ action: 'gimbal_resolution', mode: height }, 'Resolution sent.')
-                .then(function() { cameraResIn.value = ''; });
+                .then(function() { cameraResIn.blur(); });
         });
     }
 

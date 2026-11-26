@@ -1148,10 +1148,16 @@
 }
 .camera-row .camera-res select {
     margin-left: 4px;
-    background: transparent;
-    color: inherit;
-    border: none;
+    background: #1f2937;
+    color: #f9fafb;
+    border: 1px solid #4b5563;
+    border-radius: 4px;
     font: inherit;
+    color-scheme: dark;
+}
+.camera-row .camera-res select option {
+    background: #1f2937;
+    color: #f9fafb;
 }
 .camera-row #btnRecord.recording {
     border-color: #ef4444 !important;

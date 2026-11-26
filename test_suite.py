@@ -6096,6 +6096,17 @@ class TestSoloWebUtility(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("test firmware", msg)
         self.assertFalse(cm.GimbalCamera(ack_client).set_resolution(1080)[0])   # no SIYI reported yet
+        # the RES dropdown shows what the test firmware reports on the message bar
+        self.assertEqual(cm.siyi_resolution_from_text("Siyi: recording 1920x1080"), 1080)
+        self.assertEqual(cm.siyi_resolution_from_text("Siyi: recording 2160p"), 2160)
+        self.assertIsNone(cm.siyi_resolution_from_text("Siyi: recording started"))
+        self.assertIsNone(cm.siyi_resolution_from_text("Siyi: recording NO CARD!"))
+        res_state = cm.TelemetryState()
+        res_cam = cm.GimbalCamera(ack_client, state=res_state)
+        self.assertIsNone(res_cam.check_report({"MNT1_TYPE": 8.0, "CAM1_TYPE": 4.0})["resolution"])
+        res_state.camera_resolution = 1440
+        self.assertEqual(res_cam.check_report({"MNT1_TYPE": 8.0, "CAM1_TYPE": 4.0})["resolution"], 1440)
+        self.assertIsNone(cm.GimbalCamera(ack_client).check_report({"MNT1_TYPE": 8.0})["resolution"])
 
         # 5. CAMERA DOWN also takes a SIYI A8 Mini back to 1x (and sends nothing extra otherwise)
         old_cam = cm.gimbal_camera
