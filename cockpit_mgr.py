@@ -2474,6 +2474,129 @@ def rtcm_base_position(frame):
     return {"lat": round(lat, 8), "lon": round(lon, 8), "alt": round(h, 2)}
 
 
+# =============================================================================
+# SIYI A8 Mini in place of the Solo gimbal (optional). ArduPilot's own SIYI driver runs it
+# (MNT1_TYPE 8 on SERIAL4, CAM1_TYPE 4, see the "SIYI A8 Mini" preset), so the paddle, CAMERA
+# DOWN and the Smart Shots keep aiming it with the usual mount commands. The Cockpit's CAMERA
+# row adds the A8's zoom, photo, record and center through ArduPilot's standard camera commands.
+# Nothing here is sent unless the Cube reports MNT1_TYPE 8, so a stock Solo is never affected.
+# =============================================================================
+SIYI_MNT1_TYPE = 8
+GIMBAL_PARAMS = ("MNT1_TYPE", "CAM1_TYPE")
+GIMBAL_CHECK_TIMEOUT = 6.0        # s
+GIMBAL_CHECK_RESEND = 2.0         # s between requests
+GIMBAL_CHECK_MAX_AGE = 600.0      # s: a value seen this recently counts without asking again
+MAV_CMD_SET_CAMERA_ZOOM = 531
+MAV_CMD_IMAGE_START_CAPTURE = 2000
+MAV_CMD_VIDEO_START_CAPTURE = 2500
+MAV_CMD_VIDEO_STOP_CAPTURE = 2501
+ZOOM_TYPE_CONTINUOUS = 1          # -1 zoom out, 0 stop, 1 zoom in
+ZOOM_TYPE_RANGE = 2               # 0..100 % of the zoom range
+GIMBAL_ZOOM_STEPS = {"in": 1.0, "out": -1.0, "stop": 0.0}
+
+
+def gimbal_param_report(values):
+    """{MNT1_TYPE, CAM1_TYPE} read from the Cube -> what the Cockpit shows.
+    siyi: the CAMERA row is offered; ready: the camera buttons also work (CAM1_TYPE 4)."""
+    mnt = values.get("MNT1_TYPE")
+    cam = values.get("CAM1_TYPE")
+    if mnt is None:
+        return {"siyi": False, "ready": False, "message": "Could not read the gimbal setup from the Cube."}
+    if int(round(mnt)) != SIYI_MNT1_TYPE:
+        return {"siyi": False, "ready": False, "mnt1_type": int(round(mnt)),
+                "message": "No SIYI gimbal set up (MNT1_TYPE %d)." % int(round(mnt))}
+    if cam is None or int(round(cam)) != 4:
+        return {"siyi": True, "ready": False, "mnt1_type": SIYI_MNT1_TYPE,
+                "message": "SIYI gimbal set up, but CAM1_TYPE is not 4 (Mount): photo, record and zoom "
+                           "won't work. Apply the SIYI A8 Mini preset and reboot the Cube."}
+    return {"siyi": True, "ready": True, "mnt1_type": SIYI_MNT1_TYPE,
+            "message": "SIYI A8 Mini: zoom, photo, record and center are ready."}
+
+
+class GimbalCamera(object):
+    """The Cockpit's CAMERA row for a SIYI A8 Mini: zoom, photo, record, center."""
+
+    def __init__(self, client, state=None):
+        self.client = client
+        self.state = state
+        self.lock = threading.Lock()
+        self.siyi = False                 # last answer from the Cube: MNT1_TYPE is 8
+        self.recording = False            # what the Cockpit last asked for (the A8 itself isn't asked)
+        self._last_check = None           # (time, report)
+
+    def _log(self, text, severity=6):
+        print("[gimbal] %s" % text)
+        if self.state is not None:
+            with self.state.lock:
+                self.state.add_message(text, severity)
+
+    def check_report(self, values):
+        """gimbal_param_report() for /api/camera/check. A failed read keeps the last answer the
+        Cube gave (the Cube may be busy in flight)."""
+        report = gimbal_param_report(values)
+        now = time.time()
+        with self.lock:
+            if values.get("MNT1_TYPE") is not None:
+                self.siyi = bool(report.get("siyi"))
+                self._last_check = (now, report)
+            elif self._last_check is not None:
+                report = dict(self._last_check[1])
+                report["stale_secs"] = int(now - self._last_check[0])
+            report["recording"] = self.recording
+        return report
+
+    def _require_siyi(self):
+        with self.lock:
+            if self.siyi:
+                return None
+        return "No SIYI gimbal set up: apply the SIYI A8 Mini preset on the Parameters tab and reboot the Cube."
+
+    def zoom(self, how):
+        """how: in / out (zoom while held) / stop / wide (all the way out)."""
+        err = self._require_siyi()
+        if err:
+            return False, err
+        how = str(how).strip().lower()
+        if how == "wide":
+            self.client.send_command_long(MAV_CMD_SET_CAMERA_ZOOM, [ZOOM_TYPE_RANGE, 0.0, 0.0])
+            return True, "Zoom: all the way out."
+        if how not in GIMBAL_ZOOM_STEPS:
+            return False, "Zoom: say in, out, stop or wide."
+        self.client.send_command_long(MAV_CMD_SET_CAMERA_ZOOM, [ZOOM_TYPE_CONTINUOUS, GIMBAL_ZOOM_STEPS[how], 0.0])
+        return True, {"in": "Zooming in.", "out": "Zooming out.", "stop": "Zoom stopped."}[how]
+
+    def photo(self):
+        err = self._require_siyi()
+        if err:
+            return False, err
+        # camera id 0 (all), no interval, 1 picture
+        self.client.send_command_long(MAV_CMD_IMAGE_START_CAPTURE, [0.0, 0.0, 1.0, 0.0])
+        self._log("Camera: photo", 6)
+        return True, "Photo taken."
+
+    def record(self, on):
+        err = self._require_siyi()
+        if err:
+            return False, err
+        if on:
+            self.client.send_command_long(MAV_CMD_VIDEO_START_CAPTURE, [0.0, 0.0])
+        else:
+            self.client.send_command_long(MAV_CMD_VIDEO_STOP_CAPTURE, [0.0])
+        with self.lock:
+            self.recording = bool(on)
+        self._log("Camera: recording started" if on else "Camera: recording stopped", 6)
+        return True, ("Recording." if on else "Recording stopped.")
+
+    def center(self):
+        """Level and straight ahead (MAVLink targeting). Moving the paddle takes the gimbal back."""
+        err = self._require_siyi()
+        if err:
+            return False, err
+        self.client.send_command_long(MAV_CMD_DO_MOUNT_CONTROL,
+                                      [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, MAV_MOUNT_MODE_MAVLINK_TARGETING])
+        return True, "Camera centered: level, straight ahead. Moving the gimbal paddle takes it back."
+
+
 class RtkCorrections(object):
     """RTCM corrections from the phone's USB base, sent on to the Cube as GPS_RTCM_DATA."""
     def __init__(self, send_payload=None):
@@ -2607,6 +2730,7 @@ pilot_location = PilotLocation()
 rtk_corrections = RtkCorrections(send_payload=_send_rtcm_payload)
 smart_shots = SmartShotClient(state=telemetry, pilot=pilot_location, position_fn=vehicle_position)
 precland = PrecisionLanding(mav_client, state=telemetry)
+gimbal_camera = GimbalCamera(mav_client, state=telemetry)
 _started = False
 
 
@@ -2783,7 +2907,9 @@ def handle_action(action, custom_mode=None):
     """
     Handle flight mode changes, disarming, Smart Shots (start_shot: custom_mode = shot id;
     follow_style: hold / leash / freelook; selfie_settings: {distance, rise, speed}) and the
-    precision landing commands (camera_down, camera_paddle, prec_loiter: custom_mode = on/off).
+    precision landing commands (camera_down, camera_paddle, prec_loiter: custom_mode = on/off) and,
+    with a SIYI A8 Mini set up, its camera (gimbal_zoom: in/out/stop/wide, gimbal_photo,
+    gimbal_record: on/off, gimbal_center).
     CRITICAL SAFETY: Arm command execution is strictly controlled and reserved for the user.
     """
     if action == "set_mode":
@@ -2852,6 +2978,25 @@ def handle_action(action, custom_mode=None):
 
     elif action in ("camera_down", "camera_paddle"):
         ok, msg = precland.set_camera(action == "camera_down")
+        return {"status": "ok" if ok else "error", "message": msg}
+
+    elif action == "gimbal_zoom":
+        ok, msg = gimbal_camera.zoom(custom_mode)
+        return {"status": "ok" if ok else "error", "message": msg}
+
+    elif action == "gimbal_photo":
+        ok, msg = gimbal_camera.photo()
+        return {"status": "ok" if ok else "error", "message": msg}
+
+    elif action == "gimbal_record":
+        on = str(custom_mode).strip().lower()
+        if on not in ("on", "off"):
+            return {"status": "error", "message": "Record: say on or off."}
+        ok, msg = gimbal_camera.record(on == "on")
+        return {"status": "ok" if ok else "error", "message": msg, "recording": gimbal_camera.recording}
+
+    elif action == "gimbal_center":
+        ok, msg = gimbal_camera.center()
         return {"status": "ok" if ok else "error", "message": msg}
 
     elif action == "prec_loiter":

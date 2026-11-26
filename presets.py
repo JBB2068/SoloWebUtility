@@ -124,6 +124,34 @@ PRESETS = {
             "PLND_OPTIONS": 2         # bit 1: precision landing resumes after the pilot nudges the Solo in LAND
         }
     },
+    "siyi_a8_mini": {
+        "id": "siyi_a8_mini",
+        "name": "SIYI A8 Mini Gimbal (in place of the Solo gimbal)",
+        "category": "Gimbal",
+        "description": "For a SIYI A8 Mini fitted in place of the 3DR Solo gimbal, with its UART wired to the gimbal port (SERIAL4) and its HDMI to the Solo's HDMI input. ArduPilot's SIYI driver then runs the gimbal: the Controller's paddle tilts it, CAMERA DOWN and the Smart Shots aim it as before, and the Cockpit's 📷 CAMERA row adds zoom, photo, record and center. Reboot the Cube after applying. Restore Solo Gimbal undoes it.",
+        "icon": "📷",
+        "params": {
+            "SERIAL4_PROTOCOL": 8,    # 8: Gimbal (SIYI serial protocol; the Solo gimbal uses 1, MAVLink)
+            "SERIAL4_BAUD": 115,      # 115200 baud, the A8 Mini's UART speed
+            "MNT1_TYPE": 8,           # 8: SIYI gimbal driver
+            "CAM1_TYPE": 4,           # 4: camera commands (photo, record, zoom) go through the mount driver
+            "RC6_OPTION": 213         # 213: Mount1 pitch from RC6, the Controller's tilt paddle (as stock)
+        }
+    },
+    "solo_gimbal": {
+        "id": "solo_gimbal",
+        "name": "Restore Solo Gimbal",
+        "category": "Gimbal",
+        "description": "Puts the stock 3DR Solo gimbal back: MAVLink at 230400 on the gimbal port (SERIAL4), the Solo gimbal driver and the GoPro camera controls, as in the shipped Solo parameters. Reboot the Cube after applying.",
+        "icon": "🎥",
+        "params": {
+            "SERIAL4_PROTOCOL": 1,    # 1: MAVLink (the Solo gimbal talks MAVLink)
+            "SERIAL4_BAUD": 230,      # 230400 baud
+            "MNT1_TYPE": 2,           # 2: Solo gimbal driver
+            "CAM1_TYPE": 3,           # 3: GoPro in the Solo gimbal
+            "RC6_OPTION": 213         # 213: Mount1 pitch from RC6, the Controller's tilt paddle
+        }
+    },
     "bait_drop": {
         "id": "bait_drop",
         "name": "Bait Drop / Payload Release Gripper",

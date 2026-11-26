@@ -1135,6 +1135,22 @@
     opacity: 0.35;
     cursor: default;
 }
+/* SIYI A8 Mini camera row: the CAMERA button only shows with MNT1_TYPE 8 */
+#btnCamera[hidden] {
+    display: none !important;
+}
+.camera-row #btnZoomIn,
+.camera-row #btnZoomOut {
+    touch-action: none;             /* hold to zoom: no scroll, no long-press menu */
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+}
+.camera-row #btnRecord.recording {
+    border-color: #ef4444 !important;
+    color: #fee2e2 !important;
+    background: rgba(239, 68, 68, 0.45) !important;
+}
 .pad-settings {
     flex-basis: 100%;
     display: flex;

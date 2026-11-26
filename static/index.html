@@ -1204,6 +1204,8 @@
                             aria-expanded="false" aria-controls="smartShotRow">🎬 SMART SHOTS ▾</button>
                     <button id="btnPrecision" class="btn-ctrl" type="button" title="Precision Landing on the printed pad"
                             aria-expanded="false" aria-controls="precisionRow">🎯 PRECISION ▾</button>
+                    <button id="btnCamera" class="btn-ctrl" type="button" title="SIYI A8 Mini camera: zoom, photo, record, center"
+                            aria-expanded="false" aria-controls="cameraRow" hidden>📷 CAMERA ▾</button>
                 </div>
 
                 <!-- Smart Shots row (opened by the SMART SHOTS button). The shot manager runs the
@@ -1264,6 +1266,18 @@
                         <a class="btn-ctrl" href="/landing_pad.html" target="_blank" rel="noopener">📄 PRINT PAD</a>
                         <span class="smart-shot-msg pad-help">Pad size is the black square's side. Camera FOV is the horizontal angle (118° for GoPro Wide); if the height shown over the pad reads too high, raise it; too low, lower it. Video delay: point the GoPro at a stopwatch and photograph the stopwatch next to the Cockpit's video of it; the difference is the delay. The Cube makes up for 0.25 s of it (PLND_LAG), the Cockpit for the rest.</span>
                     </div>
+                </div>
+
+                <!-- SIYI A8 Mini camera row (opened by the CAMERA button, which only shows when the
+                     Cube reports MNT1_TYPE 8). ArduPilot's SIYI driver passes these on to the A8. -->
+                <div id="cameraRow" class="smart-shot-row camera-row" hidden>
+                    <button id="btnZoomOut" class="btn-ctrl" type="button" title="Hold to zoom out">➖ ZOOM</button>
+                    <button id="btnZoomIn" class="btn-ctrl" type="button" title="Hold to zoom in">➕ ZOOM</button>
+                    <button id="btnZoomWide" class="btn-ctrl" type="button" title="Zoom all the way out">1×</button>
+                    <button id="btnPhoto" class="btn-ctrl" type="button" title="Take a photo">📸 PHOTO</button>
+                    <button id="btnRecord" class="btn-ctrl" type="button" aria-pressed="false" title="Start or stop recording on the A8's card">⏺ RECORD</button>
+                    <button id="btnCenter" class="btn-ctrl" type="button" title="Level and straight ahead. Moving the gimbal paddle takes it back.">⊙ CENTER</button>
+                    <span id="cameraMsg" class="smart-shot-msg" role="status" aria-live="polite">SIYI A8 Mini. Hold ZOOM to zoom; the paddle still tilts the camera.</span>
                 </div>
             </div>
 
@@ -2171,6 +2185,14 @@ The 3DR Solo Web Utility is a free, open-source on-board management console that
 <tr>
 <td>Precision Landing (Cockpit pad finder)</td>
 <td>Turns on ArduPilot's precision landing with the target sent by the Cockpit's pad finder: <code>PLND_ENABLED = 1</code>, <code>PLND_TYPE = 1</code> (MAVLink), Kalman filter, 0.25 s lag, moves over the pad before descending when it is more than 2.5 m off. Reboot the Cube once after applying it</td>
+</tr>
+<tr>
+<td>SIYI A8 Mini Gimbal</td>
+<td>For a SIYI A8 Mini fitted in place of the Solo gimbal (its UART on the gimbal port, its HDMI to the Solo's HDMI input): <code>SERIAL4_PROTOCOL = 8</code> (Gimbal), <code>SERIAL4_BAUD = 115</code>, <code>MNT1_TYPE = 8</code> (SIYI), <code>CAM1_TYPE = 4</code> (Mount), <code>RC6_OPTION = 213</code> (the paddle tilts it). The Cockpit then shows a 📷 CAMERA row with zoom (hold), 1×, photo, record and center. Reboot the Cube once after applying it</td>
+</tr>
+<tr>
+<td>Restore Solo Gimbal</td>
+<td>Puts the stock Solo gimbal back: <code>SERIAL4_PROTOCOL = 1</code> (MAVLink), <code>SERIAL4_BAUD = 230</code>, <code>MNT1_TYPE = 2</code>, <code>CAM1_TYPE = 3</code>. Reboot the Cube once after applying it</td>
 </tr>
 </tbody>
 </table>

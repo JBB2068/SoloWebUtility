@@ -308,7 +308,7 @@
 
     // While a row (Smart Shots or Precision) is open the side HUD panels start below it instead of under it
     function layoutShotRow() {
-        const row = [smartShotRow, document.getElementById('precisionRow')].filter(function(r) {
+        const row = [smartShotRow, document.getElementById('precisionRow'), document.getElementById('cameraRow')].filter(function(r) {
             return r && !r.hidden;
         })[0];
         [leftHud, rightHud].forEach(function(p) {
@@ -342,7 +342,10 @@
             smartShotRow.hidden = !open;
             btnSmartShots.setAttribute('aria-expanded', open ? 'true' : 'false');
             setSmartShotLabel(btnSmartShots.classList.contains('shot-running') ? btnSmartShots.dataset.shotName : '');
-            if (open) closePrecisionRow();
+            if (open) {
+                closePrecisionRow();
+                closeCameraRow();
+            }
             layoutShotRow();
             layoutOsdBar();             // the OSD bar moves below the shot row
         });
@@ -1279,6 +1282,7 @@
                 if (btnSmartShots) btnSmartShots.setAttribute('aria-expanded', 'false');
                 setSmartShotLabel(btnSmartShots && btnSmartShots.classList.contains('shot-running') ? btnSmartShots.dataset.shotName : '');
             }
+            if (open) closeCameraRow();
             setPrecisionLabel();
             if (open) {
                 showPadSettings();
@@ -1616,6 +1620,164 @@
             precisionAction({ action: 'set_mode', mode: 'LAND' }, 'LAND sent.');
         });
     }
+
+    // =========================================================================
+    // SIYI A8 Mini camera (optional, in place of the Solo gimbal). The CAMERA button only shows
+    // when the Cube reports MNT1_TYPE 8 (the SIYI A8 Mini preset); ArduPilot's SIYI driver then
+    // runs zoom, photo, record and center. A stock Solo never sees the button.
+    // =========================================================================
+    const btnCamera = document.getElementById('btnCamera');
+    const cameraRow = document.getElementById('cameraRow');
+    const cameraMsg = document.getElementById('cameraMsg');
+    const btnZoomIn = document.getElementById('btnZoomIn');
+    const btnZoomOut = document.getElementById('btnZoomOut');
+    const btnZoomWide = document.getElementById('btnZoomWide');
+    const btnPhoto = document.getElementById('btnPhoto');
+    const btnRecord = document.getElementById('btnRecord');
+    const btnCenter = document.getElementById('btnCenter');
+    const CAMERA_RECHECK_MS = 60000;       // until the Cube has answered
+    const CAMERA_CHECK_EVERY_MS = 300000;  // after that (a preset change needs a Cube reboot anyway)
+    let cameraRecording = false;
+    let cameraZooming = false;
+
+    function setCameraMsg(text, isError) {
+        if (!cameraMsg) return;
+        cameraMsg.textContent = text;
+        cameraMsg.classList.toggle('error', !!isError);
+        layoutShotRow();
+    }
+
+    function setCameraLabel() {
+        if (!btnCamera || !cameraRow) return;
+        btnCamera.textContent = '📷 ' + (cameraRecording ? 'REC' : 'CAMERA') + (cameraRow.hidden ? ' ▾' : ' ▴');
+    }
+
+    function setRecordButton() {
+        if (!btnRecord) return;
+        btnRecord.textContent = cameraRecording ? '⏹ STOP REC' : '⏺ RECORD';
+        btnRecord.classList.toggle('recording', cameraRecording);
+        btnRecord.setAttribute('aria-pressed', cameraRecording ? 'true' : 'false');
+        setCameraLabel();
+    }
+
+    function closeCameraRow() {
+        const row = document.getElementById('cameraRow');
+        if (!row || row.hidden) return;
+        row.hidden = true;
+        const btn = document.getElementById('btnCamera');
+        if (btn) btn.setAttribute('aria-expanded', 'false');
+        setCameraLabel();
+    }
+
+    function checkCamera() {
+        fetch('/api/camera/check', { cache: 'no-store', headers: authHeaders() })
+            .then(function(r) {
+                if (r.status === 401) { authRequired(); throw new Error('Login required'); }
+                return r.json();
+            })
+            .then(function(res) {
+                if (!res || typeof res.siyi !== 'boolean') return CAMERA_RECHECK_MS;
+                if (btnCamera) btnCamera.hidden = !res.siyi;
+                if (!res.siyi) closeCameraRow();
+                if (typeof res.recording === 'boolean') {
+                    cameraRecording = res.recording;
+                    setRecordButton();
+                }
+                if (res.siyi && !res.ready) setCameraMsg(res.message, true);
+                layoutShotRow();
+                return res.mnt1_type === undefined ? CAMERA_RECHECK_MS : CAMERA_CHECK_EVERY_MS;
+            })
+            .catch(function() { return CAMERA_RECHECK_MS; })
+            .then(function(wait) { setTimeout(checkCamera, wait || CAMERA_RECHECK_MS); });
+    }
+
+    function cameraAction(body, doneText) {
+        return postAction(body).then(function(data) {
+            const ok = data && data.status === 'ok';
+            setCameraMsg((data && data.message) || (ok ? doneText : 'Command failed.'), !ok);
+            return data;
+        }).catch(function(err) {
+            setCameraMsg('Command failed: ' + err.message, true);
+        });
+    }
+
+    if (btnCamera && cameraRow) {
+        btnCamera.addEventListener('click', function(e) {
+            e.stopPropagation();
+            const open = cameraRow.hidden;
+            cameraRow.hidden = !open;
+            btnCamera.setAttribute('aria-expanded', open ? 'true' : 'false');
+            if (open) {
+                if (smartShotRow && !smartShotRow.hidden) {
+                    smartShotRow.hidden = true;
+                    if (btnSmartShots) btnSmartShots.setAttribute('aria-expanded', 'false');
+                    setSmartShotLabel(btnSmartShots && btnSmartShots.classList.contains('shot-running') ? btnSmartShots.dataset.shotName : '');
+                }
+                closePrecisionRow();
+            }
+            setCameraLabel();
+            layoutShotRow();
+            layoutOsdBar();
+        });
+    }
+
+    // Hold to zoom: zoom starts on press and stops on release (or when the finger slides off)
+    function bindZoom(btn, how) {
+        if (!btn) return;
+        function start(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            cameraZooming = true;
+            cameraAction({ action: 'gimbal_zoom', mode: how }, how === 'in' ? 'Zooming in.' : 'Zooming out.');
+        }
+        function stop(e) {
+            if (!cameraZooming) return;
+            if (e) e.stopPropagation();
+            cameraZooming = false;
+            cameraAction({ action: 'gimbal_zoom', mode: 'stop' }, 'Zoom stopped.');
+        }
+        btn.addEventListener('pointerdown', start);
+        ['pointerup', 'pointerleave', 'pointercancel'].forEach(function(ev) { btn.addEventListener(ev, stop); });
+        btn.addEventListener('click', function(e) { e.stopPropagation(); });
+        btn.addEventListener('contextmenu', function(e) { e.preventDefault(); });
+    }
+    bindZoom(btnZoomIn, 'in');
+    bindZoom(btnZoomOut, 'out');
+
+    if (btnZoomWide) {
+        btnZoomWide.addEventListener('click', function(e) {
+            e.stopPropagation();
+            cameraAction({ action: 'gimbal_zoom', mode: 'wide' }, 'Zoom: all the way out.');
+        });
+    }
+    if (btnPhoto) {
+        btnPhoto.addEventListener('click', function(e) {
+            e.stopPropagation();
+            speak('Photo');
+            cameraAction({ action: 'gimbal_photo' }, 'Photo taken.');
+        });
+    }
+    if (btnRecord) {
+        btnRecord.addEventListener('click', function(e) {
+            e.stopPropagation();
+            const turnOn = !cameraRecording;
+            cameraAction({ action: 'gimbal_record', mode: turnOn ? 'on' : 'off' }, turnOn ? 'Recording.' : 'Recording stopped.')
+                .then(function(data) {
+                    if (data && data.status === 'ok') {
+                        cameraRecording = typeof data.recording === 'boolean' ? data.recording : turnOn;
+                        setRecordButton();
+                        speak(cameraRecording ? 'Recording' : 'Recording stopped');
+                    }
+                });
+        });
+    }
+    if (btnCenter) {
+        btnCenter.addEventListener('click', function(e) {
+            e.stopPropagation();
+            cameraAction({ action: 'gimbal_center' }, 'Camera centered.');
+        });
+    }
+    checkCamera();
 
     function clearPadOverlay() {
         if (!padOverlayCtx) return;

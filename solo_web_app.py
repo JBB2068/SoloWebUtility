@@ -519,6 +519,19 @@ class SoloApiHandler(BaseHTTPRequestHandler):
             self._send_json(cockpit_mgr.precland.check_report(values))
             return
 
+        # SIYI A8 Mini camera row: is the Cube set up for it (MNT1_TYPE 8, CAM1_TYPE 4)
+        if path == '/api/camera/check':
+            if gimbal_update_running():
+                self._send_json({"siyi": False, "ready": False, "message": "A gimbal firmware update is running."})
+                return
+            values = cockpit_mgr.mav_client.read_params(
+                cockpit_mgr.GIMBAL_PARAMS, timeout=cockpit_mgr.GIMBAL_CHECK_TIMEOUT,
+                max_age=cockpit_mgr.GIMBAL_CHECK_MAX_AGE, resend=cockpit_mgr.GIMBAL_CHECK_RESEND)
+            # over the Cockpit's own telemetry link only: the Cockpit asks again every minute
+            # until the Cube answers, so no extra connection to the Cube is opened for it
+            self._send_json(cockpit_mgr.gimbal_camera.check_report(values))
+            return
+
         if path == '/api/video/h264':
             viewer = cockpit_mgr.video_manager.subscribe()
             conn = self.connection
