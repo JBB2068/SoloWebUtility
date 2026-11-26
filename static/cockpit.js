@@ -99,8 +99,11 @@
     const rtkRow = document.getElementById('rowRtk');
     const rtkBaseVal = document.getElementById('rtkBaseVal');
     const rtkSetupRow = document.getElementById('rowRtkSetup');
+    const rtkMsgsRow = document.getElementById('rowRtkMsgs');
+    const rtkMsgsVal = document.getElementById('rtkMsgsVal');
     const rtkSetupNote = document.getElementById('rtkSetupNote');
     const btnRtkSetup = document.getElementById('btnRtkSetup');
+    const btnRtkUsb = document.getElementById('btnRtkUsb');
     const mavlinkMsgBox = document.getElementById('mavlinkMsgBox');
     const msgCountBadge = document.getElementById('msgCountBadge');
     const btnScrollBottom = document.getElementById('btnScrollBottom');
@@ -494,6 +497,7 @@
         permission: ['ALLOW USB', 'Allow the SoloLink Viewer app to use the base receiver (Android asks once).'],
         denied: ['USB NOT ALLOWED', 'Android did not allow the app to use the base. Unplug it and plug it in again, then tap OK.'],
         error: ['BASE ERROR', 'The app could not read the base receiver.'],
+        blocked: ['ALLOW USB IN CHROME', 'Chrome only allows USB on secure pages: allow http://10.1.1.10 in chrome://flags.'],
         waiting: ['NO RTCM YET', 'The base is connected but sends no RTCM corrections. Press SET UP BASE (Mission Planner does the same ' +
             'when it connects), or turn on RTCM3 output on USB in u-center and save it in the receiver.']
     };
@@ -549,6 +553,340 @@
             showRtkNote(rtkSetupResult === 'Settings sent: survey-in started.' ? 'SURVEY STARTED' : rtkSetupResult);
         });
     }
+    // RTK base in the browser (no Viewer app): Chrome reads the base over USB itself, with Web Serial
+    // on a PC (Windows, Mac, Linux) and WebUSB on Android, and plays the Viewer app's part: the same
+    // window.SoloViewerRtk.setupBase, the same status for the RTK lines and the same RTCM frames for
+    // window.soloViewerRtcm. Chrome only offers USB on https or localhost pages; for http://10.1.1.10
+    // it has to be allowed once in chrome://flags (Insecure origins treated as secure).
+    const RTK_UBLOX_VID = 0x1546;
+    const rtkWeb = {
+        mode: '',                           // 'serial' or 'usb' while a base is open
+        port: null, reader: null, writer: null,
+        dev: null, epIn: 0, epOut: 0,
+        name: '', bytes: 0, nmea: false, ubx: false, svin: null, acks: 0, naks: 0, setupSent: false,
+        buf: new Uint8Array(0), ubxBuf: new Uint8Array(0), pending: [],
+        lastFrame: 0, quiet: false, timer: null, state: ''
+    };
+    const rtkWebPossible = !window.SoloViewerRtk && /Chrome\//.test(navigator.userAgent || '') &&
+        !/; wv\)/.test(navigator.userAgent || '');      // not inside an Android app's WebView
+    const rtkWebAndroid = /Android/.test(navigator.userAgent || '');
+    function rtkWebApi() {
+        // Android: WebUSB (Chrome's Web Serial there is for Bluetooth); a PC: Web Serial (Windows'
+        // own USB serial driver holds the receiver, so WebUSB cannot open it).
+        if (rtkWebAndroid) return navigator.usb ? 'usb' : (navigator.serial ? 'serial' : '');
+        return navigator.serial ? 'serial' : (navigator.usb ? 'usb' : '');
+    }
+    function rtkWebStatus(state, message) {
+        rtkWeb.state = state;
+        window.soloViewerRtkStatus({
+            state: state, device: rtkWeb.name, message: message || '',
+            info: {
+                bytes: rtkWeb.bytes, nmea: rtkWeb.nmea, ubx: rtkWeb.ubx, writable: !!rtkWeb.mode,
+                setup_sent: rtkWeb.setupSent, acks: rtkWeb.acks, naks: rtkWeb.naks,
+                svin: rtkWeb.svin, browser: rtkWeb.mode || 'none'
+            }
+        });
+    }
+    function rtkJoin(a, b) {
+        const out = new Uint8Array(a.length + b.length);
+        out.set(a, 0);
+        out.set(b, a.length);
+        return out;
+    }
+    function rtkCrc24q(b, off, count) {
+        let crc = 0;
+        for (let i = off; i < off + count; i++) {
+            crc ^= b[i] << 16;
+            for (let k = 0; k < 8; k++) {
+                crc <<= 1;
+                if (crc & 0x1000000) crc ^= 0x1864CFB;
+            }
+        }
+        return crc & 0xFFFFFF;
+    }
+    function rtkB64(b) {
+        let s = '';
+        for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]);
+        return btoa(s);
+    }
+    // Whole RTCM3 frames out of the byte stream (0xD3, 10-bit length, message, CRC-24Q), like RtcmFramer.java
+    function rtkFrames(data) {
+        let b = rtkJoin(rtkWeb.buf, data);
+        let start = 0;
+        while (b.length - start >= 3) {
+            if (b[start] !== 0xD3 || (b[start + 1] & 0xFC) !== 0) { start++; continue; }
+            const length = ((b[start + 1] & 0x03) << 8) | b[start + 2];
+            const total = length + 6;
+            if (b.length - start < total) break;
+            const crc = (b[start + total - 3] << 16) | (b[start + total - 2] << 8) | b[start + total - 1];
+            if (length > 0 && rtkCrc24q(b, start, total - 3) === crc) {
+                rtkWeb.pending.push(rtkB64(b.subarray(start, start + total)));
+                rtkWeb.lastFrame = Date.now();
+                start += total;
+            } else {
+                start++;
+            }
+        }
+        b = b.slice(start);
+        rtkWeb.buf = b.length > 4096 ? b.slice(b.length - 4096) : b;
+        if (rtkWeb.pending.length > RTK_QUEUE_MAX) rtkWeb.pending.splice(0, rtkWeb.pending.length - RTK_QUEUE_MAX);
+    }
+    // UBX: NAV-SVIN (survey-in progress) and ACK/NAK for the settings, like UbxScanner.java
+    function rtkUbx(data) {
+        for (let i = 0; i + 1 < data.length; i++) {
+            if (data[i] === 0x24 && data[i + 1] === 0x47) { rtkWeb.nmea = true; break; }   // "$G"
+        }
+        let b = rtkJoin(rtkWeb.ubxBuf, data);
+        let start = 0;
+        while (b.length - start >= 8) {
+            if (b[start] !== 0xB5 || b[start + 1] !== 0x62) { start++; continue; }
+            const plen = b[start + 4] | (b[start + 5] << 8);
+            if (plen > 1024) { start++; continue; }
+            if (b.length - start < plen + 8) break;
+            let ca = 0, cb = 0;
+            for (let i = start + 2; i < start + 6 + plen; i++) { ca = (ca + b[i]) & 0xFF; cb = (cb + ca) & 0xFF; }
+            if (ca !== b[start + 6 + plen] || cb !== b[start + 7 + plen]) { start++; continue; }
+            rtkWeb.ubx = true;
+            const cls = b[start + 2], id = b[start + 3], p = start + 6;
+            const u32 = function(o) { return (b[p + o] | (b[p + o + 1] << 8) | (b[p + o + 2] << 16)) + b[p + o + 3] * 16777216; };
+            if (cls === 0x01 && id === 0x3B && plen >= 40) {
+                rtkWeb.svin = {
+                    dur: u32(8), acc: Math.round(u32(28) / 100) / 100, obs: u32(32),
+                    valid: b[p + 36] !== 0, active: b[p + 37] !== 0
+                };
+            } else if (cls === 0x05 && id === 0x01) {
+                rtkWeb.acks++;
+            } else if (cls === 0x05 && id === 0x00) {
+                rtkWeb.naks++;
+            }
+            start += plen + 8;
+        }
+        b = b.slice(start);
+        rtkWeb.ubxBuf = b.length > 4096 ? b.slice(b.length - 4096) : b;
+    }
+    function rtkWebData(data) {
+        if (!data || !data.length) return;
+        rtkWeb.bytes += data.length;
+        rtkUbx(data);
+        rtkFrames(data);
+    }
+    function rtkWebTick() {
+        if (!rtkWeb.mode) return;
+        const quiet = Date.now() - rtkWeb.lastFrame > 5000;
+        rtkWebStatus(quiet ? 'waiting' : 'connected');
+        if (rtkWeb.pending.length) {
+            const frames = rtkWeb.pending;
+            rtkWeb.pending = [];
+            window.soloViewerRtcm({ frames: frames });
+        }
+    }
+    // UBX messages for SET UP BASE: the same bytes as UbxScanner.baseSetup (Mission Planner's set-up)
+    function rtkUbxMsg(cls, id, payload) {
+        const m = new Uint8Array(payload.length + 8);
+        m[0] = 0xB5; m[1] = 0x62; m[2] = cls; m[3] = id;
+        m[4] = payload.length & 0xFF; m[5] = payload.length >> 8;
+        m.set(payload, 6);
+        let ca = 0, cb = 0;
+        for (let i = 2; i < payload.length + 6; i++) { ca = (ca + m[i]) & 0xFF; cb = (cb + ca) & 0xFF; }
+        m[m.length - 2] = ca;
+        m[m.length - 1] = cb;
+        return m;
+    }
+    function rtkPut32(p, o, v) {
+        p[o] = v & 0xFF; p[o + 1] = (v >>> 8) & 0xFF; p[o + 2] = (v >>> 16) & 0xFF; p[o + 3] = (v >>> 24) & 0xFF;
+    }
+    function rtkTmode3(mode, secs, accM) {
+        const p = new Uint8Array(40);
+        p[2] = mode;
+        rtkPut32(p, 24, secs);
+        rtkPut32(p, 28, Math.round(accM * 10000));
+        return rtkUbxMsg(0x06, 0x71, p);
+    }
+    function rtkBaseSetup(secs, accM) {
+        const port = new Uint8Array(20);
+        port[0] = 3; port[12] = 0x27; port[14] = 0x23;           // USB: in UBX+NMEA+RTCM, out UBX+NMEA+RTCM3
+        const rate = function(cls, id) { return rtkUbxMsg(0x06, 0x01, new Uint8Array([cls, id, 1])); };
+        return [rtkUbxMsg(0x06, 0x00, port),
+            rate(0xF5, 0x05), rate(0xF5, 0x4D), rate(0xF5, 0x57), rate(0xF5, 0x61), rate(0xF5, 0x7F), rate(0xF5, 0xE6),
+            rate(0x01, 0x3B), rtkTmode3(0, 0, 0), rtkTmode3(1, secs, accM)];
+    }
+    function rtkWebWrite(bytes) {
+        if (rtkWeb.mode === 'serial' && rtkWeb.writer) return rtkWeb.writer.write(bytes);
+        if (rtkWeb.mode === 'usb' && rtkWeb.dev) return rtkWeb.dev.transferOut(rtkWeb.epOut, bytes);
+        return Promise.reject(new Error('No base receiver is connected.'));
+    }
+    async function rtkWebSetup(secs, accM) {
+        const msgs = rtkBaseSetup(secs, accM);
+        for (let i = 0; i < msgs.length; i++) {
+            await rtkWebWrite(msgs[i]);
+            await new Promise(function(r) { setTimeout(r, 30); });
+        }
+        rtkWeb.setupSent = true;
+    }
+    function rtkWebReset() {
+        rtkWeb.bytes = 0; rtkWeb.nmea = false; rtkWeb.ubx = false; rtkWeb.svin = null;
+        rtkWeb.acks = 0; rtkWeb.naks = 0; rtkWeb.setupSent = false;
+        rtkWeb.buf = new Uint8Array(0); rtkWeb.ubxBuf = new Uint8Array(0); rtkWeb.pending = [];
+        rtkWeb.lastFrame = Date.now();
+    }
+    function rtkWebStarted(name) {
+        rtkWeb.name = name;
+        rtkWebStatus('connected');
+        if (rtkWeb.timer) clearInterval(rtkWeb.timer);
+        rtkWeb.timer = setInterval(rtkWebTick, 1000);
+    }
+    function rtkWebClosed(message) {
+        rtkWeb.mode = '';
+        rtkWeb.reader = null; rtkWeb.writer = null; rtkWeb.port = null; rtkWeb.dev = null;
+        if (rtkWeb.timer) clearInterval(rtkWeb.timer);
+        rtkWeb.timer = null;
+        rtkWebStatus(message ? 'error' : 'none', message || 'No base receiver on this computer\'s USB port. Tap USB BASE.');
+    }
+    async function rtkOpenSerial(port) {
+        if (rtkWeb.mode) return;
+        await port.open({ baudRate: 115200 });          // a u-blox USB port ignores the speed
+        try { await port.setSignals({ dataTerminalReady: true, requestToSend: true }); } catch (e) { /* optional */ }
+        rtkWebReset();
+        rtkWeb.mode = 'serial';
+        rtkWeb.port = port;
+        rtkWeb.writer = port.writable.getWriter();
+        const vid = (port.getInfo && port.getInfo().usbVendorId) || 0;
+        rtkWebStarted(vid === RTK_UBLOX_VID ? 'u-blox receiver' : 'USB serial receiver');
+        (async function() {
+            let failed = '';
+            try {
+                while (rtkWeb.port === port && port.readable) {
+                    rtkWeb.reader = port.readable.getReader();
+                    try {
+                        for (;;) {
+                            const r = await rtkWeb.reader.read();
+                            if (r.done) break;
+                            rtkWebData(r.value);
+                        }
+                    } finally {
+                        try { rtkWeb.reader.releaseLock(); } catch (e) { /* closed */ }
+                    }
+                }
+            } catch (e) {
+                failed = (e && e.name === 'NetworkError') ? '' : ('Reading the base failed: ' + e.message);
+            }
+            try { if (rtkWeb.writer) rtkWeb.writer.releaseLock(); } catch (e) { /* closed */ }
+            try { await port.close(); } catch (e) { /* unplugged */ }
+            if (rtkWeb.port === port) rtkWebClosed(failed);
+        })();
+    }
+    async function rtkOpenUsb(dev) {
+        if (rtkWeb.mode) return;
+        await dev.open();
+        if (!dev.configuration) await dev.selectConfiguration(1);
+        let data = null, ctrl = null, epIn = 0, epOut = 0;
+        dev.configuration.interfaces.forEach(function(itf) {
+            const alt = itf.alternate || itf.alternates[0];
+            if (alt.interfaceClass === 2 && !ctrl) ctrl = itf;
+            if (alt.interfaceClass === 10 && !data) {
+                alt.endpoints.forEach(function(ep) {
+                    if (ep.type !== 'bulk') return;
+                    if (ep.direction === 'in') epIn = ep.endpointNumber; else epOut = ep.endpointNumber;
+                });
+                if (epIn) data = itf;
+            }
+        });
+        if (!data) { try { await dev.close(); } catch (e) { /* ignore */ } throw new Error('Not a USB serial (CDC) receiver.'); }
+        await dev.claimInterface(data.interfaceNumber);
+        if (ctrl) {
+            try {
+                await dev.claimInterface(ctrl.interfaceNumber);
+                const idx = ctrl.interfaceNumber;
+                await dev.controlTransferOut({ requestType: 'class', recipient: 'interface', request: 0x22, value: 3, index: idx });
+                await dev.controlTransferOut({ requestType: 'class', recipient: 'interface', request: 0x20, value: 0, index: idx },
+                    new Uint8Array([0x00, 0xC2, 0x01, 0x00, 0x00, 0x00, 0x08]));     // DTR+RTS, 115200 8N1
+            } catch (e) { /* some receivers send without it */ }
+        }
+        rtkWebReset();
+        rtkWeb.mode = 'usb';
+        rtkWeb.dev = dev; rtkWeb.epIn = epIn; rtkWeb.epOut = epOut;
+        rtkWebStarted(dev.vendorId === RTK_UBLOX_VID ? 'u-blox receiver' : (dev.productName || 'USB receiver'));
+        (async function() {
+            let failed = '';
+            try {
+                while (rtkWeb.dev === dev) {
+                    const r = await dev.transferIn(epIn, 16384);
+                    if (r.data && r.data.byteLength) rtkWebData(new Uint8Array(r.data.buffer, r.data.byteOffset, r.data.byteLength));
+                }
+            } catch (e) {
+                failed = (e && e.name === 'NotFoundError') ? '' : ('Reading the base failed: ' + e.message);
+            }
+            try { await dev.close(); } catch (e) { /* unplugged */ }
+            if (rtkWeb.dev === dev) rtkWebClosed(failed);
+        })();
+    }
+    // The USB BASE button: Chrome asks which receiver to use (once; after that it reconnects by itself)
+    async function rtkWebConnect() {
+        if (!window.isSecureContext) {
+            rtkWebStatus('blocked', 'Chrome only allows USB on secure pages. Open chrome://flags, search for ' +
+                '"Insecure origins treated as secure", add http://10.1.1.10, set it to Enabled and relaunch Chrome.');
+            return;
+        }
+        const api = rtkWebApi();
+        if (!api) {
+            rtkWebStatus('error', 'This browser cannot use USB devices. Use Chrome or Edge on a PC, Chrome on Android, or the SoloLink Viewer app.');
+            return;
+        }
+        try {
+            if (api === 'serial') {
+                const port = await navigator.serial.requestPort();
+                await rtkOpenSerial(port);
+            } else {
+                const dev = await navigator.usb.requestDevice({ filters: [{ vendorId: RTK_UBLOX_VID }, { classCode: 2 }] });
+                await rtkOpenUsb(dev);
+            }
+        } catch (e) {
+            if (e && e.name === 'NotFoundError') return;          // the picker was closed
+            rtkWebClosed('Could not open the base: ' + e.message + (api === 'serial' ? ' (close Mission Planner or u-center if they have it open)' : ''));
+        }
+    }
+    // Reconnect a receiver Chrome already allowed, now and whenever it is plugged in
+    async function rtkWebAuto() {
+        if (!rtkWebPossible || !window.isSecureContext || rtkWeb.mode) return;
+        const api = rtkWebApi();
+        try {
+            if (api === 'serial') {
+                const ports = await navigator.serial.getPorts();
+                const port = ports.filter(function(p) { return p.getInfo && p.getInfo().usbVendorId === RTK_UBLOX_VID; })[0] || ports[0];
+                if (port) await rtkOpenSerial(port);
+            } else if (api === 'usb') {
+                const devs = await navigator.usb.getDevices();
+                if (devs.length) await rtkOpenUsb(devs[0]);
+            }
+        } catch (e) { /* the button can still be used */ }
+    }
+    if (rtkWebPossible) {
+        window.SoloViewerRtk = {
+            browser: true,
+            setupBase: function(secs, accM) {
+                if (!rtkWeb.mode) return 'No base receiver is connected.';
+                rtkWebSetup(secs, accM).catch(function(e) {
+                    showRtkNote('SETUP FAILED');
+                    rtkWebStatus('error', 'Sending the settings to the base failed: ' + e.message);
+                });
+                return 'ok';
+            }
+        };
+        if (window.isSecureContext && navigator.serial && navigator.serial.addEventListener) {
+            navigator.serial.addEventListener('connect', function() { setTimeout(rtkWebAuto, 500); });
+        }
+        if (window.isSecureContext && navigator.usb && navigator.usb.addEventListener) {
+            navigator.usb.addEventListener('connect', function() { setTimeout(rtkWebAuto, 500); });
+        }
+        setTimeout(rtkWebAuto, 1000);
+    }
+    if (btnRtkUsb) {
+        btnRtkUsb.addEventListener('click', function(e) {
+            e.stopPropagation();
+            rtkWebConnect();
+        });
+    }
+
     function updateRtk(telem) {
         if (!rtkRow) return;
         const rtk = telem.rtk || {};
@@ -559,14 +897,40 @@
         rtkRow.style.display = used ? '' : 'none';
         if (rtkSetupRow) {
             const canSetup = !!window.SoloViewerRtk && (app.state === 'connected' || app.state === 'waiting');
-            rtkSetupRow.style.display = canSetup ? '' : 'none';
+            // In Chrome without the Viewer app: a USB BASE button to pick the receiver (until one is open)
+            const offerUsb = rtkWebPossible && !rtkWeb.mode;
+            rtkSetupRow.style.display = (canSetup || offerUsb) ? '' : 'none';
+            if (btnRtkUsb) btnRtkUsb.style.display = offerUsb ? '' : 'none';
+            if (btnRtkSetup) btnRtkSetup.style.display = canSetup ? '' : 'none';
+            if (rtkSetupNote) rtkSetupNote.style.display = canSetup ? '' : 'none';
             if (btnRtkSetup) btnRtkSetup.textContent = (svin && svin.active) ? 'RESTART SURVEY' : 'SET UP BASE';
+        }
+        // Second line, readable on a phone (tooltips never show there): which RTCM messages reach
+        // the Cube and whether the base has sent its own position (1005/1006), without which the
+        // Solo's GPS cannot use the corrections at all.
+        if (rtkMsgsRow) {
+            // In the browser, why USB does not work goes here (a tooltip never shows on a phone)
+            const webHint = rtkWebPossible && (app.state === 'blocked' || app.state === 'error') ? (app.message || '') : '';
+            const showMsgs = used && (rtk.active || (rtk.types || []).length > 0 || !!webHint);
+            rtkMsgsRow.style.display = showMsgs ? '' : 'none';
+            if (showMsgs && rtkMsgsVal && webHint && !rtk.active) {
+                rtkMsgsVal.textContent = webHint;
+            } else if (showMsgs && rtkMsgsVal) {
+                const types = rtk.types || [];
+                rtkMsgsVal.textContent = (types.length ? types.join(' ') : 'NONE') +
+                    ' · ' + ((rtk.rate_bps || 0) / 1024).toFixed(1) + ' KB/s' +
+                    (rtk.rejected ? ' · ' + rtk.rejected + ' BAD' : '');
+            }
         }
         if (!used) return;
         let text, color, title;
-        if (!rtk.active && svin && svin.active) {
-            text = 'SURVEY ' + svin.dur + ' s · ' + Number(svin.acc).toFixed(1) + ' m';
-            color = 'var(--accent-amber)';
+        if (svin && svin.active) {
+            // Survey-in still running: show it even while some RTCM already flows (the base does
+            // not send its position until the survey is done, so the Solo cannot use RTK yet).
+            // What matters while surveying: is the base position valid yet, and how close is it
+            // (the current accuracy must shrink below the target before the survey can finish).
+            text = (svin.valid ? 'VALID' : 'INVALID') + ' · ' + Number(svin.acc).toFixed(1) + ' m · ' + svin.dur + ' s';
+            color = svin.valid ? 'var(--accent-emerald)' : 'var(--accent-amber)';
             title = 'The base is measuring its own position (survey-in): it needs at least ' + rtkSurvey().secs +
                 ' s and ' + rtkSurvey().acc + ' m. Corrections start when it is done. Keep the base still with a clear view of the sky.';
         } else if (rtk.active) {
@@ -575,11 +939,18 @@
             const gps = telem.gps || {};
             const fixType = (typeof gps.fix_type === 'number') ? gps.fix_type :
                 ((typeof telem.gps_fix_type === 'number') ? telem.gps_fix_type : 0);
-            const kbs = (rtk.rate_bps / 1024).toFixed(1);
             const fixWord = fixType === 6 ? 'FIX' : fixType === 5 ? 'FLOAT' : fixType === 4 ? 'DGPS' :
                 (fixType >= 3 ? '3D' : 'NO FIX');
-            text = fixWord + ' · ' + kbs + ' KB/s';
-            color = fixType === 6 ? 'var(--accent-emerald)' : (fixType >= 4 ? 'var(--accent-amber)' : '#e2e8f0');
+            // Lead with the base position (valid or not, and its survey accuracy), then the
+            // Solo's fix type; the data rate is on the RTK Msgs line below.
+            let posWord;
+            if (svin && svin.valid) posWord = 'VALID ' + Number(svin.acc).toFixed(1) + ' m';
+            else if (svin) posWord = 'INVALID ' + Number(svin.acc).toFixed(1) + ' m';
+            else posWord = rtk.base ? 'POS OK' : 'NO POS';
+            const posOk = svin ? !!svin.valid : !!rtk.base;
+            text = posWord + ' · ' + fixWord;
+            color = fixType === 6 ? 'var(--accent-emerald)' : (fixType >= 4 ? 'var(--accent-amber)' :
+                (posOk ? '#e2e8f0' : 'var(--accent-amber)'));
             title = (fixType === 6 ? 'RTK fixed: about 1-2 cm against the base. ' :
                 fixType === 5 ? 'RTK float: about 0.2-1 m; it turns into FIX when the GPS solves the carrier phase. ' :
                 fixType === 4 ? 'DGPS: the GPS uses the corrections, but not RTK yet. ' :

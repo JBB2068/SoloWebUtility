@@ -63,12 +63,21 @@ def read_version_json():
         return json.load(f)
 
 
+def _swap_version(data, old, new):
+    """Replace the version old with new in data, but not where the same digits are something else:
+    a longer number (1.2.1 inside 1.2.13), or the section and figure numbers of the drone manual inside
+    the web page ('<h4 id="121-smart-battery">1.2.1 Smart Battery', 'Figure 1.2.4.1:', 'Figure 6.1.2.1:'),
+    which earlier bumps used to overwrite."""
+    pat = re.compile(br'(?<![\d.])(?<!">)' + re.escape(old.encode("ascii")) + br'(?!\d)(?!\.\d+:)')
+    return pat.sub(new.encode("ascii"), data)
+
+
 def _replace_in(path, old, new):
     with open(path, "rb") as f:
         data = f.read()
     oa, ob, oc = parse(old)
     na, nb, nc = parse(new)
-    out = data.replace(old.encode("ascii"), new.encode("ascii"))
+    out = _swap_version(data, old, new)
     # Windows file version tuple: filevers=(1, 2, 0, 0)
     out = re.sub(br"\(\s*%d,\s*%d,\s*%d,\s*0\s*\)" % (oa, ob, oc), b"(%d, %d, %d, 0)" % (na, nb, nc), out)
     # APK versionCode in build.ps1

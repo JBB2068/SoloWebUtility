@@ -13,6 +13,8 @@ What it serves:
                              the controller's "tlog" service) and any Cube .BIN logs the Solo copied
                              to <root>/bin/<n>.BIN
   /api/logviewer/flightlog/<id>  one file, with Range support (t0..t9 = telemetry logs, b<n> = .BIN)
+  /api/logviewer/findsolo    "Find my Solo": the Solo's last known position from the end of the newest
+                             telemetry log that has one (also while armed; only reads the log's end)
 
 Rules it keeps (the controller also runs the radio, video and the Solo link):
   * read-only: files are opened "rb"; nothing is written except its own small log;
@@ -27,9 +29,11 @@ Python 2.7 (controller) and 3 (tests). No packages.
 from __future__ import print_function
 
 import json
+import math
 import os
 import re
 import socket
+import struct
 import sys
 import threading
 import time
@@ -231,6 +235,229 @@ def parse_range(header, size):
     return (a, min(b, size - 1))
 
 
+# ---------- Find my Solo: the last known position in the telemetry logs ----------
+#
+# The controller's tlog service keeps writing what the Solo sends until the link is lost, so the end of
+# the newest telemetry log holds the Solo's last position even when the Solo is off or crashed. After a
+# controller restart the logs move up by one (solo.tlog -> solo.tlog.1), so older logs are searched too.
+# Only the end of a log is read (and only the new part while it grows); nothing is written.
+
+MSG_HEARTBEAT, MSG_SYS_STATUS, MSG_GPS_RAW, MSG_GPOS, MSG_HOME = 0, 1, 24, 33, 242
+CRC_EXTRA = {MSG_HEARTBEAT: 50, MSG_SYS_STATUS: 124, MSG_GPS_RAW: 24, MSG_GPOS: 104, MSG_HOME: 104}
+BASE_LEN = {MSG_HEARTBEAT: 9, MSG_SYS_STATUS: 31, MSG_GPS_RAW: 30, MSG_GPOS: 28, MSG_HOME: 52}
+FIND_WINDOWS = (256 * 1024, 2 * 1024 * 1024)    # how much of a log's end to read, then more if no fix there
+HOME_HEAD = 1024 * 1024                         # where to look for a home point when the end has none
+TRAIL_SECONDS = 3                               # one trail point every this many seconds of log
+TRAIL_POINTS = 40
+LIVE_SECONDS = 10                               # newest log written this recently = Solo still linked
+GOOD_TIME = 1.5e9                               # a clock that reads before 2017 has not been set
+
+
+def iter_frames(raw, wanted):
+    """Good (CRC checked) MAVLink 1/2 frames from the Cube in a piece of .tlog.
+    Yields (record time in us or None, msgid, payload padded to its base length, end offset)."""
+    raw = bytes(raw)
+    buf = bytearray(raw)
+    n = len(buf)
+    i = 0
+    while True:
+        m = _MAGIC.search(raw, i)
+        if not m:
+            return
+        i = m.start()
+        if buf[i] == 0xFE:
+            if i + 6 > n:
+                return
+            ln = buf[i + 1]
+            hdr = 6
+            sysid, comp, mid = buf[i + 3], buf[i + 4], buf[i + 5]
+            signed = 0
+        else:
+            if i + 10 > n:
+                return
+            ln = buf[i + 1]
+            hdr = 10
+            signed = 13 if (buf[i + 2] & 1) else 0
+            sysid, comp = buf[i + 5], buf[i + 6]
+            mid = buf[i + 7] | (buf[i + 8] << 8) | (buf[i + 9] << 16)
+        crc_end = i + hdr + ln
+        end = crc_end + 2 + signed
+        if mid in wanted and sysid == 1 and comp == 1 and end <= n:
+            crc = _crc_x25(raw[i + 1:crc_end])
+            crc = _crc_x25(bytes(bytearray([CRC_EXTRA[mid]])), crc)
+            if (crc & 0xFF) == buf[crc_end] and (crc >> 8) == buf[crc_end + 1]:
+                pay = raw[i + hdr:crc_end]
+                want = BASE_LEN[mid]
+                if len(pay) < want:                     # MAVLink 2 drops trailing zero bytes
+                    pay = pay + b"\x00" * (want - len(pay))
+                t = None
+                if i >= 8:
+                    t = struct.unpack(">Q", raw[i - 8:i])[0]
+                yield t, mid, pay, end
+                i = end
+                continue
+        i += 1
+
+
+def new_find_state():
+    return {"pos": None, "gps": None, "home": None, "bat": None, "armed": None, "trail": [], "last_t": None}
+
+
+def scan_find(raw, state):
+    """Reads a piece of .tlog (oldest first) into state (newer data replaces older). -> end of the last good frame."""
+    done = 0
+    for t, mid, pay, end in iter_frames(raw, CRC_EXTRA):
+        done = end
+        if t is not None:
+            state["last_t"] = t
+        if mid == MSG_GPOS:
+            _boot, lat, lon, alt, rel, vx, vy, vz, hdg = struct.unpack("<IiiiihhhH", pay[:28])
+            if lat == 0 and lon == 0:
+                continue
+            state["pos"] = {"lat": lat / 1e7, "lon": lon / 1e7, "alt": alt / 1000.0, "rel": rel / 1000.0,
+                            "vx": vx / 100.0, "vy": vy / 100.0, "vz": vz / 100.0,
+                            "hdg": None if hdg == 65535 else hdg / 100.0, "t": t}
+            tr = state["trail"]
+            if t is None or not tr or tr[-1][2] is None or t - tr[-1][2] >= TRAIL_SECONDS * 1e6:
+                tr.append([round(lat / 1e7, 7), round(lon / 1e7, 7), t])
+                if len(tr) > TRAIL_POINTS:
+                    del tr[:len(tr) - TRAIL_POINTS]
+        elif mid == MSG_GPS_RAW:
+            tus, lat, lon, alt, eph, _epv, vel, _cog, fix, sats = struct.unpack("<QiiiHHHHBB", pay[:30])
+            state["gps"] = {"time_us": tus, "lat": lat / 1e7, "lon": lon / 1e7, "alt": alt / 1000.0,
+                            "hdop": None if eph == 65535 else eph / 100.0, "vel": vel / 100.0,
+                            "fix": fix, "sats": None if sats == 255 else sats, "t": t}
+        elif mid == MSG_HOME:
+            lat, lon, alt = struct.unpack("<iii", pay[:12])
+            if lat or lon:
+                state["home"] = {"lat": lat / 1e7, "lon": lon / 1e7, "alt": alt / 1000.0}
+        elif mid == MSG_SYS_STATUS:
+            mv = struct.unpack("<H", pay[14:16])[0]
+            rem = struct.unpack("<b", pay[30:31])[0]
+            state["bat"] = {"volts": None if mv in (0, 65535) else mv / 1000.0, "pct": None if rem < 0 else rem}
+        elif mid == MSG_HEARTBEAT:
+            state["armed"] = bool(bytearray(pay)[6] & 0x80)
+    return done
+
+
+def _read_at(path, start, size):
+    with open(path, "rb") as f:
+        f.seek(start)
+        return f.read(size)
+
+
+def scan_log_for_fix(path, st, cache):
+    """The find state of one log, reading only what is new since the last call."""
+    c = cache.get(path)
+    if c is not None and st.st_size >= c["size"] and c.get("ino") == getattr(st, "st_ino", None):
+        if st.st_size == c["size"]:
+            return c["state"]
+        if st.st_size - c["done"] <= FIND_WINDOWS[-1]:
+            state = c["state"]
+            raw = _read_at(path, c["done"], st.st_size - c["done"])
+            got = scan_find(raw, state)
+            if got:
+                c["done"] += got
+            c["size"] = st.st_size
+            return state
+    state = new_find_state()
+    done = 0
+    for w in FIND_WINDOWS:
+        start = max(0, st.st_size - w)
+        state = new_find_state()
+        got = scan_find(_read_at(path, start, st.st_size - start), state)
+        done = start + got if got else start
+        if state["pos"] is not None or start == 0:
+            break
+    if state["home"] is None and st.st_size > FIND_WINDOWS[0]:
+        head = new_find_state()
+        scan_find(_read_at(path, 0, min(HOME_HEAD, st.st_size)), head)
+        state["home"] = head["home"]
+    cache[path] = {"size": st.st_size, "done": done, "state": state, "ino": getattr(st, "st_ino", None)}
+    return state
+
+
+def distance_bearing(lat1, lon1, lat2, lon2):
+    """Metres and degrees (0 = north) from point 1 to point 2."""
+    r = 6371000.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp, dl = p2 - p1, math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    d = 2 * r * math.asin(min(1.0, math.sqrt(a)))
+    y = math.sin(dl) * math.cos(p2)
+    x = math.cos(p1) * math.sin(p2) - math.sin(p1) * math.cos(p2) * math.cos(dl)
+    return d, (math.degrees(math.atan2(y, x)) + 360.0) % 360.0
+
+
+def find_solo(log_dir, cache=None, now=None):
+    """The Solo's last known position from the controller's telemetry logs (newest log first)."""
+    now = time.time() if now is None else now
+    cache = {} if cache is None else cache
+    found = []
+    try:
+        names = os.listdir(log_dir)
+    except OSError:
+        names = []
+    for name in names:
+        m = TLOG_NAME.match(name)
+        if not m:
+            continue
+        path = os.path.join(log_dir, name)
+        try:
+            st = os.stat(path)
+        except OSError:
+            continue
+        if st.st_size >= 64:
+            found.append((int(m.group(1)) if m.group(1) else 0, path, st))
+    found.sort(key=lambda x: x[0])
+    for k, path, st in found:
+        try:
+            s = scan_log_for_fix(path, st, cache)
+        except (IOError, OSError):
+            continue
+        pos, gps = s["pos"], s["gps"]
+        source = "position"
+        if pos is None and gps is not None and gps["fix"] >= 2 and (gps["lat"] or gps["lon"]):
+            pos = {"lat": gps["lat"], "lon": gps["lon"], "alt": gps["alt"], "rel": None, "vx": None, "vy": None,
+                   "vz": None, "hdg": None, "t": gps["t"]}
+            source = "gps"
+        if pos is None:
+            continue
+        t = pos["t"] / 1e6 if pos["t"] else None
+        age = None
+        if t is not None and (t > GOOD_TIME) == (now > GOOD_TIME) and (k == 0 or t > GOOD_TIME):
+            age = max(0, int(now - t))
+        when = None                                      # real time of the fix: GPS time first
+        if gps and gps["time_us"] > GOOD_TIME * 1e6:
+            when = gps["time_us"] / 1e6
+            if gps["t"] and pos["t"]:
+                when += (pos["t"] - gps["t"]) / 1e6
+        elif t is not None and t > GOOD_TIME:
+            when = t
+        live = bool(k == 0 and now - st.st_mtime <= LIVE_SECONDS and age is not None and age <= LIVE_SECONDS)
+        out = {"found": True, "live": live, "log": "t%d" % k, "older_log": k > 0, "source": source,
+               "lat": round(pos["lat"], 7), "lon": round(pos["lon"], 7),
+               "alt_msl": round(pos["alt"], 1), "rel_alt": None if pos["rel"] is None else round(pos["rel"], 1),
+               "speed": None if pos["vx"] is None else round(math.hypot(pos["vx"], pos["vy"]), 1),
+               "climb": None if pos["vz"] is None else round(-pos["vz"], 1),
+               "heading": None if pos["hdg"] is None else round(pos["hdg"]),
+               "fix": gps["fix"] if gps else None, "sats": gps["sats"] if gps else None,
+               "hdop": gps["hdop"] if gps else None, "gps_lost": bool(gps and gps["fix"] < 2),
+               "time": None if when is None else int(when), "age": age,
+               "armed": s["armed"], "battery": s["bat"], "home": None, "dist_home": None, "bearing_home": None,
+               "trail": [[p[0], p[1]] for p in s["trail"]], "now": int(now)}
+        last = [round(pos["lat"], 7), round(pos["lon"], 7)]
+        if not out["trail"] or out["trail"][-1] != last:
+            out["trail"].append(last)
+        if s["home"]:
+            h = s["home"]
+            d, b = distance_bearing(h["lat"], h["lon"], pos["lat"], pos["lon"])
+            out["home"] = {"lat": round(h["lat"], 7), "lon": round(h["lon"], 7)}
+            out["dist_home"], out["bearing_home"] = int(round(d)), int(round(b)) % 360
+        return out
+    return {"found": False, "live": False, "now": int(now), "logs": len(found)}
+
+
 # ---------- HTTP ----------
 
 class Handler(BaseHTTPRequestHandler):
@@ -271,6 +498,10 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 return False
         return is_armed(self._cfg("log_dir"))
+
+    def _find(self):
+        with self.server.find_lock:                  # one scan at a time; the cache makes repeats cheap
+            return find_solo(self._cfg("log_dir"), self.server.find_cache)
 
     def _static(self, rel):
         base = os.path.join(self._cfg("root"), "web")
@@ -367,6 +598,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"mode": "controller", "dir": self._cfg("log_dir"), "version": self._version(),
                                    "logs": list_logs(self._cfg("log_dir"), self._cfg("bin_dir")),
                                    "armed": self._armed()})
+            if path == "/api/logviewer/findsolo":
+                return self._json(self._find())
             if path.startswith("/api/logviewer/flightlog/"):
                 return self._send_log(path[len("/api/logviewer/flightlog/"):])
             return self._json({"error": "Not found."}, 404)
@@ -399,6 +632,8 @@ class Server(ThreadingMixIn, HTTPServer):
         HTTPServer.__init__(self, addr, Handler)
         self.cfg = cfg
         self.gate = threading.BoundedSemaphore(MAX_DOWNLOADS)
+        self.find_lock = threading.Lock()
+        self.find_cache = {}
 
 
 def make_config(root=DEFAULT_ROOT, log_dir=DEFAULT_LOG_DIR, armed=None, verbose=False):

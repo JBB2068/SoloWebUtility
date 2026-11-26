@@ -10,14 +10,204 @@
   h1 { font-size: 18px; margin: 4px 0 2px; }
   p.sub { margin: 0 0 6px; color: #94a3b8; font-size: 13px; }
   .wrap { max-width: 1100px; margin: 0 auto; }
+  /* Find my Solo */
+  .fs { background: #111833; border: 1px solid #24305a; border-radius: 10px; padding: 12px; margin: 10px 0 14px; }
+  .fs-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .fs-head h2 { font-size: 16px; margin: 0; flex: 1 1 auto; }
+  .fs-badge { font-size: 11px; font-weight: 700; letter-spacing: .04em; padding: 3px 7px; border-radius: 999px;
+              background: #334155; color: #e2e8f0; }
+  .fs-badge.live { background: #15803d; color: #fff; }
+  .fs-badge.old { background: #b45309; color: #fff; }
+  .fs-btn { background: #1e293b; color: #f1f5f9; border: 1px solid #334155; border-radius: 8px; padding: 8px 12px;
+            font-size: 14px; cursor: pointer; text-decoration: none; display: inline-block; }
+  .fs-btn.main { background: #2563eb; border-color: #2563eb; color: #fff; font-weight: 600; }
+  .fs-coords { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; margin: 10px 0 2px;
+               word-break: break-all; user-select: all; -webkit-user-select: all; }
+  .fs-when { color: #cbd5e1; font-size: 13px; margin-bottom: 8px; }
+  .fs-warn { color: #fbbf24; font-size: 13px; margin: 4px 0; }
+  .fs-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin: 8px 0; }
+  .fs-cell { background: #0b1020; border: 1px solid #1f2a4d; border-radius: 8px; padding: 7px 9px; }
+  .fs-cell b { display: block; font-size: 16px; font-variant-numeric: tabular-nums; }
+  .fs-cell span { color: #94a3b8; font-size: 12px; }
+  .fs-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+  .fs-body { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-start; }
+  .fs-info { flex: 1 1 280px; min-width: 0; }
+  .fs-plot { flex: 0 0 auto; width: 220px; max-width: 100%; }
+  .fs-plot svg { width: 100%; height: auto; background: #0b1020; border: 1px solid #1f2a4d; border-radius: 8px; display: block; }
+  .fs-plot p { margin: 4px 0 0; color: #94a3b8; font-size: 11px; }
+  .fs-note { color: #94a3b8; font-size: 12px; margin: 6px 0 0; }
+  .fs-none { color: #cbd5e1; font-size: 14px; margin: 8px 0 0; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>Solo controller: flight logs</h1>
   <p class="sub">Read-only. Open a log after landing. Served by the controller at this address.</p>
+  <section class="fs" id="findSolo" aria-live="polite">
+    <div class="fs-head">
+      <h2>Find my Solo</h2>
+      <span class="fs-badge" id="fsBadge">Looking&hellip;</span>
+      <button class="fs-btn" id="fsRefresh" type="button">Refresh</button>
+    </div>
+    <div id="fsOut"><p class="fs-none">Reading the controller's telemetry logs&hellip;</p></div>
+  </section>
   <div id="logViewerMount"></div>
 </div>
+<script>
+(function () {
+  "use strict";
+  var out = document.getElementById("fsOut");
+  var badge = document.getElementById("fsBadge");
+  var timer = null;
+  var last = null;
+  var DIRS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function dir(deg) { return DIRS[Math.round(((deg % 360) + 360) % 360 / 45) % 8]; }
+  function dist(m) {
+    if (m < 1000) { return Math.round(m) + " m (" + Math.round(m * 3.28084) + " ft)"; }
+    return (m / 1000).toFixed(2) + " km (" + (m / 1609.344).toFixed(2) + " mi)";
+  }
+  function height(m) { return Math.round(m) + " m (" + Math.round(m * 3.28084) + " ft)"; }
+  function ago(s) {
+    if (s < 60) { return s + " s ago"; }
+    if (s < 3600) { return Math.floor(s / 60) + " min ago"; }
+    if (s < 172800) { return Math.floor(s / 3600) + " h " + Math.floor((s % 3600) / 60) + " min ago"; }
+    return Math.floor(s / 86400) + " days ago";
+  }
+  function fixName(f) {
+    return ({ 0: "no GPS", 1: "no fix", 2: "2D fix", 3: "3D fix", 4: "DGPS fix", 5: "RTK Float", 6: "RTK Fixed" })[f] || ("fix " + f);
+  }
+  function cell(label, value) { return '<div class="fs-cell"><span>' + esc(label) + "</span><b>" + esc(value) + "</b></div>"; }
+
+  function plot(d) {
+    // north-up sketch of the last positions (no map tiles: SoloLink Wi-Fi has no internet)
+    var pts = (d.trail || []).slice();
+    var home = d.home;
+    var all = pts.slice();
+    if (home) { all.push([home.lat, home.lon]); }
+    if (all.length < 2) { return ""; }
+    var lat0 = d.lat, k = Math.cos(lat0 * Math.PI / 180);
+    var xy = function (p) { return [(p[1] - d.lon) * 111320 * k, (p[0] - d.lat) * 110540]; };
+    var x0 = 0, x1 = 0, y0 = 0, y1 = 0, i, q;
+    for (i = 0; i < all.length; i++) {
+      q = xy(all[i]);
+      x0 = Math.min(x0, q[0]); x1 = Math.max(x1, q[0]); y0 = Math.min(y0, q[1]); y1 = Math.max(y1, q[1]);
+    }
+    var cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, mx = Math.max(10, (x1 - x0) / 2, (y1 - y0) / 2);
+    var S = 200, H = S / 2, sc = (H - 16) / mx;
+    var P = function (p) { q = xy(p); return [(H + (q[0] - cx) * sc).toFixed(1), (H - (q[1] - cy) * sc).toFixed(1)]; };
+    var line = [];
+    for (i = 0; i < pts.length; i++) { line.push(P(pts[i]).join(",")); }
+    var svg = '<svg viewBox="0 0 ' + S + " " + S + '" role="img" aria-label="Last positions, north up">';
+    svg += '<text x="8" y="16" fill="#94a3b8" font-size="12">N&#8593;</text>';
+    if (line.length > 1) { svg += '<polyline points="' + line.join(" ") + '" fill="none" stroke="#60a5fa" stroke-width="2" stroke-linejoin="round"/>'; }
+    if (home) {
+      var hp = P([home.lat, home.lon]);
+      svg += '<rect x="' + (hp[0] - 5) + '" y="' + (hp[1] - 5) + '" width="10" height="10" fill="#22c55e"/>';
+      svg += '<text x="' + (+hp[0] + 8) + '" y="' + (+hp[1] + 4) + '" fill="#86efac" font-size="11">Home</text>';
+    }
+    var me = P([d.lat, d.lon]);
+    svg += '<circle cx="' + me[0] + '" cy="' + me[1] + '" r="6" fill="#f43f5e" stroke="#fff" stroke-width="2"/>';
+    svg += "</svg>";
+    var scaleM = S / sc;
+    return '<div class="fs-plot">' + svg + "<p>Red: last position. Blue: path before it. Box is about " +
+      esc(dist(scaleM)) + " across.</p></div>";
+  }
+
+  function render(d) {
+    last = d;
+    if (!d || !d.found) {
+      badge.className = "fs-badge";
+      badge.textContent = "No position";
+      out.innerHTML = '<p class="fs-none">No GPS position in the controller\'s telemetry logs yet. The controller records the ' +
+        "Solo's position while they are linked, so it shows here after the Solo has had a GPS fix.</p>";
+      return;
+    }
+    badge.className = "fs-badge" + (d.live ? " live" : (d.older_log ? " old" : ""));
+    badge.textContent = d.live ? "LIVE" : "LAST KNOWN";
+    var ll = d.lat.toFixed(6) + ", " + d.lon.toFixed(6);
+    var when = [];
+    if (d.age !== null && d.age !== undefined) { when.push(d.live ? "Updating now" : "Last fix " + ago(d.age)); }
+    if (d.time) { when.push(new Date(d.time * 1000).toLocaleString()); }
+    if (d.fix !== null && d.fix !== undefined) { when.push(fixName(d.fix) + (d.sats !== null ? ", " + d.sats + " satellites" : "")); }
+    var h = '<div class="fs-body"><div class="fs-info">';
+    h += '<div class="fs-coords" id="fsCoords">' + esc(ll) + "</div>";
+    h += '<div class="fs-when">' + esc(when.join(" \u00b7 ") || "Time of fix unknown") + "</div>";
+    if (d.older_log) { h += '<p class="fs-warn">From an older log: the controller has been restarted since this position was recorded.</p>'; }
+    if (d.gps_lost) { h += '<p class="fs-warn">The Solo had lost its GPS fix by then, so this position is an estimate.</p>'; }
+    h += '<div class="fs-grid">';
+    if (d.rel_alt !== null && d.rel_alt !== undefined) { h += cell("Height above home", height(d.rel_alt)); }
+    if (d.dist_home !== null && d.dist_home !== undefined) { h += cell("From home", dist(d.dist_home) + " " + dir(d.bearing_home)); }
+    if (d.speed !== null && d.speed !== undefined) {
+      h += cell("Moving", d.speed < 0.5 ? "Stopped" : d.speed.toFixed(1) + " m/s" + (d.heading !== null ? " " + dir(d.heading) : ""));
+    }
+    if (d.battery && d.battery.pct !== null) { h += cell("Battery", d.battery.pct + "%" + (d.battery.volts ? " (" + d.battery.volts.toFixed(1) + " V)" : "")); }
+    if (d.armed !== null && d.armed !== undefined) { h += cell(d.live ? "Motors" : "Motors at last contact", d.armed ? "Armed" : "Disarmed"); }
+    h += "</div>";
+    var q = d.lat.toFixed(7) + "," + d.lon.toFixed(7);
+    var ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    var other = ios ? "https://maps.apple.com/?daddr=" + q + "&dirflg=w" : "geo:" + q + "?q=" + q + "(Solo)";
+    h += '<div class="fs-row">';
+    h += '<a class="fs-btn main" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&amp;travelmode=walking&amp;destination=' + q + '">Navigate in Google Maps</a>';
+    h += '<a class="fs-btn" href="' + esc(other) + '">' + (ios ? "Apple Maps" : "Other map app") + "</a>";
+    h += '<button class="fs-btn" type="button" id="fsCopy">Copy coordinates</button>';
+    h += "</div>";
+    h += '<p class="fs-note">This page can\'t use your phone\'s location (phones only share it with secure pages), so the ' +
+      "Navigate button lets Maps work out the distance and route from where you are. Maps need mobile data; the coordinates " +
+      "above work without it. Write them down before you leave the controller's Wi-Fi.</p>";
+    h += "</div>" + plot(d) + "</div>";
+    out.innerHTML = h;
+    document.getElementById("fsCopy").onclick = function () { copy(ll, this); };
+  }
+
+  function copy(text, btn) {
+    var done = function () { btn.textContent = "Copied"; setTimeout(function () { btn.textContent = "Copy coordinates"; }, 2000); };
+    try {
+      if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(text).then(done); return; }
+    } catch (e) { /* fall through */ }
+    var ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); done(); } catch (e2) { btn.textContent = "Select the numbers above to copy"; }
+    document.body.removeChild(ta);
+  }
+
+  function load() {
+    clearTimeout(timer);
+    var x = new XMLHttpRequest();
+    x.open("GET", "/api/logviewer/findsolo", true);
+    x.timeout = 15000;
+    x.onload = function () {
+      var d = null;
+      try { d = JSON.parse(x.responseText); } catch (e) { d = null; }
+      if (x.status === 200 && d) { render(d); } else if (!last) { badge.textContent = "Error"; }
+      next();
+    };
+    x.onerror = x.ontimeout = function () {
+      if (last) { badge.className = "fs-badge old"; badge.textContent = "LAST KNOWN (no answer)"; }
+      else { badge.textContent = "No answer"; }
+      next();
+    };
+    x.send();
+  }
+  function next() {
+    if (document.hidden) { return; }
+    timer = setTimeout(load, last && last.live ? 2000 : 15000);
+  }
+  document.getElementById("fsRefresh").onclick = load;
+  document.addEventListener("visibilitychange", function () { if (!document.hidden) { load(); } });
+  load();
+})();
+</script>
 <script src="/log-viewer/log-viewer.js?v=%VERSION%" defer></script>
 </body>
 </html>

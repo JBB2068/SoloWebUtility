@@ -1,7 +1,7 @@
 {
-  "version": "1.2.13",
-  "iteration": 85,
-  "updated_at": 1795467581,
+  "version": "1.2.14",
+  "iteration": 86,
+  "updated_at": 1795497124,
   "changelog": [
     {
       "version": "1.0.67",
@@ -484,6 +484,12 @@
       "iteration": 85,
       "date": "2026-11-23 14:59:41",
       "description": "Battery Solutions tab: the do-it-yourself battery mod is listed first and all prices are removed. Cube SD log copy: the Cube's file transfer is reset and the open retried, and every copy is logged on the Solo. RTK base on the phone: plug a u-blox RTK base receiver into the phone running the SoloLink Viewer app (1.6) and its RTCM corrections go to the Solo's RTK GPS (GPS_RTCM_DATA, like Mission Planner's RTK inject); SET UP BASE in the Cockpit starts survey-in and RTCM output on the base, with a choice of survey time and accuracy (1 min / 2 m up to 30 min / 0.3 m); the Cockpit shows the survey-in, the corrections and RTK Float/Fixed. The vehicle message box now sits at the bottom of the video above the flight mode and opens upwards. PUSH_TO_SOLO.bat copies changed files to a Solo for testing."
+    },
+    {
+      "version": "1.2.14",
+      "iteration": 86,
+      "date": "2026-11-24 05:12:04",
+      "description": "Find my Solo on the controller: the controller's log viewer (http://10.1.1.1/) shows the Solo's last known position from the controller's telemetry logs, live while the Solo is linked: coordinates, time of the fix, GPS fix and satellites, height above home, distance and direction from home, speed, battery and the last path, with Google Maps / Apple Maps / map app buttons and a copy button. It also works after a controller restart (older logs) and while armed. Update the controller viewer from the Flight Logs tab. Cockpit RTK: a second line (RTK Msgs) shows which RTCM corrections reach the Cube and whether the base has sent its position, and the base survey-in progress stays visible while corrections already flow. The RTK Base line now leads with the base position, VALID or INVALID with its survey accuracy in metres, then the Solo's fix type (3D, DGPS, FLOAT, FIX); the data rate moved to the RTK Msgs line. RTK base without the phone app: in Chrome (or Edge) on a PC, plug the base into the PC's USB port and press USB BASE in the Cockpit's GPS card; Chrome on Android works the same way. SET UP BASE, the survey choices and the RTK lines work as in the SoloLink Viewer app, and the corrections go to the Solo over Wi-Fi. Chrome allows USB only on secure pages, so http://10.1.1.10 has to be added once under chrome://flags, Insecure origins treated as secure."
     }
   ]
 }

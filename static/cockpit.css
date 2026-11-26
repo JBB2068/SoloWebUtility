@@ -1192,6 +1192,7 @@
 /* RTK base: the HUD panels ignore taps (pointer-events: none above), so the SET UP BASE
    button and the survey choice turn them back on for themselves and get a visible button look. */
 .hud-card #btnRtkSetup,
+.hud-card #btnRtkUsb,
 .hud-card #rtkSetupNote {
     pointer-events: auto !important;
     cursor: pointer !important;
@@ -1204,6 +1205,7 @@
     touch-action: manipulation;
 }
 .hud-card #btnRtkSetup:active,
+.hud-card #btnRtkUsb:active,
 .hud-card #rtkSetupNote:active {
     background: rgba(16, 185, 129, 0.45) !important;
 }

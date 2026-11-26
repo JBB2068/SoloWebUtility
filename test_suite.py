@@ -5749,13 +5749,16 @@ class TestSoloWebUtility(unittest.TestCase):
             self.assertIn('id="rowRtk"', html, page)
             self.assertIn('id="rtkBaseVal"', html, page)
             self.assertIn('id="btnRtkSetup"', html, page)
+            self.assertIn('id="btnRtkUsb"', html, page)   # RTK base in Chrome (Web Serial / WebUSB)
         css = open(os.path.join(root, "static", "cockpit.css"), encoding="utf-8").read()
         rule = css[css.index(".hud-card #btnRtkSetup"):]
         self.assertIn("pointer-events: auto !important;", rule[:rule.index("}")])   # the HUD panels ignore taps
         self.assertIn(".hud-card #rtkSetupNote", css)
+        self.assertIn(".hud-card #btnRtkUsb,", css)
         js = open(os.path.join(root, "static", "cockpit.js"), encoding="utf-8").read()
         for s in ("window.soloViewerRtcm", "window.soloViewerRtkStatus", "'/api/rtk/rtcm'", "updateRtk(telem);",
-                  "'RTK FIX'", "window.SoloViewerRtk.setupBase(rtkSurvey().secs, rtkSurvey().acc)", "RTK_SURVEY_PRESETS", "'SURVEY '"):
+                  "'RTK FIX'", "window.SoloViewerRtk.setupBase(rtkSurvey().secs, rtkSurvey().acc)", "RTK_SURVEY_PRESETS", "'INVALID'", "'VALID '", "' KB/s'",
+                  "navigator.serial.requestPort()", "navigator.usb.requestDevice(", "function rtkBaseSetup(", "function rtkCrc24q("):
             self.assertIn(s, js)
         app_dir = os.path.join(root, "android_app")
         src = os.path.join(app_dir, "src", "com", "sololink", "viewer")
@@ -5783,6 +5786,189 @@ class TestSoloWebUtility(unittest.TestCase):
         ps = open(os.path.join(app_dir, "build_viewer.ps1")).read()
         self.assertIn("static\\sololink_viewer.apk.bin", ps)
         self.assertNotIn("-A $AssetsDir", ps)
+
+    def test_66_find_my_solo_on_the_controller(self):
+        """Find my Solo: the controller viewer reads the Solo's last known position from the end of its
+        telemetry logs (GLOBAL_POSITION_INT, GPS_RAW_INT, HOME_POSITION, SYS_STATUS; MAVLink 1 and 2, CRC
+        checked), falls back to older logs after a controller restart, answers while armed, and the page
+        shows it with map links."""
+        import tempfile
+        import shutil as _shutil
+        import struct as _struct
+        import json as _json
+        import re as _re
+        import threading as _threading
+        import importlib.util as _ilu
+        import http.client as _http
+        root = os.path.dirname(os.path.abspath(__file__))
+        cdir = os.path.join(root, "modules", "log_viewer", "controller")
+        spec = _ilu.spec_from_file_location("lv_ctl_find_test", os.path.join(cdir, "log_server.py"))
+        srv = _ilu.module_from_spec(spec)
+        spec.loader.exec_module(srv)
+        with open(os.path.join(cdir, "log_server.py"), "r", encoding="utf-8") as f:
+            ssrc = f.read()
+        self.assertIsNone(_re.search(r"\bf\"|\bf'", ssrc))              # Python 2.7 on the controller
+
+        def frame(ts, mid, pay, v2=False):
+            if v2:
+                p = pay.rstrip(b"\x00")
+                body = bytes(bytearray([len(p), 0, 0, 9, 1, 1, mid & 255, (mid >> 8) & 255, mid >> 16])) + p
+            else:
+                body = bytes(bytearray([len(pay), 9, 1, 1, mid])) + pay
+            crc = srv._crc_x25(body)
+            crc = srv._crc_x25(bytes(bytearray([srv.CRC_EXTRA[mid]])), crc)
+            return _struct.pack(">Q", ts) + (b"\xfd" if v2 else b"\xfe") + body + _struct.pack("<H", crc)
+
+        def gpos(ts, lat, lon, rel, v2=False):
+            return frame(ts, 33, _struct.pack("<IiiiihhhH", 5000, int(round(lat * 1e7)), int(round(lon * 1e7)), 80000,
+                                              int(rel * 1000), 300, -400, 100, 27000), v2)
+
+        def gps(ts, fix, sats, gps_us):
+            return frame(ts, 24, _struct.pack("<QiiiHHHHBB", gps_us, 1, 1, 0, 80, 120, 500, 0, fix, sats))
+
+        def home(ts, lat, lon):
+            return frame(ts, 242, _struct.pack("<iii", int(lat * 1e7), int(lon * 1e7), 20000) + b"\x00" * 40)
+
+        def heartbeat(ts, armed):
+            return frame(ts, 0, _struct.pack("<I", 5) + bytes(bytearray([2, 3, 0x80 if armed else 0, 0, 3])))
+
+        def sys_status(ts, mv, pct):
+            p = bytearray(31)
+            p[14:16] = _struct.pack("<H", mv)
+            p[30:31] = _struct.pack("<b", pct)
+            return frame(ts, 1, bytes(p))
+
+        now = 1795000000.0
+        t0 = int((now - 300) * 1e6)
+        flight = home(t0, 40.0, -75.0) + b"\xfe\x05noise\xfd\x09" * 50
+        for k in range(60):
+            t = t0 + k * 10 ** 6
+            flight += (heartbeat(t, True) + gps(t, 3, 15, int((now - 300) * 1e6) + k * 10 ** 6) +
+                       gpos(t, 40.0 + k * 1e-5, -75.0 + k * 1e-5, 10 + k, v2=bool(k % 2)) + sys_status(t, 15600, 35))
+        bad = bytearray(gpos(t0 + 61 * 10 ** 6, 10.0, 10.0, 5))
+        bad[-1] ^= 0xFF                                                  # a broken frame is ignored
+        flight += bytes(bad)
+        tmp = tempfile.mkdtemp()
+        httpd = None
+        try:
+            log_dir = os.path.join(tmp, "log")
+            os.makedirs(log_dir)
+            # nothing yet
+            self.assertFalse(srv.find_solo(log_dir, {}, now=now)["found"])
+            # the controller was restarted: the flight is in solo.tlog.1, the new solo.tlog has no position
+            with open(os.path.join(log_dir, "solo.tlog.1"), "wb") as f:
+                f.write(flight)
+            with open(os.path.join(log_dir, "solo.tlog"), "wb") as f:
+                f.write(heartbeat(t0, False) * 10)
+            cache = {}
+            r = srv.find_solo(log_dir, cache, now=now)
+            self.assertTrue(r["found"])
+            self.assertEqual((r["log"], r["older_log"], r["live"], r["source"]), ("t1", True, False, "position"))
+            self.assertAlmostEqual(r["lat"], 40.00059, places=6)
+            self.assertAlmostEqual(r["lon"], -74.99941, places=6)
+            self.assertEqual((r["rel_alt"], r["alt_msl"], r["heading"], r["speed"], r["climb"]), (69.0, 80.0, 270, 5.0, -1.0))
+            self.assertEqual((r["fix"], r["sats"], r["hdop"], r["gps_lost"], r["armed"]), (3, 15, 0.8, False, True))
+            self.assertEqual(r["battery"], {"volts": 15.6, "pct": 35})
+            self.assertEqual(r["age"], 241)
+            self.assertEqual(r["time"], int(now - 300) + 59)
+            self.assertEqual(r["home"], {"lat": 40.0, "lon": -75.0})
+            self.assertTrue(81 <= r["dist_home"] <= 85, r["dist_home"])          # ~66 m north, ~50 m east
+            self.assertTrue(35 <= r["bearing_home"] <= 40, r["bearing_home"])
+            self.assertEqual(r["trail"][-1], [r["lat"], r["lon"]])
+            self.assertTrue(2 < len(r["trail"]) <= srv.TRAIL_POINTS + 1)
+            d, b = srv.distance_bearing(0.0, 0.0, 1.0, 0.0)
+            self.assertAlmostEqual(d, 111195, delta=5)
+            self.assertAlmostEqual(b, 0.0, places=3)
+            # the Solo is still linked: solo.tlog grows; only the new part is read; it is live
+            live = b""
+            for k in range(5):
+                t = int((now - 5 + k) * 1e6)
+                live += heartbeat(t, True) + gps(t, 6, 20, t) + gpos(t, 41.0, -76.0 + k * 1e-5, 30)
+            path0 = os.path.join(log_dir, "solo.tlog")
+            with open(path0, "ab") as f:
+                f.write(live[:-7])                                       # the last frame is still half written
+            os.utime(path0, (now - 1, now - 1))
+            r = srv.find_solo(log_dir, cache, now=now)
+            self.assertEqual((r["log"], r["live"], r["fix"]), ("t0", True, 6))
+            self.assertAlmostEqual(r["lon"], -75.99997, places=6)
+            done = cache[path0]["done"]
+            with open(path0, "ab") as f:
+                f.write(live[-7:])
+            os.utime(path0, (now, now))
+            r = srv.find_solo(log_dir, cache, now=now)
+            self.assertAlmostEqual(r["lon"], -75.99996, places=6)
+            self.assertGreater(cache[path0]["done"], done)
+            self.assertEqual(r, srv.find_solo(log_dir, {}, now=now))      # incremental = full read
+            # GPS lost at the end: the estimate is still shown, with a warning flag
+            with open(path0, "ab") as f:
+                f.write(gps(int(now * 1e6), 1, 3, 0))
+            self.assertTrue(srv.find_solo(log_dir, {}, now=now)["gps_lost"])
+            # only GPS_RAW_INT (no EKF position): its fix is used
+            os.remove(path0)
+            os.remove(os.path.join(log_dir, "solo.tlog.1"))
+            with open(path0, "wb") as f:
+                f.write(heartbeat(t0, False) + gps(t0, 3, 9, 0) + gps(t0 + 10 ** 6, 0, 0, 0))
+            self.assertFalse(srv.find_solo(log_dir, {}, now=now)["found"])     # last GPS had no fix, no position
+            with open(path0, "ab") as f:
+                f.write(frame(t0 + 2 * 10 ** 6, 24, _struct.pack("<QiiiHHHHBB", 0, 515000000, -1200000, 9000, 150,
+                                                                   200, 0, 0, 3, 8)))
+            r = srv.find_solo(log_dir, {}, now=now)
+            self.assertEqual((r["source"], r["lat"], r["lon"], r["rel_alt"], r["home"]), ("gps", 51.5, -0.12, None, None))
+            self.assertEqual(r["time"], t0 // 10 ** 6 + 2)                # no GPS time: the controller's record time
+
+            # over HTTP, also while armed
+            rootdir = os.path.join(tmp, "lv")
+            os.makedirs(os.path.join(rootdir, "web"))
+            cfg = srv.make_config(rootdir, log_dir, armed=lambda: True)
+            httpd = srv.Server(("127.0.0.1", 0), cfg)
+            th = _threading.Thread(target=httpd.serve_forever)
+            th.daemon = True
+            th.start()
+            c = _http.HTTPConnection("127.0.0.1", httpd.server_address[1], timeout=10)
+            c.request("GET", "/api/logviewer/findsolo")
+            res = c.getresponse()
+            body = _json.loads(res.read().decode("utf-8"))
+            c.close()
+            self.assertEqual((res.status, body["found"], body["lat"]), (200, True, 51.5))
+        finally:
+            if httpd is not None:
+                httpd.shutdown()
+                httpd.server_close()
+            _shutil.rmtree(tmp, ignore_errors=True)
+
+        # the page: panel above the log viewer, map links, no phone location (http page), copy fallback
+        with open(os.path.join(cdir, "index.html"), "r", encoding="utf-8") as f:
+            page = f.read()
+        self.assertLess(page.index('id="findSolo"'), page.index('id="logViewerMount"'))
+        for s in ("/api/logviewer/findsolo", "https://www.google.com/maps/dir/?api=1", "travelmode=walking",
+                  "maps.apple.com", "geo:", "execCommand(\"copy\")", "LAST KNOWN", "LIVE", "visibilitychange"):
+            self.assertIn(s, page)
+        self.assertNotIn("geolocation", page)
+
+    def test_67_version_bump_keeps_the_drone_manual_numbers(self):
+        """tools/bump_version.py changes the utility version only: not a longer number that starts the
+        same, and not the section and figure numbers of the drone manual inside the web page."""
+        import importlib.util as _ilu
+        root = os.path.dirname(os.path.abspath(__file__))
+        spec = _ilu.spec_from_file_location("bump_version_test", os.path.join(root, "tools", "bump_version.py"))
+        bv = _ilu.module_from_spec(spec)
+        spec.loader.exec_module(bv)
+        page = (b'<link href="/style.css?v=1.2.1">v1.2.1 Solo Web Utility v1.2.1 Installer.exe 1.2.10 1.2.13\r\n'
+                b'<h4 id="121-smart-battery">1.2.1 Smart Battery</h4>\r\n'
+                b'<p><em>Figure 1.2.1.1: Solo Overview</em> <em>Figure 6.1.2.1: App</em></p>\r\n'
+                b"StringStruct('FileVersion', '1.2.1.0') filevers=(1, 2, 1, 0) Version 1.2.1.")
+        out = bv._swap_version(page, "1.2.1", "1.2.2")
+        self.assertEqual(out, page.replace(b"?v=1.2.1", b"?v=1.2.2").replace(b"v1.2.1 Solo", b"v1.2.2 Solo")
+                         .replace(b"v1.2.1 Inst", b"v1.2.2 Inst").replace(b"'1.2.1.0'", b"'1.2.2.0'")
+                         .replace(b"Version 1.2.1.", b"Version 1.2.2."))
+        for name in ("static/index.html", "templates/index.html", "static/solo_drone_manual.html"):
+            with open(os.path.join(root, name), "rb") as f:
+                text = f.read()
+            for s in (b'<h4 id="121-smart-battery">1.2.1 Smart Battery</h4>',
+                      b'<h4 id="124-fixed-camera-mount-and-hdmi-cable">1.2.4 Fixed Camera Mount',
+                      b"Figure 1.2.4.1: Solo Overview", b"Figure 6.1.2.1: App", b"Figure 7.1.2.1: Controller"):
+                self.assertIn(s, text, name)
+
 
 def _struct_float(b4):
     """Pack 4 signed bytes into the float the gimbal sends as GMB_SWVER."""
