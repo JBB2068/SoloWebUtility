@@ -1146,6 +1146,7 @@
     user-select: none;
     -webkit-touch-callout: none;
 }
+.camera-row .camera-res[hidden] { display: none !important; }
 .camera-row .camera-res select {
     margin-left: 4px;
     background: #1f2937;

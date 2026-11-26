@@ -1702,20 +1702,49 @@
             })
             .then(function(res) {
                 if (!res || typeof res.siyi !== 'boolean') return CAMERA_RECHECK_MS;
-                if (btnCamera) btnCamera.hidden = !res.siyi;
-                if (!res.siyi) closeCameraRow();
+                // camera: any camera gimbal the utility knows (older servers only say siyi)
+                const camera = typeof res.camera === 'boolean' ? res.camera : res.siyi;
+                if (btnCamera) btnCamera.hidden = !camera;
+                if (!camera) closeCameraRow();
+                showCameraResolutions(res.resolutions);
                 if (res.mnt1_type !== undefined) followCameraLens(res.siyi);
                 if (typeof res.recording === 'boolean') {
                     cameraRecording = res.recording;
                     setRecordButton();
                 }
-                if (res.siyi && !res.ready) setCameraMsg(res.message, true);
+                if (camera && !res.ready) setCameraMsg(res.message, true);
                 showCameraResolution(res.resolution);
                 layoutShotRow();
                 return res.mnt1_type === undefined ? CAMERA_RECHECK_MS : CAMERA_CHECK_EVERY_MS;
             })
             .catch(function() { return CAMERA_RECHECK_MS; })
             .then(function(wait) { setTimeout(checkCamera, wait || CAMERA_RECHECK_MS); });
+    }
+
+    // RES offers the heights this camera gimbal has (none: RES is hidden)
+    const CAMERA_RES_NAMES = { 720: '720p', 1080: '1080p', 1440: '2K', 2160: '4K' };
+    let cameraResList = '';
+    function showCameraResolutions(list) {
+        const sel = document.getElementById('cameraResIn');
+        const label = sel && sel.closest('.camera-res');
+        if (!sel || !label || !Array.isArray(list)) return;
+        label.hidden = list.length === 0;
+        const key = list.join(',');
+        if (key === cameraResList) return;
+        cameraResList = key;
+        const keep = sel.value;
+        sel.innerHTML = '';
+        const dash = document.createElement('option');
+        dash.value = '';
+        dash.textContent = '—';
+        sel.appendChild(dash);
+        list.forEach(function(h) {
+            const o = document.createElement('option');
+            o.value = String(h);
+            o.textContent = CAMERA_RES_NAMES[h] || (h + 'p');
+            sel.appendChild(o);
+        });
+        sel.value = list.indexOf(Number(keep)) >= 0 ? keep : '';
     }
 
     // RES shows what the Cube last reported (test firmware only); a dash while it's unknown

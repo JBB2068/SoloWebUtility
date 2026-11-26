@@ -161,14 +161,14 @@ def clean_statustext(raw):
     text = raw.split('\x00', 1)[0]               # text ends at the first NUL
     return ' '.join(text.split())                 # trim and collapse whitespace
 _ARDUCOPTER_BANNER = re.compile(r"ArduCopter V(\d+\.\d+(?:\.\d+)?)")
-# the test Cube firmware's A8 resolution lines: "Siyi: recording 1920x1080" (at boot) and
-# "Siyi: recording 1080p" (after a change)
-_SIYI_RESOLUTION = re.compile(r"^Siyi: recording (?:\d+x(\d+)|(\d+)p)$")
+# the test Cube firmware's resolution lines, the same for every camera: "Mount1: recording 1920x1080"
+# (when first known) and "Mount1: recording 1080p" (after a change). "Siyi: ..." is the first test build.
+_CAMERA_RESOLUTION = re.compile(r"^(?:Mount1|Siyi): recording (?:\d+x(\d+)|(\d+)p)$")
 
 
-def siyi_resolution_from_text(text):
-    """STATUSTEXT -> the A8's recording height (720, 1080, 1440, 2160) or None."""
-    m = _SIYI_RESOLUTION.match(text or "")
+def camera_resolution_from_text(text):
+    """STATUSTEXT -> the camera's recording height (720, 1080, 1440, 2160) or None."""
+    m = _CAMERA_RESOLUTION.match(text or "")
     if not m:
         return None
     try:
@@ -936,7 +936,7 @@ class LiveMAVLinkClient(threading.Thread):
                             self.state.cube_version = m.group(1)
                             self.state.cube_version_time = now
                             _remember_cube_version(m.group(1))
-                        height = siyi_resolution_from_text(raw_text) if compid == 1 else None
+                        height = camera_resolution_from_text(raw_text) if compid == 1 else None
                         if height:
                             self.state.camera_resolution = height
 
@@ -2525,6 +2525,13 @@ def rtcm_base_position(frame):
 # Nothing here is sent unless the Cube reports MNT1_TYPE 8, so a stock Solo is never affected.
 # =============================================================================
 SIYI_MNT1_TYPE = 8
+# Camera gimbals the CAMERA row works with, by MNT1_TYPE. Zoom, photo, record and center are
+# ArduPilot's standard camera commands, so another camera gimbal is one more entry here (plus its
+# preset). resolutions: the recording heights the test Cube firmware can set on it (empty: no RES).
+CAMERA_GIMBALS = {
+    SIYI_MNT1_TYPE: {"name": "SIYI", "preset": "SIYI A8 Mini", "resolutions": (720, 1080, 1440, 2160),
+                     "zoom_hint": True},
+}
 GIMBAL_PARAMS = ("MNT1_TYPE", "CAM1_TYPE")
 GIMBAL_CHECK_TIMEOUT = 6.0        # s
 GIMBAL_CHECK_RESEND = 2.0         # s between requests
@@ -2537,7 +2544,7 @@ MAV_CMD_VIDEO_STOP_CAPTURE = 2501
 # (MAV_CMD_USER_1 as "change camera setting": param1 setting, param2 value, param3 camera 0 = primary)
 MAV_CMD_CAMERA_CHANGE_SETTING = 31010
 CAMERA_SETTING_RECORDING_RESOLUTION = 3
-GIMBAL_RESOLUTIONS = (720, 1080, 1440, 2160)
+GIMBAL_RESOLUTIONS = (720, 1080, 1440, 2160)   # every height the firmware knows (CameraSetting 3)
 ZOOM_TYPE_CONTINUOUS = 1          # -1 zoom out, 0 stop, 1 zoom in
 ZOOM_TYPE_RANGE = 2               # 0..100 % of the zoom range
 GIMBAL_ZOOM_STEPS = {"in": 1.0, "out": -1.0, "stop": 0.0}
@@ -2556,30 +2563,38 @@ GIMBAL_ZOOM_HINT = " If the picture doesn't change, set the A8's recording to 10
 
 def gimbal_param_report(values):
     """{MNT1_TYPE, CAM1_TYPE} read from the Cube -> what the Cockpit shows.
-    siyi: the CAMERA row is offered; ready: the camera buttons also work (CAM1_TYPE 4)."""
+    camera: the CAMERA row is offered (MNT1_TYPE is in CAMERA_GIMBALS); ready: the camera buttons
+    also work (CAM1_TYPE 4); resolutions: what RES offers; siyi: it is the SIYI driver (the A8's lens)."""
     mnt = values.get("MNT1_TYPE")
     cam = values.get("CAM1_TYPE")
     if mnt is None:
-        return {"siyi": False, "ready": False, "message": "Could not read the gimbal setup from the Cube."}
-    if int(round(mnt)) != SIYI_MNT1_TYPE:
-        return {"siyi": False, "ready": False, "mnt1_type": int(round(mnt)),
-                "message": "No SIYI gimbal set up (MNT1_TYPE %d)." % int(round(mnt))}
+        return {"camera": False, "siyi": False, "ready": False, "resolutions": [],
+                "message": "Could not read the gimbal setup from the Cube."}
+    mnt = int(round(mnt))
+    gimbal = CAMERA_GIMBALS.get(mnt)
+    if gimbal is None:
+        return {"camera": False, "siyi": False, "ready": False, "mnt1_type": mnt, "resolutions": [],
+                "message": "No camera gimbal set up (MNT1_TYPE %d)." % mnt}
+    report = {"camera": True, "siyi": mnt == SIYI_MNT1_TYPE, "mnt1_type": mnt, "name": gimbal["name"],
+              "resolutions": list(gimbal["resolutions"])}
     if cam is None or int(round(cam)) != 4:
-        return {"siyi": True, "ready": False, "mnt1_type": SIYI_MNT1_TYPE,
-                "message": "SIYI gimbal set up, but CAM1_TYPE is not 4 (Mount): photo, record and zoom "
-                           "won't work. Apply the SIYI A8 Mini preset and reboot the Cube."}
-    return {"siyi": True, "ready": True, "mnt1_type": SIYI_MNT1_TYPE,
-            "message": "SIYI A8 Mini: zoom, photo, record and center are ready."}
+        report.update(ready=False, message="%s gimbal set up, but CAM1_TYPE is not 4 (Mount): photo, record and "
+                      "zoom won't work. Apply the %s preset and reboot the Cube." % (gimbal["name"], gimbal["preset"]))
+    else:
+        report.update(ready=True, message="%s: zoom, photo, record and center are ready." % gimbal["preset"])
+    return report
 
 
 class GimbalCamera(object):
-    """The Cockpit's CAMERA row for a SIYI A8 Mini: zoom, photo, record, center."""
+    """The Cockpit's CAMERA row for a camera gimbal in CAMERA_GIMBALS (a SIYI A8 Mini so far):
+    zoom, photo, record, center, and the recording resolution where the gimbal has it."""
 
     def __init__(self, client, state=None):
         self.client = client
         self.state = state
         self.lock = threading.Lock()
-        self.siyi = False                 # last answer from the Cube: MNT1_TYPE is 8
+        self.gimbal = None                # last answer from the Cube: its CAMERA_GIMBALS entry, or None
+        self.siyi = False                 # ... and it is the SIYI driver
         self.recording = False            # what the Cockpit last asked for (the A8 itself isn't asked)
         self._last_check = None           # (time, report)
 
@@ -2597,6 +2612,7 @@ class GimbalCamera(object):
         with self.lock:
             if values.get("MNT1_TYPE") is not None:
                 self.siyi = bool(report.get("siyi"))
+                self.gimbal = CAMERA_GIMBALS.get(report.get("mnt1_type")) if report.get("camera") else None
                 self._last_check = (now, report)
             elif self._last_check is not None:
                 report = dict(self._last_check[1])
@@ -2607,10 +2623,11 @@ class GimbalCamera(object):
         return report
 
     def _require_siyi(self):
+        """None when a camera gimbal is set up, else why the camera buttons can't work."""
         with self.lock:
-            if self.siyi:
+            if self.gimbal is not None:
                 return None
-        return "No SIYI gimbal set up: apply the SIYI A8 Mini preset on the Parameters tab and reboot the Cube."
+        return "No camera gimbal set up: apply the SIYI A8 Mini preset on the Parameters tab and reboot the Cube."
 
     def zoom(self, how):
         """how: in / out (zoom while held) / stop / wide (all the way out)."""
@@ -2638,7 +2655,9 @@ class GimbalCamera(object):
             msg = GIMBAL_ZOOM_REFUSED.get(result, "The Cube refused the zoom (result %d)." % result)
             self._log("Camera: zoom refused by the Cube (result %d)" % result, 4)
             return False, msg
-        return True, done + GIMBAL_ZOOM_HINT
+        with self.lock:
+            hint = bool(self.gimbal and self.gimbal.get("zoom_hint"))
+        return True, done + (GIMBAL_ZOOM_HINT if hint else "")
 
     def _ack(self, command, since):
         """The Cube's COMMAND_ACK result, or None (no answer, or a client that can't tell)."""
@@ -2656,30 +2675,36 @@ class GimbalCamera(object):
         return siyi
 
     def set_resolution(self, height):
-        """Recording resolution by its height (720, 1080, 1440, 2160). Needs the test Cube firmware;
-        stock ArduPilot answers "unsupported". The Cube confirms on the message bar."""
+        """Recording resolution by its height, from the gimbal's CAMERA_GIMBALS resolutions. Needs the
+        test Cube firmware; stock ArduPilot answers "unsupported". The Cube confirms on the message bar."""
         err = self._require_siyi()
         if err:
             return False, err
+        with self.lock:
+            gimbal = self.gimbal or {}
+        allowed = tuple(gimbal.get("resolutions") or ())
+        if not allowed:
+            return False, "The %s gimbal has no resolution setting here." % gimbal.get("name", "camera")
         try:
             height = int(height)
         except (TypeError, ValueError):
             height = 0
-        if height not in GIMBAL_RESOLUTIONS:
-            return False, "Resolution: pick 720, 1080, 1440 or 2160."
+        if height not in allowed:
+            return False, "Resolution: pick %s." % ", ".join(str(h) for h in allowed)
         sent = time.time()
         self.client.send_command_long(MAV_CMD_CAMERA_CHANGE_SETTING,
                                       [CAMERA_SETTING_RECORDING_RESOLUTION, float(height), 0.0])
         result = self._ack(MAV_CMD_CAMERA_CHANGE_SETTING, sent)
         name = "4K" if height == 2160 else ("2K" if height == 1440 else "%dp" % height)
         if result == 3:
-            return False, ("This Cube firmware can't change the A8's resolution: it needs the test firmware with "
-                           "SIYI resolution support. Set it in SIYI's app instead.")
+            return False, ("This Cube firmware can't change the camera's resolution: it needs the test firmware "
+                           "with camera resolution support. Set it in the camera maker's app instead.")
         if result is not None and result != MAV_RESULT_ACCEPTED:
-            return False, "The Cube could not ask the A8 for %s (result %d)." % (name, result)
+            return False, "The Cube could not ask the camera for %s (result %d)." % (name, result)
         self._log("Camera: recording resolution %s requested" % name, 6)
-        return True, ("Asked the A8 to record in %s. The Cube confirms it on the message bar (\"Siyi: recording %dp\")."
-                      % (name, height)) + (" Zoom does not work in 4K." if height == 2160 else "")
+        hint = " Zoom does not work in 4K." if height == 2160 and gimbal.get("zoom_hint") else ""
+        return True, ("Asked the camera to record in %s. The Cube confirms it on the message bar "
+                      "(\"Mount1: recording %dp\")." % (name, height)) + hint
 
     def photo(self):
         err = self._require_siyi()

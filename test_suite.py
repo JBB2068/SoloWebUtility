@@ -6048,7 +6048,7 @@ class TestSoloWebUtility(unittest.TestCase):
             self.assertIn('id="cameraRow" class="smart-shot-row camera-row" hidden', page, name)
         with open(os.path.join(root, "static", "cockpit.js"), encoding="utf-8") as f:
             js = f.read()
-        self.assertIn("btnCamera.hidden = !res.siyi", js)
+        self.assertIn("btnCamera.hidden = !camera", js)
         self.assertIn("const A8_LENS = { fov: 81, lens: 'rectilinear' }", js)
         self.assertEqual(js.count("zoomWideForFinder();"), 2)      # pad finder and takeoff spot on
 
@@ -6097,10 +6097,33 @@ class TestSoloWebUtility(unittest.TestCase):
         self.assertIn("test firmware", msg)
         self.assertFalse(cm.GimbalCamera(ack_client).set_resolution(1080)[0])   # no SIYI reported yet
         # the RES dropdown shows what the test firmware reports on the message bar
-        self.assertEqual(cm.siyi_resolution_from_text("Siyi: recording 1920x1080"), 1080)
-        self.assertEqual(cm.siyi_resolution_from_text("Siyi: recording 2160p"), 2160)
-        self.assertIsNone(cm.siyi_resolution_from_text("Siyi: recording started"))
-        self.assertIsNone(cm.siyi_resolution_from_text("Siyi: recording NO CARD!"))
+        self.assertEqual(cm.camera_resolution_from_text("Siyi: recording 1920x1080"), 1080)
+        self.assertEqual(cm.camera_resolution_from_text("Siyi: recording 2160p"), 2160)
+        self.assertIsNone(cm.camera_resolution_from_text("Siyi: recording started"))
+        self.assertIsNone(cm.camera_resolution_from_text("Siyi: recording NO CARD!"))
+        self.assertEqual(cm.camera_resolution_from_text("Mount1: recording 4096x2160"), 2160)
+        self.assertEqual(cm.camera_resolution_from_text("Mount1: recording 1440p"), 1440)
+        self.assertIsNone(cm.camera_resolution_from_text("Mount1: 2160p refused"))
+        # the camera gimbal table drives the row and RES: another camera is one more entry
+        rep = cm.gimbal_param_report({"MNT1_TYPE": 8.0, "CAM1_TYPE": 4.0})
+        self.assertTrue(rep["camera"] and rep["ready"])
+        self.assertEqual(rep["resolutions"], [720, 1080, 1440, 2160])
+        self.assertEqual(cm.gimbal_param_report({"MNT1_TYPE": 2.0})["resolutions"], [])
+        old_table = dict(cm.CAMERA_GIMBALS)
+        try:
+            cm.CAMERA_GIMBALS[99] = {"name": "Other", "preset": "Other cam", "resolutions": (1080,)}
+            rep = cm.gimbal_param_report({"MNT1_TYPE": 99.0, "CAM1_TYPE": 4.0})
+            self.assertTrue(rep["camera"])
+            self.assertFalse(rep["siyi"])
+            other = cm.GimbalCamera(ack_client)
+            other.check_report({"MNT1_TYPE": 99.0, "CAM1_TYPE": 4.0})
+            ack_client.result = 0
+            self.assertFalse(other.set_resolution(2160)[0])
+            self.assertTrue(other.set_resolution(1080)[0])
+            self.assertTrue(other.photo()[0])
+        finally:
+            cm.CAMERA_GIMBALS.clear()
+            cm.CAMERA_GIMBALS.update(old_table)
         res_state = cm.TelemetryState()
         res_cam = cm.GimbalCamera(ack_client, state=res_state)
         self.assertIsNone(res_cam.check_report({"MNT1_TYPE": 8.0, "CAM1_TYPE": 4.0})["resolution"])
