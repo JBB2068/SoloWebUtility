@@ -6049,6 +6049,23 @@ class TestSoloWebUtility(unittest.TestCase):
         with open(os.path.join(root, "static", "cockpit.js"), encoding="utf-8") as f:
             js = f.read()
         self.assertIn("btnCamera.hidden = !res.siyi", js)
+        self.assertIn("const A8_LENS = { fov: 81, lens: 'rectilinear' }", js)
+        self.assertEqual(js.count("zoomWideForFinder();"), 2)      # pad finder and takeoff spot on
+
+        # 5. CAMERA DOWN also takes a SIYI A8 Mini back to 1x (and sends nothing extra otherwise)
+        old_cam = cm.gimbal_camera
+        try:
+            cm.gimbal_camera = cam
+            pl = cm.PrecisionLanding(client)
+            del client.sent[:]
+            pl.set_camera(True)
+            self.assertEqual(client.sent, [(205, [-90.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2]), (531, [2, 0.0, 0.0])])
+            cam.check_report({"MNT1_TYPE": 2.0, "CAM1_TYPE": 3.0})
+            del client.sent[:]
+            pl.set_camera(True)
+            self.assertEqual(client.sent, [(205, [-90.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2])])
+        finally:
+            cm.gimbal_camera = old_cam
 
 def _struct_float(b4):
     """Pack 4 signed bytes into the float the gimbal sends as GMB_SWVER."""

@@ -2338,6 +2338,8 @@ class PrecisionLanding(object):
         if down:
             self.client.send_command_long(MAV_CMD_DO_MOUNT_CONTROL,
                                           [-90.0, 0.0, 0.0, 0.0, 0.0, 0.0, MAV_MOUNT_MODE_MAVLINK_TARGETING])
+            # a SIYI A8 Mini goes back to 1x: the finders read the height from the pad's size
+            gimbal_camera.zoom_wide_if_siyi()
         else:
             self.client.send_command_long(MAV_CMD_DO_MOUNT_CONTROL,
                                           [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, MAV_MOUNT_MODE_RC_TARGETING])
@@ -2564,6 +2566,14 @@ class GimbalCamera(object):
             return False, "Zoom: say in, out, stop or wide."
         self.client.send_command_long(MAV_CMD_SET_CAMERA_ZOOM, [ZOOM_TYPE_CONTINUOUS, GIMBAL_ZOOM_STEPS[how], 0.0])
         return True, {"in": "Zooming in.", "out": "Zooming out.", "stop": "Zoom stopped."}[how]
+
+    def zoom_wide_if_siyi(self):
+        """For the pad and spot finders (CAMERA DOWN): 1x on a SIYI A8 Mini, nothing otherwise."""
+        with self.lock:
+            siyi = self.siyi
+        if siyi:
+            self.client.send_command_long(MAV_CMD_SET_CAMERA_ZOOM, [ZOOM_TYPE_RANGE, 0.0, 0.0])
+        return siyi
 
     def photo(self):
         err = self._require_siyi()

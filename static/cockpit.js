@@ -1354,6 +1354,7 @@
             if (padFinderOn) {
                 setPrecisionMsg('Looking for the pad. Point the camera down and fly over it.', false);
                 speak('Pad finder on');
+                zoomWideForFinder();
                 checkPrecisionSetup(false);
             } else {
                 clearPadOverlay();
@@ -1568,6 +1569,7 @@
             const t = currentTelem;
             if (spotOn) {
                 speak('Takeoff spot on');
+                zoomWideForFinder();
                 checkPrecisionSetup(false);
                 if (telemArmed(t) && !spotRefs.length && (t.alt_rel || 0) < 0.5) {
                     spotStartClimb(t);                 // armed, still on the ground
@@ -1669,6 +1671,29 @@
         setCameraLabel();
     }
 
+    // The pad and spot finders work out height from the pad's size in the picture, so they need the
+    // A8 at 1x: a zoomed picture would read the Solo as much lower than it is.
+    function zoomWideForFinder() {
+        const btn = document.getElementById('btnCamera');
+        if (!btn || btn.hidden) return;
+        postAction({ action: 'gimbal_zoom', mode: 'wide' }).catch(function() {});
+    }
+
+    // Lens settings for the pad and spot finders. While they are still at one camera's defaults,
+    // they follow the camera the Cube reports; values typed in under PAD are never changed.
+    const GOPRO_LENS = { fov: 118, lens: 'fisheye' };      // GoPro Wide
+    const A8_LENS = { fov: 81, lens: 'rectilinear' };      // SIYI A8 Mini: 81 deg horizontal (SIYI spec)
+    function followCameraLens(siyi) {
+        const from = siyi ? GOPRO_LENS : A8_LENS;
+        const to = siyi ? A8_LENS : GOPRO_LENS;
+        if (Math.round(padFovDeg) !== from.fov || padLens !== from.lens) return;
+        padFovDeg = to.fov;
+        padLens = to.lens;
+        savePadSetting('solo_pad_fov_deg', padFovDeg);
+        savePadSetting('solo_pad_lens', padLens);
+        showPadSettings();
+    }
+
     function checkCamera() {
         fetch('/api/camera/check', { cache: 'no-store', headers: authHeaders() })
             .then(function(r) {
@@ -1679,6 +1704,7 @@
                 if (!res || typeof res.siyi !== 'boolean') return CAMERA_RECHECK_MS;
                 if (btnCamera) btnCamera.hidden = !res.siyi;
                 if (!res.siyi) closeCameraRow();
+                if (res.mnt1_type !== undefined) followCameraLens(res.siyi);
                 if (typeof res.recording === 'boolean') {
                     cameraRecording = res.recording;
                     setRecordButton();
