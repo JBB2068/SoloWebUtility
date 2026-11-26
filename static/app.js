@@ -2094,6 +2094,10 @@ function setUploadProgressVisible(visible) {
         {
             title: '🎯 Precision Landing Presets',
             match: function (p) { return p.category === 'Precision Landing'; }
+        },
+        {
+            title: '📷 Gimbal Presets',
+            match: function (p) { return p.category === 'Gimbal'; }
         }
     ];
 

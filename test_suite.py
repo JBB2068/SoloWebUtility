@@ -1624,7 +1624,8 @@ class TestSoloWebUtility(unittest.TestCase):
                   "BATT_LOW_MAH", "BATT_CRT_MAH", "BATT_LOW_TIMER", "BATT_FS_LOW_ACT", "BATT_FS_CRT_ACT",
                   "BATT_FS_VOLTSRC", "MOT_BAT_VOLT_MIN", "MOT_BAT_VOLT_MAX", "MOT_BAT_CURR_MAX", "LOIT_BRK_DELAY",
                   "LOIT_ANG_MAX", "ATC_INPUT_TC", "PLND_ENABLED", "PLND_TYPE", "PLND_EST_TYPE", "PLND_LAG",
-                  "PLND_XY_DIST_MAX", "PLND_OPTIONS"]
+                  "PLND_XY_DIST_MAX", "PLND_OPTIONS", "SERIAL4_PROTOCOL", "SERIAL4_BAUD", "MNT1_TYPE",
+                  "CAM1_TYPE", "RC6_OPTION"]
         new_names = sorted(_pm.PARAM_ALIASES_PRE_4_7.keys())
         old_names = [_pm.PARAM_ALIASES_PRE_4_7[n][0] for n in new_names]
 
@@ -2987,13 +2988,14 @@ class TestSoloWebUtility(unittest.TestCase):
         self.assertIn("app_ip=find_app_on_shotmanager()", src)
         self.assertIn("armed=is_vehicle_armed(wake=True)", src)
 
-        # pages: SMART SHOTS is the 6th control button (PRECISION the 7th); its row has a button for every shot
+        # pages: SMART SHOTS is the 6th control button (PRECISION the 7th, the SIYI-only CAMERA the 8th);
+        # its row has a button for every shot
         import re as _re
         for page in ("static/index.html", "templates/index.html"):
             html = open(os.path.join(root, page), encoding="utf-8").read()
             top = html[html.index('<section class="tab-content" id="tab-cockpit">'):html.index('<div class="cockpit-body">')]
             row = top[top.index('class="annun-row"', top.index('id="btnUnitToggle"') - 200):top.index('id="smartShotRow"')]
-            self.assertEqual(row.count('class="btn-ctrl'), 7, page)
+            self.assertEqual(row.count('class="btn-ctrl'), 8, page)
             self.assertIn('id="btnSmartShots"', row)
             shots = set(int(s) for s in _re.findall(r'data-shot="(-?\d+)"', top))
             self.assertEqual(shots, set(s[0] for s in cm.SMART_SHOTS), page)
@@ -5969,6 +5971,180 @@ class TestSoloWebUtility(unittest.TestCase):
                       b"Figure 1.2.4.1: Solo Overview", b"Figure 6.1.2.1: App", b"Figure 7.1.2.1: Controller"):
                 self.assertIn(s, text, name)
 
+
+    def test_68_siyi_a8_mini_gimbal(self):
+        """Optional SIYI A8 Mini in place of the Solo gimbal: the two presets swap SERIAL4 / MNT1_TYPE /
+        CAM1_TYPE between the A8 and the stock gimbal, the Cockpit camera commands are only sent once
+        the Cube reports MNT1_TYPE 8, and the CAMERA button starts hidden."""
+        import cockpit_mgr as cm
+        root = os.path.dirname(os.path.abspath(__file__))
+
+        # 1. presets: the A8 and the stock Solo gimbal (as in the shipped Solo parameters)
+        a8 = presets.get_preset("siyi_a8_mini")["params"]
+        solo = presets.get_preset("solo_gimbal")["params"]
+        self.assertEqual(a8, {"SERIAL4_PROTOCOL": 8, "SERIAL4_BAUD": 115, "MNT1_TYPE": 8, "CAM1_TYPE": 4,
+                              "RC6_OPTION": 213})
+        self.assertEqual(sorted(solo), sorted(a8))
+        with open(os.path.join(root, "firmware", "Solo.param")) as f:
+            stock = dict((l.split()[0], float(l.split()[1])) for l in f if len(l.split()) == 2)
+        for name, value in solo.items():
+            self.assertEqual(stock[name], value, name)
+
+        # 2. the camera report from the Cube's MNT1_TYPE / CAM1_TYPE
+        self.assertFalse(cm.gimbal_param_report({"MNT1_TYPE": None})["siyi"])
+        self.assertFalse(cm.gimbal_param_report({"MNT1_TYPE": 2.0, "CAM1_TYPE": 3.0})["siyi"])
+        half = cm.gimbal_param_report({"MNT1_TYPE": 8.0, "CAM1_TYPE": 3.0})
+        self.assertTrue(half["siyi"])
+        self.assertFalse(half["ready"])
+        self.assertTrue(cm.gimbal_param_report({"MNT1_TYPE": 8.0, "CAM1_TYPE": 4.0})["ready"])
+
+        # 3. commands: nothing is sent before the Cube said MNT1_TYPE 8; then the standard ones
+        class _Client(object):
+            def __init__(self):
+                self.sent = []
+
+            def send_command_long(self, command, params):
+                self.sent.append((command, list(params)))
+        client = _Client()
+        cam = cm.GimbalCamera(client)
+        for ok, _ in (cam.zoom("in"), cam.photo(), cam.record(True), cam.center()):
+            self.assertFalse(ok)
+        self.assertEqual(client.sent, [])
+        cam.check_report({"MNT1_TYPE": 2.0, "CAM1_TYPE": 3.0})
+        self.assertFalse(cam.photo()[0])
+        cam.check_report({"MNT1_TYPE": 8.0, "CAM1_TYPE": 4.0})
+        self.assertTrue(cam.siyi)
+        # a failed read later keeps the last answer
+        self.assertTrue(cam.check_report({"MNT1_TYPE": None, "CAM1_TYPE": None})["siyi"])
+        self.assertTrue(cam.siyi)
+
+        self.assertTrue(cam.zoom("in")[0])
+        self.assertTrue(cam.zoom("stop")[0])
+        self.assertTrue(cam.zoom("out")[0])
+        self.assertTrue(cam.zoom("wide")[0])
+        self.assertFalse(cam.zoom("sideways")[0])
+        self.assertTrue(cam.photo()[0])
+        self.assertTrue(cam.record(True)[0])
+        self.assertTrue(cam.recording)
+        self.assertTrue(cam.record(False)[0])
+        self.assertFalse(cam.recording)
+        self.assertTrue(cam.center()[0])
+        self.assertEqual(client.sent, [
+            (531, [1, 1.0, 0.0]), (531, [1, 0.0, 0.0]), (531, [1, -1.0, 0.0]), (531, [2, 0.0, 0.0]),
+            (2000, [0.0, 0.0, 1.0, 0.0]), (2500, [0.0, 0.0]), (2501, [0.0]),
+            (205, [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2])])
+
+        # 4. wiring: the actions, the check endpoint and the hidden CAMERA button
+        with open(os.path.join(root, "cockpit_mgr.py"), encoding="utf-8") as f:
+            src = f.read()
+        for a in ('"gimbal_zoom"', '"gimbal_photo"', '"gimbal_record"', '"gimbal_center"'):
+            self.assertIn(a, src)
+        with open(os.path.join(root, "solo_web_app.py"), encoding="utf-8") as f:
+            self.assertIn("'/api/camera/check'", f.read())
+        for name in ("static/index.html", "templates/index.html"):
+            with open(os.path.join(root, name), encoding="utf-8") as f:
+                page = f.read()
+            self.assertIn('aria-controls="cameraRow" hidden>', page, name)
+            self.assertIn('id="cameraRow" class="smart-shot-row camera-row" hidden', page, name)
+        with open(os.path.join(root, "static", "cockpit.js"), encoding="utf-8") as f:
+            js = f.read()
+        self.assertIn("btnCamera.hidden = !camera", js)
+        self.assertIn("const A8_LENS = { fov: 81, lens: 'rectilinear' }", js)
+        self.assertEqual(js.count("zoomWideForFinder();"), 2)      # pad finder and takeoff spot on
+
+        # 4b. zoom reports the Cube's COMMAND_ACK: refused -> error; accepted -> the A8 4K hint
+        class _AckClient(_Client):
+            result = 3
+
+            def wait_command_ack(self, command, since, timeout=1.0):
+                self.asked = command
+                return self.result
+        ack_client = _AckClient()
+        ack_cam = cm.GimbalCamera(ack_client)
+        ack_cam.check_report({"MNT1_TYPE": 8.0, "CAM1_TYPE": 4.0})
+        ok, msg = ack_cam.zoom("in")
+        self.assertFalse(ok)
+        self.assertIn("CAM1_TYPE", msg)
+        self.assertEqual(ack_client.asked, 531)
+        self.assertFalse(ack_cam.zoom("wide")[0])
+        ack_client.result = 0
+        ok, msg = ack_cam.zoom("in")
+        self.assertTrue(ok)
+        self.assertIn("4K", msg)
+        self.assertTrue(ack_cam.zoom("stop")[0])
+
+        # 4c. the telemetry link keeps COMMAND_ACKs from the Cube, also MAVLink 2's truncated "accepted"
+        import struct as _st
+        link = cm.LiveMAVLinkClient(cm.TelemetryState())
+        t0 = time.time()
+        link.decode_payload(77, _st.pack('<HB', 531, 3), sysid=1, compid=1)
+        self.assertEqual(link.wait_command_ack(531, t0, 0.1), 3)
+        link.decode_payload(77, _st.pack('<H', 2000), sysid=1, compid=1)
+        self.assertEqual(link.wait_command_ack(2000, t0, 0.1), 0)
+        link.decode_payload(77, _st.pack('<HB', 2500, 4), sysid=1, compid=154)    # not the autopilot
+        self.assertIsNone(link.wait_command_ack(2500, t0, 0.1))
+
+        # 4d. recording resolution (test Cube firmware: MAV_CMD_USER_1 = change camera setting 3)
+        ack_client.result = 0
+        del ack_client.sent[:]
+        ok, msg = ack_cam.set_resolution("1080")
+        self.assertTrue(ok, msg)
+        self.assertEqual(ack_client.sent, [(31010, [3, 1080.0, 0.0])])
+        self.assertFalse(ack_cam.set_resolution(900)[0])
+        ack_client.result = 3                      # stock ArduPilot: unsupported
+        ok, msg = ack_cam.set_resolution(1080)
+        self.assertFalse(ok)
+        self.assertIn("test firmware", msg)
+        self.assertFalse(cm.GimbalCamera(ack_client).set_resolution(1080)[0])   # no SIYI reported yet
+        # the RES dropdown shows what the test firmware reports on the message bar
+        self.assertEqual(cm.camera_resolution_from_text("Siyi: recording 1920x1080"), 1080)
+        self.assertEqual(cm.camera_resolution_from_text("Siyi: recording 2160p"), 2160)
+        self.assertIsNone(cm.camera_resolution_from_text("Siyi: recording started"))
+        self.assertIsNone(cm.camera_resolution_from_text("Siyi: recording NO CARD!"))
+        self.assertEqual(cm.camera_resolution_from_text("Mount1: recording 4096x2160"), 2160)
+        self.assertEqual(cm.camera_resolution_from_text("Mount1: recording 1440p"), 1440)
+        self.assertIsNone(cm.camera_resolution_from_text("Mount1: 2160p refused"))
+        # the camera gimbal table drives the row and RES: another camera is one more entry
+        rep = cm.gimbal_param_report({"MNT1_TYPE": 8.0, "CAM1_TYPE": 4.0})
+        self.assertTrue(rep["camera"] and rep["ready"])
+        self.assertEqual(rep["resolutions"], [720, 1080, 1440, 2160])
+        self.assertEqual(cm.gimbal_param_report({"MNT1_TYPE": 2.0})["resolutions"], [])
+        old_table = dict(cm.CAMERA_GIMBALS)
+        try:
+            cm.CAMERA_GIMBALS[99] = {"name": "Other", "preset": "Other cam", "resolutions": (1080,)}
+            rep = cm.gimbal_param_report({"MNT1_TYPE": 99.0, "CAM1_TYPE": 4.0})
+            self.assertTrue(rep["camera"])
+            self.assertFalse(rep["siyi"])
+            other = cm.GimbalCamera(ack_client)
+            other.check_report({"MNT1_TYPE": 99.0, "CAM1_TYPE": 4.0})
+            ack_client.result = 0
+            self.assertFalse(other.set_resolution(2160)[0])
+            self.assertTrue(other.set_resolution(1080)[0])
+            self.assertTrue(other.photo()[0])
+        finally:
+            cm.CAMERA_GIMBALS.clear()
+            cm.CAMERA_GIMBALS.update(old_table)
+        res_state = cm.TelemetryState()
+        res_cam = cm.GimbalCamera(ack_client, state=res_state)
+        self.assertIsNone(res_cam.check_report({"MNT1_TYPE": 8.0, "CAM1_TYPE": 4.0})["resolution"])
+        res_state.camera_resolution = 1440
+        self.assertEqual(res_cam.check_report({"MNT1_TYPE": 8.0, "CAM1_TYPE": 4.0})["resolution"], 1440)
+        self.assertIsNone(cm.GimbalCamera(ack_client).check_report({"MNT1_TYPE": 8.0})["resolution"])
+
+        # 5. CAMERA DOWN also takes a SIYI A8 Mini back to 1x (and sends nothing extra otherwise)
+        old_cam = cm.gimbal_camera
+        try:
+            cm.gimbal_camera = cam
+            pl = cm.PrecisionLanding(client)
+            del client.sent[:]
+            pl.set_camera(True)
+            self.assertEqual(client.sent, [(205, [-90.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2]), (531, [2, 0.0, 0.0])])
+            cam.check_report({"MNT1_TYPE": 2.0, "CAM1_TYPE": 3.0})
+            del client.sent[:]
+            pl.set_camera(True)
+            self.assertEqual(client.sent, [(205, [-90.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2])])
+        finally:
+            cm.gimbal_camera = old_cam
 
 def _struct_float(b4):
     """Pack 4 signed bytes into the float the gimbal sends as GMB_SWVER."""

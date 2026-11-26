@@ -85,8 +85,10 @@ PARAM_METADATA = {
     "RTL_SPEED": "Return to Launch horizontal speed (cm/s, 800 = 8 m/s)",
     "FENCE_ENABLE": "Geofence enabled (0: Disabled, 1: Enabled)",
     "FENCE_ALT_MAX": "Maximum geofence altitude (meters)",
-    "SERIAL4_PROTOCOL": "Serial 4 communication protocol (1: MAVLink)",
-    "SERIAL4_BAUD": "Serial 4 baud rate (230: 230400, 115: 115200)"
+    "SERIAL4_PROTOCOL": "Serial 4 communication protocol (1: MAVLink, Solo gimbal; 8: Gimbal, SIYI A8 Mini)",
+    "SERIAL4_BAUD": "Serial 4 baud rate (230: 230400, 115: 115200)",
+    "MNT1_TYPE": "Mount 1 type (2: Solo gimbal, 8: SIYI)",
+    "CAM1_TYPE": "Camera 1 type (3: GoPro in Solo gimbal, 4: Mount, e.g. SIYI)"
 }
 
 

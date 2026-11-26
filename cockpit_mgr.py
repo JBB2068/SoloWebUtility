@@ -128,6 +128,8 @@ PARAM_REQUEST_READ_MSGID = 20
 PARAM_REQUEST_READ_CRC_EXTRA = 214
 PARAM_VALUE_MSGID = 22
 PARAM_VALUE_CRC_EXTRA = 220
+COMMAND_ACK_MSGID = 77
+COMMAND_ACK_CRC_EXTRA = 143
 MAV_FRAME_LOCAL_FRD = 20          # level, heading-aligned (ArduPilot 4.7 AC_PrecLand_MAVLink)
 MAV_CMD_DO_MOUNT_CONTROL = 205
 MAV_CMD_DO_AUX_FUNCTION = 218
@@ -137,7 +139,8 @@ AUX_FUNC_PRECISION_LOITER = 39
 # Messages whose content we act on are only accepted with a valid CRC
 # (STATUSTEXT too: a random 0xFE/0xFD byte must never put garbage text on the OSD bar)
 CHECKED_CRC_EXTRA = {0: HEARTBEAT_CRC_EXTRA, AUTOPILOT_VERSION_MSGID: AUTOPILOT_VERSION_CRC_EXTRA,
-                     STATUSTEXT_MSGID: STATUSTEXT_CRC_EXTRA, PARAM_VALUE_MSGID: PARAM_VALUE_CRC_EXTRA}
+                     STATUSTEXT_MSGID: STATUSTEXT_CRC_EXTRA, PARAM_VALUE_MSGID: PARAM_VALUE_CRC_EXTRA,
+                     COMMAND_ACK_MSGID: COMMAND_ACK_CRC_EXTRA}
 
 # OSD messages bar: only real vehicle STATUSTEXT messages (never the utility's own notes)
 OSD_HISTORY_MAX = 20      # kept on the server
@@ -158,6 +161,21 @@ def clean_statustext(raw):
     text = raw.split('\x00', 1)[0]               # text ends at the first NUL
     return ' '.join(text.split())                 # trim and collapse whitespace
 _ARDUCOPTER_BANNER = re.compile(r"ArduCopter V(\d+\.\d+(?:\.\d+)?)")
+# the test Cube firmware's resolution lines, the same for every camera: "Mount1: recording 1920x1080"
+# (when first known) and "Mount1: recording 1080p" (after a change). "Siyi: ..." is the first test build.
+_CAMERA_RESOLUTION = re.compile(r"^(?:Mount1|Siyi): recording (?:\d+x(\d+)|(\d+)p)$")
+
+
+def camera_resolution_from_text(text):
+    """STATUSTEXT -> the camera's recording height (720, 1080, 1440, 2160) or None."""
+    m = _CAMERA_RESOLUTION.match(text or "")
+    if not m:
+        return None
+    try:
+        height = int(m.group(1) or m.group(2))
+    except (TypeError, ValueError):
+        return None
+    return height if height > 0 else None
 
 
 def _frame_crc_ok(data, start, end, crc_extra):
@@ -483,6 +501,7 @@ class LiveMAVLinkClient(threading.Thread):
         self.last_stream_req_sent = 0.0
         self.last_version_req_sent = 0.0
         self.param_values = {}            # PARAM_VALUE seen on the link: name -> (value, time), under state.lock
+        self.command_acks = {}            # COMMAND_ACK seen on the link: command -> (result, time), under state.lock
         self.last_rate_time = time.time()
         self.pkt_counter = 0
 
@@ -555,6 +574,19 @@ class LiveMAVLinkClient(threading.Thread):
         p = [float(x) for x in params] + [0.0] * (7 - len(params))
         payload = struct.pack('<fffffffHBBB', p[0], p[1], p[2], p[3], p[4], p[5], p[6], int(command), 1, 1, 0)
         self.send_packet(self.build_mavlink_v1_packet(76, payload, 152))
+
+    def wait_command_ack(self, command, since, timeout=1.0):
+        """The Cube's COMMAND_ACK result for command, if one came after since (time.time()) within
+        timeout seconds. -> MAV_RESULT (0 accepted, 3 unsupported, 4 failed, ...) or None."""
+        deadline = time.time() + timeout
+        while True:
+            with self.state.lock:
+                got = self.command_acks.get(int(command))
+            if got is not None and got[1] >= since:
+                return got[0]
+            if time.time() >= deadline:
+                return None
+            time.sleep(0.05)
 
     def read_params(self, names, timeout=3.0, max_age=0.0, resend=0.7):
         """Read a few parameters over this (already running) telemetry link: PARAM_REQUEST_READ
@@ -866,6 +898,12 @@ class LiveMAVLinkClient(threading.Thread):
                     if name:
                         self.param_values[name] = (float(value), now)
 
+                # COMMAND_ACK (77): kept for wait_command_ack()
+                elif msgid == COMMAND_ACK_MSGID and len(payload) >= 2 and compid == 1:
+                    # MAVLink 2 drops trailing zero bytes: result 0 (accepted) can arrive as 2 bytes
+                    command, result = struct.unpack('<HB', (payload[:3] + b'\x00\x00\x00')[:3])
+                    self.command_acks[command] = (result, now)
+
                 # BATTERY_STATUS (147)
                 elif msgid == 147 and len(payload) >= 35:
                     consumed_mah, energy, temp = struct.unpack('<iih', payload[:10])
@@ -898,6 +936,9 @@ class LiveMAVLinkClient(threading.Thread):
                             self.state.cube_version = m.group(1)
                             self.state.cube_version_time = now
                             _remember_cube_version(m.group(1))
+                        height = camera_resolution_from_text(raw_text) if compid == 1 else None
+                        if height:
+                            self.state.camera_resolution = height
 
                 # AUTOPILOT_VERSION (148): flight_sw_version = major<<24 | minor<<16 | patch<<8 | type
                 elif msgid == AUTOPILOT_VERSION_MSGID and compid == 1:
@@ -2338,6 +2379,8 @@ class PrecisionLanding(object):
         if down:
             self.client.send_command_long(MAV_CMD_DO_MOUNT_CONTROL,
                                           [-90.0, 0.0, 0.0, 0.0, 0.0, 0.0, MAV_MOUNT_MODE_MAVLINK_TARGETING])
+            # a SIYI A8 Mini goes back to 1x: the finders read the height from the pad's size
+            gimbal_camera.zoom_wide_if_siyi()
         else:
             self.client.send_command_long(MAV_CMD_DO_MOUNT_CONTROL,
                                           [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, MAV_MOUNT_MODE_RC_TARGETING])
@@ -2474,6 +2517,227 @@ def rtcm_base_position(frame):
     return {"lat": round(lat, 8), "lon": round(lon, 8), "alt": round(h, 2)}
 
 
+# =============================================================================
+# SIYI A8 Mini in place of the Solo gimbal (optional). ArduPilot's own SIYI driver runs it
+# (MNT1_TYPE 8 on SERIAL4, CAM1_TYPE 4, see the "SIYI A8 Mini" preset), so the paddle, CAMERA
+# DOWN and the Smart Shots keep aiming it with the usual mount commands. The Cockpit's CAMERA
+# row adds the A8's zoom, photo, record and center through ArduPilot's standard camera commands.
+# Nothing here is sent unless the Cube reports MNT1_TYPE 8, so a stock Solo is never affected.
+# =============================================================================
+SIYI_MNT1_TYPE = 8
+# Camera gimbals the CAMERA row works with, by MNT1_TYPE. Zoom, photo, record and center are
+# ArduPilot's standard camera commands, so another camera gimbal is one more entry here (plus its
+# preset). resolutions: the recording heights the test Cube firmware can set on it (empty: no RES).
+CAMERA_GIMBALS = {
+    SIYI_MNT1_TYPE: {"name": "SIYI", "preset": "SIYI A8 Mini", "resolutions": (720, 1080, 1440, 2160),
+                     "zoom_hint": True},
+}
+GIMBAL_PARAMS = ("MNT1_TYPE", "CAM1_TYPE")
+GIMBAL_CHECK_TIMEOUT = 6.0        # s
+GIMBAL_CHECK_RESEND = 2.0         # s between requests
+GIMBAL_CHECK_MAX_AGE = 600.0      # s: a value seen this recently counts without asking again
+MAV_CMD_SET_CAMERA_ZOOM = 531
+MAV_CMD_IMAGE_START_CAPTURE = 2000
+MAV_CMD_VIDEO_START_CAPTURE = 2500
+MAV_CMD_VIDEO_STOP_CAPTURE = 2501
+# Recording resolution: only with the test Cube firmware that adds it to ArduPilot's SIYI driver
+# (MAV_CMD_USER_1 as "change camera setting": param1 setting, param2 value, param3 camera 0 = primary)
+MAV_CMD_CAMERA_CHANGE_SETTING = 31010
+CAMERA_SETTING_RECORDING_RESOLUTION = 3
+GIMBAL_RESOLUTIONS = (720, 1080, 1440, 2160)   # every height the firmware knows (CameraSetting 3)
+ZOOM_TYPE_CONTINUOUS = 1          # -1 zoom out, 0 stop, 1 zoom in
+ZOOM_TYPE_RANGE = 2               # 0..100 % of the zoom range
+GIMBAL_ZOOM_STEPS = {"in": 1.0, "out": -1.0, "stop": 0.0}
+GIMBAL_ACK_TIMEOUT = 0.8          # s to wait for the Cube's COMMAND_ACK
+MAV_RESULT_ACCEPTED = 0
+GIMBAL_ZOOM_REFUSED = {
+    3: "The Cube says it has no zoom camera (unsupported). Check CAM1_TYPE is 4 (Mount) and that the Cube "
+       "has found the A8 (reboot the Cube with the A8 powered).",
+    4: "The Cube could not send the zoom to the A8 (failed). Check the A8's UART wiring on SERIAL4.",
+    2: "The Cube is busy and refused the zoom (denied). Try again."}
+# The A8 Mini's digital zoom does nothing while it records in 4K (ArduPilot developer rmackay9 on
+# discuss.ardupilot.org); in 1080p or 2K it works.
+GIMBAL_ZOOM_HINT = " If the picture doesn't change, set the A8's recording to 1080p or 2K in SIYI's app: " \
+                   "its zoom is off in 4K."
+
+
+def gimbal_param_report(values):
+    """{MNT1_TYPE, CAM1_TYPE} read from the Cube -> what the Cockpit shows.
+    camera: the CAMERA row is offered (MNT1_TYPE is in CAMERA_GIMBALS); ready: the camera buttons
+    also work (CAM1_TYPE 4); resolutions: what RES offers; siyi: it is the SIYI driver (the A8's lens)."""
+    mnt = values.get("MNT1_TYPE")
+    cam = values.get("CAM1_TYPE")
+    if mnt is None:
+        return {"camera": False, "siyi": False, "ready": False, "resolutions": [],
+                "message": "Could not read the gimbal setup from the Cube."}
+    mnt = int(round(mnt))
+    gimbal = CAMERA_GIMBALS.get(mnt)
+    if gimbal is None:
+        return {"camera": False, "siyi": False, "ready": False, "mnt1_type": mnt, "resolutions": [],
+                "message": "No camera gimbal set up (MNT1_TYPE %d)." % mnt}
+    report = {"camera": True, "siyi": mnt == SIYI_MNT1_TYPE, "mnt1_type": mnt, "name": gimbal["name"],
+              "resolutions": list(gimbal["resolutions"])}
+    if cam is None or int(round(cam)) != 4:
+        report.update(ready=False, message="%s gimbal set up, but CAM1_TYPE is not 4 (Mount): photo, record and "
+                      "zoom won't work. Apply the %s preset and reboot the Cube." % (gimbal["name"], gimbal["preset"]))
+    else:
+        report.update(ready=True, message="%s: zoom, photo, record and center are ready." % gimbal["preset"])
+    return report
+
+
+class GimbalCamera(object):
+    """The Cockpit's CAMERA row for a camera gimbal in CAMERA_GIMBALS (a SIYI A8 Mini so far):
+    zoom, photo, record, center, and the recording resolution where the gimbal has it."""
+
+    def __init__(self, client, state=None):
+        self.client = client
+        self.state = state
+        self.lock = threading.Lock()
+        self.gimbal = None                # last answer from the Cube: its CAMERA_GIMBALS entry, or None
+        self.siyi = False                 # ... and it is the SIYI driver
+        self.recording = False            # what the Cockpit last asked for (the A8 itself isn't asked)
+        self._last_check = None           # (time, report)
+
+    def _log(self, text, severity=6):
+        print("[gimbal] %s" % text)
+        if self.state is not None:
+            with self.state.lock:
+                self.state.add_message(text, severity)
+
+    def check_report(self, values):
+        """gimbal_param_report() for /api/camera/check. A failed read keeps the last answer the
+        Cube gave (the Cube may be busy in flight)."""
+        report = gimbal_param_report(values)
+        now = time.time()
+        with self.lock:
+            if values.get("MNT1_TYPE") is not None:
+                self.siyi = bool(report.get("siyi"))
+                self.gimbal = CAMERA_GIMBALS.get(report.get("mnt1_type")) if report.get("camera") else None
+                self._last_check = (now, report)
+            elif self._last_check is not None:
+                report = dict(self._last_check[1])
+                report["stale_secs"] = int(now - self._last_check[0])
+            report["recording"] = self.recording
+        # only the test Cube firmware reports it; None (the Cockpit shows a dash) until it does
+        report["resolution"] = getattr(self.state, "camera_resolution", None) if self.state is not None else None
+        return report
+
+    def _require_siyi(self):
+        """None when a camera gimbal is set up, else why the camera buttons can't work."""
+        with self.lock:
+            if self.gimbal is not None:
+                return None
+        return "No camera gimbal set up: apply the SIYI A8 Mini preset on the Parameters tab and reboot the Cube."
+
+    def zoom(self, how):
+        """how: in / out (zoom while held) / stop / wide (all the way out)."""
+        err = self._require_siyi()
+        if err:
+            return False, err
+        how = str(how).strip().lower()
+        if how == "wide":
+            sent = time.time()
+            self.client.send_command_long(MAV_CMD_SET_CAMERA_ZOOM, [ZOOM_TYPE_RANGE, 0.0, 0.0])
+            result = self._ack(MAV_CMD_SET_CAMERA_ZOOM, sent)
+            if result is not None and result != MAV_RESULT_ACCEPTED:
+                return False, ("The Cube refused 1x (result %d): hold ZOOM out instead. " % result) + \
+                    GIMBAL_ZOOM_REFUSED.get(result, "")
+            return True, "Zoom: all the way out."
+        if how not in GIMBAL_ZOOM_STEPS:
+            return False, "Zoom: say in, out, stop or wide."
+        sent = time.time()
+        self.client.send_command_long(MAV_CMD_SET_CAMERA_ZOOM, [ZOOM_TYPE_CONTINUOUS, GIMBAL_ZOOM_STEPS[how], 0.0])
+        done = {"in": "Zooming in.", "out": "Zooming out.", "stop": "Zoom stopped."}[how]
+        if how == "stop":
+            return True, done
+        result = self._ack(MAV_CMD_SET_CAMERA_ZOOM, sent)
+        if result is not None and result != MAV_RESULT_ACCEPTED:
+            msg = GIMBAL_ZOOM_REFUSED.get(result, "The Cube refused the zoom (result %d)." % result)
+            self._log("Camera: zoom refused by the Cube (result %d)" % result, 4)
+            return False, msg
+        with self.lock:
+            hint = bool(self.gimbal and self.gimbal.get("zoom_hint"))
+        return True, done + (GIMBAL_ZOOM_HINT if hint else "")
+
+    def _ack(self, command, since):
+        """The Cube's COMMAND_ACK result, or None (no answer, or a client that can't tell)."""
+        wait = getattr(self.client, "wait_command_ack", None)
+        if wait is None:
+            return None
+        return wait(command, since, GIMBAL_ACK_TIMEOUT)
+
+    def zoom_wide_if_siyi(self):
+        """For the pad and spot finders (CAMERA DOWN): 1x on a SIYI A8 Mini, nothing otherwise."""
+        with self.lock:
+            siyi = self.siyi
+        if siyi:
+            self.client.send_command_long(MAV_CMD_SET_CAMERA_ZOOM, [ZOOM_TYPE_RANGE, 0.0, 0.0])
+        return siyi
+
+    def set_resolution(self, height):
+        """Recording resolution by its height, from the gimbal's CAMERA_GIMBALS resolutions. Needs the
+        test Cube firmware; stock ArduPilot answers "unsupported". The Cube confirms on the message bar."""
+        err = self._require_siyi()
+        if err:
+            return False, err
+        with self.lock:
+            gimbal = self.gimbal or {}
+        allowed = tuple(gimbal.get("resolutions") or ())
+        if not allowed:
+            return False, "The %s gimbal has no resolution setting here." % gimbal.get("name", "camera")
+        try:
+            height = int(height)
+        except (TypeError, ValueError):
+            height = 0
+        if height not in allowed:
+            return False, "Resolution: pick %s." % ", ".join(str(h) for h in allowed)
+        sent = time.time()
+        self.client.send_command_long(MAV_CMD_CAMERA_CHANGE_SETTING,
+                                      [CAMERA_SETTING_RECORDING_RESOLUTION, float(height), 0.0])
+        result = self._ack(MAV_CMD_CAMERA_CHANGE_SETTING, sent)
+        name = "4K" if height == 2160 else ("2K" if height == 1440 else "%dp" % height)
+        if result == 3:
+            return False, ("This Cube firmware can't change the camera's resolution: it needs the test firmware "
+                           "with camera resolution support. Set it in the camera maker's app instead.")
+        if result is not None and result != MAV_RESULT_ACCEPTED:
+            return False, "The Cube could not ask the camera for %s (result %d)." % (name, result)
+        self._log("Camera: recording resolution %s requested" % name, 6)
+        hint = " Zoom does not work in 4K." if height == 2160 and gimbal.get("zoom_hint") else ""
+        return True, ("Asked the camera to record in %s. The Cube confirms it on the message bar "
+                      "(\"Mount1: recording %dp\")." % (name, height)) + hint
+
+    def photo(self):
+        err = self._require_siyi()
+        if err:
+            return False, err
+        # camera id 0 (all), no interval, 1 picture
+        self.client.send_command_long(MAV_CMD_IMAGE_START_CAPTURE, [0.0, 0.0, 1.0, 0.0])
+        self._log("Camera: photo", 6)
+        return True, "Photo taken."
+
+    def record(self, on):
+        err = self._require_siyi()
+        if err:
+            return False, err
+        if on:
+            self.client.send_command_long(MAV_CMD_VIDEO_START_CAPTURE, [0.0, 0.0])
+        else:
+            self.client.send_command_long(MAV_CMD_VIDEO_STOP_CAPTURE, [0.0])
+        with self.lock:
+            self.recording = bool(on)
+        self._log("Camera: recording started" if on else "Camera: recording stopped", 6)
+        return True, ("Recording." if on else "Recording stopped.")
+
+    def center(self):
+        """Level and straight ahead (MAVLink targeting). Moving the paddle takes the gimbal back."""
+        err = self._require_siyi()
+        if err:
+            return False, err
+        self.client.send_command_long(MAV_CMD_DO_MOUNT_CONTROL,
+                                      [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, MAV_MOUNT_MODE_MAVLINK_TARGETING])
+        return True, "Camera centered: level, straight ahead. Moving the gimbal paddle takes it back."
+
+
 class RtkCorrections(object):
     """RTCM corrections from the phone's USB base, sent on to the Cube as GPS_RTCM_DATA."""
     def __init__(self, send_payload=None):
@@ -2607,6 +2871,7 @@ pilot_location = PilotLocation()
 rtk_corrections = RtkCorrections(send_payload=_send_rtcm_payload)
 smart_shots = SmartShotClient(state=telemetry, pilot=pilot_location, position_fn=vehicle_position)
 precland = PrecisionLanding(mav_client, state=telemetry)
+gimbal_camera = GimbalCamera(mav_client, state=telemetry)
 _started = False
 
 
@@ -2783,7 +3048,9 @@ def handle_action(action, custom_mode=None):
     """
     Handle flight mode changes, disarming, Smart Shots (start_shot: custom_mode = shot id;
     follow_style: hold / leash / freelook; selfie_settings: {distance, rise, speed}) and the
-    precision landing commands (camera_down, camera_paddle, prec_loiter: custom_mode = on/off).
+    precision landing commands (camera_down, camera_paddle, prec_loiter: custom_mode = on/off) and,
+    with a SIYI A8 Mini set up, its camera (gimbal_zoom: in/out/stop/wide, gimbal_photo,
+    gimbal_record: on/off, gimbal_center, gimbal_resolution: 720/1080/1440/2160 with the test firmware).
     CRITICAL SAFETY: Arm command execution is strictly controlled and reserved for the user.
     """
     if action == "set_mode":
@@ -2852,6 +3119,29 @@ def handle_action(action, custom_mode=None):
 
     elif action in ("camera_down", "camera_paddle"):
         ok, msg = precland.set_camera(action == "camera_down")
+        return {"status": "ok" if ok else "error", "message": msg}
+
+    elif action == "gimbal_zoom":
+        ok, msg = gimbal_camera.zoom(custom_mode)
+        return {"status": "ok" if ok else "error", "message": msg}
+
+    elif action == "gimbal_photo":
+        ok, msg = gimbal_camera.photo()
+        return {"status": "ok" if ok else "error", "message": msg}
+
+    elif action == "gimbal_record":
+        on = str(custom_mode).strip().lower()
+        if on not in ("on", "off"):
+            return {"status": "error", "message": "Record: say on or off."}
+        ok, msg = gimbal_camera.record(on == "on")
+        return {"status": "ok" if ok else "error", "message": msg, "recording": gimbal_camera.recording}
+
+    elif action == "gimbal_resolution":
+        ok, msg = gimbal_camera.set_resolution(custom_mode)
+        return {"status": "ok" if ok else "error", "message": msg}
+
+    elif action == "gimbal_center":
+        ok, msg = gimbal_camera.center()
         return {"status": "ok" if ok else "error", "message": msg}
 
     elif action == "prec_loiter":
